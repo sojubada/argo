@@ -231,7 +231,13 @@ struct WebDAVBrowserView: View {
     @State private var loading = false
     @State private var message = ""
 
-    @State private var selected: WebDAVItem?
+    /// Where "copy" puts things: whatever folder the local browser is sitting on.
+    @State private var destination: String
+
+    @State private var detailItem: WebDAVItem?
+    @State private var multiSelect = false
+    @State private var picked: Set<String> = []
+
     @State private var transferring = false
     @State private var progress: Double = 0
     @State private var transferLabel = ""
@@ -255,6 +261,11 @@ struct WebDAVBrowserView: View {
         self.onBack = onBack
         self._client = State(initialValue: WebDAVClient(server: server))
         self._path = State(initialValue: server.rootPath)
+        self._destination = State(initialValue: directory.wrappedValue)
+    }
+
+    private var atRoot: Bool {
+        WebDAVClient.normalize(path) == WebDAVClient.normalize(server.rootPath)
     }
 
     var body: some View {
@@ -262,7 +273,7 @@ struct WebDAVBrowserView: View {
             header
 
             if transferring {
-                Text("\(transferLabel) \(Int(progress * 100))%")
+                Text("\(transferLabel)  \(Int(progress * 100))%")
                     .font(.headline)
             } else if loading {
                 Text("Loading...")
@@ -275,13 +286,16 @@ struct WebDAVBrowserView: View {
                     .foregroundColor(.secondary)
             }
 
-            if selected != nil {
+            if detailItem != nil {
                 detailPanel
             } else {
                 listPanel
             }
         }
         .onAppear { reload() }
+        // The remote's Menu button walks back up the tree, the way it does in
+        // the local browser, instead of closing the whole sheet.
+        .onExitCommand { goBack() }
         .sheet(isPresented: $showViewer) {
             viewerContent
         }
@@ -309,33 +323,78 @@ struct WebDAVBrowserView: View {
 
     private var header: some View {
         VStack {
-            Text(server.displayName)
-                .font(.title)
             Text(path)
+                .font(.headline)
+            Text("\(server.displayName)   copy to \(destination)")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
             HStack {
-                Button(action: {
-                    if selected != nil {
-                        selected = nil
-                    } else if WebDAVClient.normalize(path) == WebDAVClient.normalize(server.rootPath) {
-                        onBack()
-                    } else {
-                        path = WebDAVClient.parent(of: path)
-                        reload()
-                    }
-                }) {
+                Button(action: { goBack() }) {
                     Image(systemName: "chevron.left")
+                        .frame(width: 50, height: 50)
                 }
+
                 Button(action: { reload() }) {
                     Image(systemName: "arrow.clockwise")
+                        .frame(width: 50, height: 50)
                 }
+
+                Button(action: {
+                    if multiSelect {
+                        multiSelect = false
+                        picked.removeAll()
+                    } else {
+                        detailItem = nil
+                        multiSelect = true
+                    }
+                }) {
+                    Image(systemName: multiSelect ? "checkmark.circle.fill" : "checkmark.circle")
+                        .frame(width: 50, height: 50)
+                }
+
+                if multiSelect {
+                    Button(action: {
+                        let files = items.filter { !$0.isDirectory }
+                        if picked.count == files.count {
+                            picked.removeAll()
+                        } else {
+                            picked = Set(files.map { $0.path })
+                        }
+                    }) {
+                        Image(systemName: "square.stack")
+                            .frame(width: 50, height: 50)
+                    }
+                }
+
+                Button(action: { copyPicked() }) {
+                    ZStack {
+                        Image(systemName: "doc.on.doc")
+                            .frame(width: 50, height: 50)
+                        Image(systemName: "arrow.down")
+                            .resizable()
+                            .frame(width: 15, height: 13)
+                            .offset(x: -4, y: 11.75)
+                    }
+                }
+                .disabled(transferring || picked.isEmpty)
+
+                Button(action: {
+                    directory = destination.hasSuffix("/") ? destination : destination + "/"
+                    isPresented = false
+                }) {
+                    Image(systemName: "folder")
+                        .frame(width: 50, height: 50)
+                }
+
                 Button(action: { onBack() }) {
-                    Text("Connections")
+                    Image(systemName: "globe")
+                        .frame(width: 50, height: 50)
                 }
+
                 Button(action: { isPresented = false }) {
-                    Text("Close")
+                    Image(systemName: "xmark")
+                        .frame(width: 50, height: 50)
                 }
             }
         }
@@ -347,6 +406,9 @@ struct WebDAVBrowserView: View {
         List(items) { item in
             Button(action: { open(item) }) {
                 HStack {
+                    if multiSelect && !item.isDirectory {
+                        Image(systemName: picked.contains(item.path) ? "checkmark.circle.fill" : "circle")
+                    }
                     Image(systemName: icon(for: item))
                     VStack(alignment: .leading) {
                         Text(item.name)
@@ -371,7 +433,7 @@ struct WebDAVBrowserView: View {
 
     private var detailPanel: some View {
         VStack(alignment: .leading) {
-            if let item = selected {
+            if let item = detailItem {
                 Text(item.name)
                     .font(.headline)
                 Text("\(item.sizeDescription)   \(item.modifiedDescription)")
@@ -391,20 +453,20 @@ struct WebDAVBrowserView: View {
                 Button(action: { downloadThenView(item) }) {
                     HStack {
                         Image(systemName: "eye")
-                        Text("Download and view")
+                        Text("View")
                     }
                 }
                 .disabled(transferring)
 
-                Button(action: { download(item) { _ in } }) {
+                Button(action: { copyOne(item) }) {
                     HStack {
-                        Image(systemName: "folder")
-                        Text("Download only")
+                        Image(systemName: "doc.on.doc")
+                        Text("Copy to \(destination)")
                     }
                 }
                 .disabled(transferring)
 
-                Button(action: { selected = nil }) {
+                Button(action: { detailItem = nil }) {
                     Text("Back")
                 }
             }
@@ -412,14 +474,35 @@ struct WebDAVBrowserView: View {
         .padding()
     }
 
-    // MARK: Actions
+    // MARK: Navigation
+
+    private func goBack() {
+        if detailItem != nil {
+            detailItem = nil
+        } else if multiSelect {
+            multiSelect = false
+            picked.removeAll()
+        } else if !atRoot {
+            path = WebDAVClient.parent(of: path)
+            reload()
+        } else {
+            onBack()
+        }
+    }
 
     private func open(_ item: WebDAVItem) {
         if item.isDirectory {
             path = item.path
+            picked.removeAll()
             reload()
+        } else if multiSelect {
+            if picked.contains(item.path) {
+                picked.remove(item.path)
+            } else {
+                picked.insert(item.path)
+            }
         } else {
-            selected = item
+            detailItem = item
         }
     }
 
@@ -439,29 +522,68 @@ struct WebDAVBrowserView: View {
         }
     }
 
-    private func download(_ item: WebDAVItem, completion: @escaping (String?) -> Void) {
-        let destination = WebDAVCache.localPath(for: item)
+    // MARK: Transfers
+
+    private func localTarget(for item: WebDAVItem) -> String {
+        return (destination as NSString).appendingPathComponent(item.name)
+    }
+
+    private func download(_ item: WebDAVItem, to target: String,
+                          label: String, completion: @escaping (String?) -> Void) {
         transferring = true
         progress = 0
-        transferLabel = "Downloading \(item.name)"
+        transferLabel = label
         message = ""
-        client.download(item: item, to: destination, progress: { fraction in
+        client.download(item: item, to: target, progress: { fraction in
             progress = fraction
         }, completion: { result in
-            transferring = false
             switch result {
-            case .success(let localPath):
-                message = "Saved to \(localPath)"
-                completion(localPath)
+            case .success(let saved):
+                completion(saved)
             case .failure(let error):
+                transferring = false
                 message = error.localizedDescription
                 completion(nil)
             }
         })
     }
 
+    private func copyOne(_ item: WebDAVItem) {
+        download(item, to: localTarget(for: item), label: "Copying \(item.name)") { saved in
+            transferring = false
+            if let saved = saved { message = "Copied to \(saved)" }
+        }
+    }
+
+    private func copyPicked() {
+        let queue = items.filter { picked.contains($0.path) && !$0.isDirectory }
+        guard !queue.isEmpty else {
+            message = "Select some files first."
+            return
+        }
+        copyStep(queue, 0)
+    }
+
+    private func copyStep(_ queue: [WebDAVItem], _ index: Int) {
+        if index >= queue.count {
+            transferring = false
+            message = "Copied \(queue.count) file(s) to \(destination)"
+            picked.removeAll()
+            multiSelect = false
+            return
+        }
+        let item = queue[index]
+        download(item, to: localTarget(for: item),
+                 label: "Copying \(item.name)  (\(index + 1)/\(queue.count))") { saved in
+            if saved == nil { return }   // download() already reported the failure
+            copyStep(queue, index + 1)
+        }
+    }
+
     private func downloadThenView(_ item: WebDAVItem) {
-        download(item) { local in
+        download(item, to: WebDAVCache.localPath(for: item),
+                 label: "Opening \(item.name)") { local in
+            transferring = false
             guard let local = local else { return }
             localPath = local
             localName = item.name
@@ -490,7 +612,8 @@ struct WebDAVBrowserView: View {
     }
 
     private func downloadThenInstall(_ item: WebDAVItem) {
-        download(item) { local in
+        download(item, to: WebDAVCache.localPath(for: item),
+                 label: "Downloading \(item.name)") { local in
             guard let local = local else { return }
             transferring = true
             transferLabel = "Installing \(item.name)"
