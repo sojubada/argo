@@ -48,9 +48,9 @@ struct DMGMountView: View {
 			
 			Button(action: {
 				var isDir: ObjCBool = false
-				if Spartan.fileManager.fileExists(atPath: dmgFilesAreAvailableAt, isDirectory: &isDir) {
+				if fileManager.fileExists(atPath: dmgFilesAreAvailableAt, isDirectory: &isDir) {
 					do {
-						try Spartan.fileManager.createDirectory(atPath: dmgFilesAreAvailableAt, withIntermediateDirectories: true, attributes: nil)
+						try fileManager.createDirectory(atPath: dmgFilesAreAvailableAt, withIntermediateDirectories: true, attributes: nil)
 					} catch {
 						errorDesc = LocalizedString("DMG_COULDNTCREATE")
 						errorOccurred = true

@@ -73,13 +73,13 @@ struct SpartanApp: App {
             print("We are jailbroken!")
         #endif
         
-        if(!(Spartan.fileManager.fileExists(atPath: "/private/var/mobile/Media/.Trash"))){
+        if(!(fileManager.fileExists(atPath: "/private/var/mobile/Media/.Trash"))){
             RootHelperActs.mkdir("/private/var/mobile/Media/.Trash")
         } else {
             print("Trash already exists")
         }
         
-		if(Spartan.fileManager.isReadableFile(atPath: "/private/var/mobile/")){ //shows app data directory if sandbox exists
+		if(fileManager.isReadableFile(atPath: "/private/var/mobile/")){ //shows app data directory if sandbox exists
             //displayView(pathToLoad: "/private/var/mobile/Documents/")
             //displayView(pathToLoad: Bundle.main.bundlePath)
             //displayView(pathToLoad: "/private/var/containers/Bundle/Application/2A65A51A-4061-4143-B622-FA0E57C0C3EE/trillstore.app/")
@@ -93,7 +93,7 @@ struct SpartanApp: App {
     
     func displayView(pathToLoad: String) {
         let isRootless = {
-			if(Spartan.fileManager.fileExists(atPath: "/private/var/jb/")) { //rootless tvos :woeis:
+			if(fileManager.fileExists(atPath: "/private/var/jb/")) { //rootless tvos :woeis:
                 return true
             }
             return false

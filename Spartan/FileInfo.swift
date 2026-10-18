@@ -296,7 +296,7 @@ class FileInfo {
     class func readSymlinkDestination(path: String) throws -> String {
         var rawPath = "/"
         do {
-             rawPath += try Spartan.fileManager.destinationOfSymbolicLink(atPath: removeLastChar(path))
+             rawPath += try fileManager.destinationOfSymbolicLink(atPath: removeLastChar(path))
         } catch {
             print("Make a valid symlink please. (Error ID 167)")
             throw "167"
