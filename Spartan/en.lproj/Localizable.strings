@@ -1,0 +1,278 @@
+/* 
+  Localizable.strings
+  Spartan
+
+  Created by RealKGB on 4/22/23.
+  
+*/
+
+///IF THERE IS A SPACE, PRESERVE THAT SPACE IN OTHER LOCALIZED STRINGS. IT IS INTENTIONAL
+///IF THERE IS A SPACE, PRESERVE THAT SPACE IN OTHER LOCALIZED STRINGS. IT IS INTENTIONAL
+///IF THERE IS A SPACE, PRESERVE THAT SPACE IN OTHER LOCALIZED STRINGS. IT IS INTENTIONAL
+///IF THERE IS A SPACE, PRESERVE THAT SPACE IN OTHER LOCALIZED STRINGS. IT IS INTENTIONAL
+
+//general use
+"DISMISS" = "Dismiss";
+"CONFIRM" = "Confirm";
+"OPTIONAL" = " (optional)";
+"PIXELS" = "pixels";
+"UNKNOWN" = "Unknown";
+"OPEN" = "Open";
+"ERROR" = "An error occurred";
+"ERROR_EXPLANATION" = "An unknown error occurred.";
+"INSTALL" = "Install";
+"EXTRACT" = "Extract";
+"BUILD" = "Build";
+"ERR_NOJAILBREAK" = "You need to be jailbroken for this function";
+"LOADING" = "Loading...";
+
+"NOT_JB" = "You need to be jailbroken for this function.";
+
+"YES" = "Yes";
+"NO" = "No";
+
+//main view
+"FREE_SPACE" = "Free space: ";
+"INPUT_DIRECTORY" = "Input directory";
+"PERMSEDIT" = "Edit file permissions";
+
+//context menu
+"INFO" = "Info";
+"RENAME" = "Rename";
+"COPYTO" = "Copy To";
+"MOVETO" = "Move To";
+"OPENIN" = "Open In";
+"DELETE" = "Delete";
+"TRASHYEET" = "Empty Trash";
+"GOTOTRASH" = "Move to Trash";
+
+"SERVERHEAD" = "Start webserver";
+"MOUNTPOINTS" = "List mounted devices";
+"SERVERHEADLESS" = "Start webserver headless";
+
+"OPEN_DIRECTORY" = "Directory Viewer";
+"OPEN_AUDIO" = "Audio Player";
+"OPEN_VIDEO" = "Video Player";
+"OPEN_IMAGE" = "Image Viewer";
+"OPEN_IMAGERGBA" = "Open As RGBA";
+"OPEN_IMAGESVG" = "Open As SVG";
+"OPEN_TEXT" = "Text Editor";
+"OPEN_HEX" = "Hex Editor";
+"OPEN_PLIST" = "Plist Editor";
+"OPEN_DPKG" = "Open in Dpkg Installer";
+"OPEN_DPKGDEB" = "Open in Deb Builder";
+"OPEN_SPAWN" = "Spawn As Binary";
+"OPEN_CAR" = "Asset Catalog Viewer";
+"OPEN_FONT" = "Font Viewer";
+"OPEN_TBD" = "TBD Editor";
+"OPEN_DMG" = "Mount As DMG";
+"OPEN_HTML" = "Open In Web View";
+"OPEN_COMP" = "Compress File";
+"OPEN_UNCOMP" = "Uncompress File";
+
+//generic
+"SHOW_DENIED" = "Permission Denied";
+"SHOW_INFO" = "File Info";
+"INFO_DENIED" = "You don't have permission for that.";
+"CACHE_CLEAR" = "Clear Metadata Cache";
+"BADSYMLINK" = "Invalid Symlink";
+"BADSYMLINK_MSG" = "Please create a valid symlink. (Error ID 167)";
+
+//file info
+"INFO_PATH" = "File path: ";
+"INFO_SIZE" = "File size: ";
+"INFO_CREATION" = "Creation date: ";
+"INFO_MODIFICATION" = "Modification date: ";
+"INFO_OWNER" = "File owner: ";
+"INFO_OWNERID" = "File owner ID: ";
+"INFO_PERMISSIONS" = "File permissions: ";
+
+//file sizes
+"BRONTOBYTES" = "BB";
+"YOTTABYTES" = "YB";
+"ZETTABYTES" = "ZB";
+"EXABYTES" = "EB";
+"PETABYTES" = "PB";
+"TERABYTES" = "TB";
+"GIGABYTES" = "GB";
+"MEGABYTES" = "MB";
+"KILOBYTES" = "KB";
+"BYTES" = "bytes";
+
+//time duration
+"HOURS" = "hours";
+"MINUTES" = "minutes";
+"SECONDS" = "seconds";
+
+//text editor
+"LINEADD" = "Insert Line After";
+"LINEREMOVE" = "Remove Line";
+"LINESELECTED" = "Selected Line";
+"LINEADD_DESCRIPTION" = "Enter new text line";
+
+//touch view
+"TOUCH_TITLE" = "Create New File";
+"TOUCH_NAME" = "Enter file name";
+
+//dirtouch view
+"DIRTOUCH_TITLE" = "Create New Directory";
+"DIRTOUCH_NAME" = "Enter directory title";
+
+//symtouch view
+"SYMTOUCH_TITLE" = "Create New Symlink";
+"SYMTOUCH_NAME" = "Enter symbolic link name";
+"SYMTOUCH_DEST" = "Enter symbolic link destination path";
+
+//rename view
+"RENAME_TITLE" = "Rename File To";
+"RENAME_NAME" = "Enter new file name";
+
+//move and copy to
+"MOVE_TITLE" = "Move To";
+"COPY_TITLE" = "Copy To";
+"DEST_PATH" = "Enter destination path";
+"NEW_FILENAME" = "Enter new file name";
+
+//video view
+"VIDEO_FILE" = "Video file: ";
+"DIMENSIONS" = "Dimensions: ";
+"VIDEO_DURATION" = "Duration: ";
+"VIDEO_ERROR" = "Error: Could not get video track";
+
+//audio view
+"AUDIO_ERROR" = "Please select a valid audio file";
+"ALBUM" = "Album: ";
+"ARTIST" = "Artist: ";
+"ALBUMARTIST" = "Album Artist: ";
+"GENRE" = "Genre: ";
+"YEAR" = "Year: ";
+"TRACKNUMBER" = "Track Number: ";
+"DISCNUMBER" = "Disc Number: ";
+"BPM" = "BPM: ";
+
+//image view
+"IMAGE_ERROR" = "Please select a valid image file";
+"IMAGE_ENCODING" = "Image encoding: ";
+
+//favorites
+"NOFAVORITES" = "No favorites";
+"FAVORITES_TITLE" = "Favorites";
+"FAVORITESADD" = "Add to Favorites";
+"FAVORITESADD_DISPLAYNAME" = "Enter the item's display name";
+"FAVORITESADD_FILEPATH" = "Enter the item's filepath";
+
+
+//compression view
+"UNCOMP_TITLE" = "Uncompress Archive";
+"UNCOMP_DIR" = "Destination Directory";
+
+"COMP_TITLE" = "Compress Archive";
+"COMP_PASSWORD" = "Enter password to apply";
+"COMP_FILENAME" = "Enter archive name";
+"COMP_TYPE" = "Select Compression Type";
+"COMP_TARTYPE" = "Select Tarball Compression Type";
+"COMP_DESTNAME" = "Output Filename";
+
+"COMPERROR_INCORRECTCOMPRESSIONTYPE" = "The specified data compression type was invalid";
+"COMPERROR_ARCHIVECREATIONFAILED" = "An interim variable type could not be created";
+"COMPERROR_INPUTFILEOPENFAILED" = "The input file could not be opened, or you do not have permission to access it.";
+"COMPERROR_OUTPUTFILEOPENFAILED" = "The output file could not be created, or it already exists.";
+"COMPERROR_ARCHIVEREADHEADERFAILED" = "The specified archive could not be read. It could be corrupted, or you do not have permission to access it.";
+"COMPERROR_ARCHIVEREADDATAFAILED" = "Data could not be read from the specified archive. It could be corrupted, or it may have been moved.";
+"COMPERROR_ARCHIVEWRITEHEADERFAILED" = "The archive information could not be written to the file.";
+"COMPERROR_ARCHIVEWRITEDATAFAILED" = "The compressed data could not be created. Make sure the input file(s) were not moved.";
+"COMPERROR_ARCHIVEFINISHENTRYFAILED" = "The compressed data could not be written to the output file.";
+
+//settings
+"SETTINGS" = "Settings";
+"SETTINGS_TITLES" = "Descriptive Titles";
+"SETTINGS_TITLES_DESC" = "If enabled, shows the full filepath to a given file. Otherwise just the name of the file is shown.";
+"SETTINGS_TIMESTAMPS" = "Verbose Timestamps";
+"SETTINGS_TIMESTAMPS_DESC" = "If enabled, displays timestamps as ss.ssssss instead of mm:ss.";
+"SETTINGS_AUTOCOMPLETE" = "Autocomplete File Extensions";
+"SETTINGS_AUTOCOMPLETE_DESC_1" = "If enabled, will automatically add file extensions if you don't add them,";
+"SETTINGS_AUTOCOMPLETE_DESC_2" = "such as adding '/' when changing directory or '.zip' to archives.";
+"SETTINGS_AUTOCOMPLETE_WARNING" = "WARNING: Make sure you type your filepaths **exactly** if you disable this!";
+"SETTINGS_LOGFONTSIZE" = "Sets the font size for log windows when installing a package or running a binary.";
+"SETTINGS_SHEIKAH" = "Sheikah font in app";
+"SETTINGS_DATEFORMAT" = "Input the date format";
+"SETTINGS_DATEFORMATDESC1" = "Sets the DateFormatter format to use when displaying dates.";
+"SETTINGS_DATEFORMATDESC2" = "Visit https://www.advancedswift.com/date-formatter-cheatsheet-formulas-swift/ for a guide.";
+"CREDITS" = "Credits";
+"SETTINGS_WEBSERVERSTART" = "Configure Web Server";
+"SETTINGS_CACHEALL" = "Cache Metadata For All Folders";
+"SETTINGS_CACHEALLDESC" = "Precaches metadata for files in every directory (improves load times). This will take a long time to complete.";
+
+//app icon
+"APPICON" = "Change App Icon";
+"APPICON_TITLE" = "Available Icons";
+
+
+//search
+"SEARCH_TERM" = "Enter the search term";
+"SEARCH_PATH" = "Enter a directory to search";
+"SEARCH_CASE" = "Match Case";
+"SEARCH_RESULTS" = "Search Results";
+
+//topbar
+"CREATE_FILE" = "Create File";
+"CREATE_DIR" = "Create Directory";
+"CREATE_SYM" = "Create Symbolic Link";
+
+//mount
+"MOUNT_TITLE" = "Mount Points";
+"MOUNT_DESC" = "is mounted at";
+
+//hex
+"HEX_DATA" = "Enter new bytes";
+
+//spawn
+"SPAWN_ARGS" = "Enter program arguments";
+"SPAWN_ENV" = "Enter environment variables";
+"SPAWN_ROOTCONFIRM" = "Spawn as Root";
+"SPAWN_CONFIRM" = "Spawn";
+"STDOUT" = "stdout";
+"STDERR" = "stderr";
+
+//dpkg
+"EXTRACT_CURRENTDIR" = "Extract to current directory";
+"DPKGDEB_OUTDIR" = "Specify the destination directory";
+"DPKGDEB_OUTNAME" = "Specify the deb's filename";
+"DPKGDEB_COMPTYPE" = "Specify the compression type to use";
+
+//filenotfound
+"SHOW_NOTFOUND" = "The file does not exist, or it was moved.";
+"SHOW_OLDDEST" = "The listed destination is ";
+
+//plist
+"PLIST_KEY" = "Enter key name";
+"PLIST_DATA" = "Enter key value";
+"PLIST_UNKNOWNTYPE" = "Unknown data type";
+"PLIST_FAILEDTOSAVE" = "The file could not be saved";
+"PLIST_FAILEDTOSAVEINFO" = "Make sure you have permission to save the file.";
+"PLIST_STRINGDATA" = "Input new String value";
+
+"PLIST_YEAR" = "Year";
+"PLIST_MONTH" = "Month";
+"PLIST_DAY" = "Day";
+"PLIST_HOUR" = "Hour";
+"PLIST_MINUTE" = "Minute";
+"PLIST_SECOND" = "Second";
+
+//plistarray
+"PLISTARR_ADD" = "Add item after item ";
+"PLISTARR_REMOVE" = "Remove item ";
+
+//dmg
+"DMG_MOUNTPATH" = "Input a directory for the DMG's contents to be mounted";
+"DMG_FSTYPE" = "Select the DMG's filesystem";
+"HFS" = "HFS";
+"APFS" = "APFS";
+"DMG_READONLY" = "Mount As Read-Only";
+"DMG_NOFSTYPE" = "No filetype was specified";
+"DMG_FAILTOATTACH" = "The DMG was not found at its reported attach point";
+"DMG_SUCCESS" = "The DMG was mounted at";
+"DMG_GOTOFILES" = "Would you like to go to the mounted location?";
+"DMG_MOUNTPATH_CREATE" = "If this directory does not exist, it will be created.";
+"DMG_NOTDIR" = "The inputted file is not a directory. Ensure it is a directory, and then try again.";
+"DMG_COULDNTCREATE" = "An error occurred while attempting to create the mount path directory for the DMG";

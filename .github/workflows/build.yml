@@ -1,0 +1,111 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      make_release:
+        description: "Publish a GitHub release with the IPA"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 15
+        run: |
+          for candidate in /Applications/Xcode_15.4.app /Applications/Xcode_15.3.app /Applications/Xcode_15.2.app; do
+            if [ -d "$candidate" ]; then
+              sudo xcode-select -s "$candidate"
+              break
+            fi
+          done
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i appletv || true
+
+      - name: Patch the tvOS SDK's spawn.h
+        # Spartan calls posix_spawnattr_set_persona_np(), which Apple's shipped
+        # spawn.h does not declare. Upstream tells you to do this by hand.
+        run: |
+          SDK_PATH="$(xcrun --sdk appletvos --show-sdk-path)"
+          echo "tvOS SDK: $SDK_PATH"
+          sudo cp "$SDK_PATH/usr/include/spawn.h" "$SDK_PATH/usr/include/spawn.h.orig" || true
+          sudo cp spawn.h "$SDK_PATH/usr/include/spawn.h"
+
+      - name: Install ldid
+        run: |
+          brew install ldid || brew install ldid-procursus
+          ldid -v || true
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Spartan.xcodeproj \
+            -scheme Spartan \
+            -configuration Release \
+            -destination 'generic/platform=tvOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_BITCODE=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Fakesign and package
+        run: |
+          set -e
+          # DEPLOYMENT_LOCATION=YES in this project installs the app next to the
+          # sources rather than into DerivedData, so look in both places.
+          APP_PATH="$(find build/Build/Products Applications . -maxdepth 4 -name 'Argo.app' -type d 2>/dev/null | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "Could not find Argo.app"
+            find . -maxdepth 5 -name '*.app' -type d -print
+            exit 1
+          fi
+          echo "App: $APP_PATH"
+
+          # Apply the entitlements the app needs under TrollStore / a jailbreak.
+          ldid -S"$GITHUB_WORKSPACE/Argo.entitlements" "$APP_PATH/Argo"
+
+          # Fakesign anything else that ships inside the bundle.
+          find "$APP_PATH" -type f \( -name '*.dylib' -o -name 'RootHelper' \) -print0 \
+            | xargs -0 -I{} ldid -S "{}" || true
+
+          rm -rf Payload Argo.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry Argo.ipa Payload
+          ls -lh Argo.ipa
+
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" 2>/dev/null || echo 1.0)"
+          echo "IPA_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_TAG=build-$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Argo-ipa
+          path: Argo.ipa
+
+      - name: Publish release
+        if: github.event_name == 'push' || inputs.make_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUILD_TAG }}
+          name: Argo ${{ env.IPA_VERSION }} (${{ env.BUILD_TAG }})
+          body: |
+            Unsigned, fakesigned build of Argo - a tvOS file browser with WebDAV support.
+
+            Install with TrollStore on your Apple TV.
+          files: Argo.ipa

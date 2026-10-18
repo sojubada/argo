@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SchemeUserState</key>
+	<dict>
+		<key>RootHelper.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+		<key>SWXMLHashPlayground (Playground) 1.xcscheme</key>
+		<dict>
+			<key>isShown</key>
+			<false/>
+			<key>orderHint</key>
+			<integer>2</integer>
+		</dict>
+		<key>SWXMLHashPlayground (Playground) 2.xcscheme</key>
+		<dict>
+			<key>isShown</key>
+			<false/>
+			<key>orderHint</key>
+			<integer>3</integer>
+		</dict>
+		<key>SWXMLHashPlayground (Playground).xcscheme</key>
+		<dict>
+			<key>isShown</key>
+			<false/>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+		<key>Spartan.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>0</integer>
+		</dict>
+		<key>Spartan_Jailed.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>2</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>F83CB39D2A410E81005BF95A</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F853AB2A29DBCB1A006EA2D5</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F88CC4D92A44FBD4001FACFC</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F88FBB352A3006C800E31EDA</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F88FBB582A30096100E31EDA</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F8CE8CCF2AEA054800862703</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>F8F855C22A47770700DC9CE4</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+	</dict>
+</dict>
+</plist>
