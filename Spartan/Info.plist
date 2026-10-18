@@ -45,8 +45,11 @@
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
+		<!-- NSAllowsArbitraryLoads must stand alone. On tvOS 10 and later the
+		     system ignores it whenever NSAllowsLocalNetworking (or one of the
+		     other newer keys) is also present, which left plain-HTTP servers
+		     reachable only at .local names and private IP literals - a DDNS
+		     hostname such as http://host.iptime.org:7707 was still refused. -->
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
