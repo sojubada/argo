@@ -22,6 +22,8 @@ struct WebDAVRootView: View {
     @State private var screen = 0
     @State private var workingServer = WebDAVServer()
     @State private var isNewServer = false
+    /// When on, selecting a connection opens its settings instead of browsing it.
+    @State private var editMode = false
 
     var body: some View {
         Group {
@@ -36,12 +38,17 @@ struct WebDAVRootView: View {
                                      onSave: {
                                          store.upsert(workingServer)
                                          screen = 0
+                                         editMode = false
                                      },
                                      onDelete: {
                                          store.remove(workingServer)
                                          screen = 0
+                                         editMode = false
                                      },
-                                     onCancel: { screen = 0 })
+                                     onCancel: {
+                                         screen = 0
+                                         editMode = false
+                                     })
             } else {
                 connectionList
             }
@@ -58,33 +65,36 @@ struct WebDAVRootView: View {
                     .foregroundColor(.secondary)
                     .padding(.top, 20)
             } else {
+                // One button per row: tvOS focuses a whole row at once, so a row
+                // holding two buttons would always fire the trailing one.
                 List(store.servers) { server in
-                    HStack {
-                        Button(action: {
-                            workingServer = server
-                            screen = 2
-                        }) {
-                            HStack {
-                                Image(systemName: "globe")
-                                VStack(alignment: .leading) {
-                                    Text(server.displayName)
-                                    Text(server.urlString)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        Spacer()
-                        Button(action: {
-                            workingServer = server
+                    Button(action: {
+                        workingServer = server
+                        if editMode {
                             isNewServer = false
                             screen = 1
-                        }) {
-                            Image(systemName: "gear")
+                        } else {
+                            screen = 2
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: editMode ? "gear" : "globe")
+                            VStack(alignment: .leading) {
+                                Text(server.displayName)
+                                Text(server.urlString)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
             }
+
+            Text(editMode
+                 ? "Edit mode: choose a connection to change its settings."
+                 : "Choose a connection to browse it.")
+                .font(.caption)
+                .foregroundColor(.secondary)
 
             HStack {
                 Button(action: {
@@ -95,6 +105,15 @@ struct WebDAVRootView: View {
                     HStack {
                         Image(systemName: "plus")
                         Text("Add connection")
+                    }
+                }
+
+                if !store.servers.isEmpty {
+                    Button(action: { editMode.toggle() }) {
+                        HStack {
+                            Image(systemName: "gear")
+                            Text(editMode ? "Done" : "Edit connections")
+                        }
                     }
                 }
 
