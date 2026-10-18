@@ -51,7 +51,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Spartan uses the local network to connect to WebDAV servers.</string>
+	<string>Argo uses the local network to reach your WebDAV servers.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>apple-magnifier</string>
