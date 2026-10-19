@@ -7,10 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		DA20EE412D2AED4AA64024E6 /* PDFReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA207B5F45953C99AACC2B44 /* PDFReaderModel.swift */; };
-		DA208B49B121E2C2123086D7 /* PDFKitContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA203E09E6E4E21A2A250266 /* PDFKitContainer.swift */; };
-		DA20E005DA66076F77150D07 /* PDFReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA20BEE7C5132D365CEC4CF5 /* PDFReaderView.swift */; };
-		DA2065E268624058FA2C62E8 /* PDFOutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA209D86F930D0C8A89B5FF7 /* PDFOutlineView.swift */; };
 		DA19ED3E597CD4E5196D12A3 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA19B70CAF54CAC53790D498 /* FavoritesStore.swift */; };
 		DA18F4FFA15F2E9355290505 /* TrashManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1841A433A5C12931505747 /* TrashManager.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
@@ -84,10 +80,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		DA207B5F45953C99AACC2B44 /* PDFReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderModel.swift; sourceTree = "<group>"; };
-		DA203E09E6E4E21A2A250266 /* PDFKitContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFKitContainer.swift; sourceTree = "<group>"; };
-		DA20BEE7C5132D365CEC4CF5 /* PDFReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderView.swift; sourceTree = "<group>"; };
-		DA209D86F930D0C8A89B5FF7 /* PDFOutlineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFOutlineView.swift; sourceTree = "<group>"; };
 		DA19B70CAF54CAC53790D498 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
 		DA1841A433A5C12931505747 /* TrashManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashManager.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
@@ -186,17 +178,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		DA20AB8BAA537FB622273266 /* PDFReader */ = {
-			isa = PBXGroup;
-			children = (
-				DA207B5F45953C99AACC2B44 /* PDFReaderModel.swift */,
-				DA203E09E6E4E21A2A250266 /* PDFKitContainer.swift */,
-				DA20BEE7C5132D365CEC4CF5 /* PDFReaderView.swift */,
-				DA209D86F930D0C8A89B5FF7 /* PDFOutlineView.swift */,
-			);
-			path = PDFReader;
-			sourceTree = "<group>";
-		};
 		DA1995C5F5ED9405B6E826B1 /* Favorites */ = {
 			isa = PBXGroup;
 			children = (
@@ -303,7 +284,6 @@
 		F8EA28D129F8ACAB0063206D /* FileOpeners */ = {
 			isa = PBXGroup;
 			children = (
-				DA20AB8BAA537FB622273266 /* PDFReader */,
 				F853AB4E29DE57D8006EA2D5 /* AudioPlayerView.swift */,
 				F8CC212E29E74DF4008C7B88 /* VideoPlayerView.swift */,
 				F8CC211E29E2762F008C7B88 /* ImageView.swift */,
@@ -512,10 +492,6 @@
 				42B2B5AF2B63845700E19B22 /* TSUtil.m in Sources */,
 				F853AB5529DE8B3B006EA2D5 /* FavoritesView.swift in Sources */,
 				F853AB3129DBCB1A006EA2D5 /* ContentView.swift in Sources */,
-				DA20EE412D2AED4AA64024E6 /* PDFReaderModel.swift in Sources */,
-				DA208B49B121E2C2123086D7 /* PDFKitContainer.swift in Sources */,
-				DA20E005DA66076F77150D07 /* PDFReaderView.swift in Sources */,
-				DA2065E268624058FA2C62E8 /* PDFOutlineView.swift in Sources */,
 				DA19ED3E597CD4E5196D12A3 /* FavoritesStore.swift in Sources */,
 				DA18F4FFA15F2E9355290505 /* TrashManager.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,

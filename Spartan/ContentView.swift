@@ -469,9 +469,6 @@ struct ContentView: View {
                         .sheet(isPresented: $showSubView[33], content: {
                             HTMLView(filePath: newViewFilePath, fileName: newViewFileName)
                         })
-                        .sheet(isPresented: $showSubView[36], content: {
-                            PDFReaderView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[36])
-                        })
                 }
                 HStack {
                     List { //directory contents view
@@ -747,12 +744,6 @@ struct ContentView: View {
                                                     }
 											case 14:
 												Image(systemName: "safari")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 15:
-												Image(systemName: "doc.richtext")
 												Text(masterFiles[index].name)
                                                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                                                         view.scaledFont(name: "BotW Sheikah Regular", size: 40)
@@ -1057,12 +1048,6 @@ struct ContentView: View {
                                                     }
 											case 14:
 												Image(systemName: "safari")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 15:
-												Image(systemName: "doc.richtext")
 												Text(masterFiles[index].name)
                                                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                                                         view.scaledFont(name: "BotW Sheikah Regular", size: 40)
@@ -1693,8 +1678,6 @@ struct ContentView: View {
                 }
 			case 14:
 				showSubView[33] = true
-			case 15:
-				showSubView[36] = true
             default:
                 masterFiles[index].isLoadingFile = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

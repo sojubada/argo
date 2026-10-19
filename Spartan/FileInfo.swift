@@ -35,10 +35,6 @@ class FileInfo {
             //5.9 = bplist
         } else if (isHTML(filePath: file)) {
             return 14 //html
-        } else if (isPDF(filePath: file)) {
-            return 15 //pdf - ahead of the executable and archive checks, which
-                       //would otherwise claim a PDF carrying the +x bit and
-                       //would read the whole file to do it
         } else if (doesFileHaveFileExtension(filePath: file, extensions: [".dmg"])) {
             return 13 //dmg
         } else if (doesFileHaveFileExtension(filePath: file, extensions: [".svg"])) {
@@ -208,26 +204,6 @@ class FileInfo {
             if let header = String(data: data.subdata(in: 0..<15), encoding: .utf8) {
                 return header == "<!DOCTYPE html>"
             }
-        }
-        return false
-    }
-    class func isPDF(filePath: String) -> Bool {
-        if doesFileHaveFileExtension(filePath: filePath, extensions: [".pdf"]) {
-            return true
-        }
-        // Read only the signature. isArchive() above pulls whole files into
-        // memory, so this check is placed ahead of it in the chain to keep a
-        // large PDF from being slurped just to be classified.
-        guard let handle = FileHandle(forReadingAtPath: filePath) else {
-            return false
-        }
-        defer {
-            try? handle.close()
-        }
-        let headerData = handle.readData(ofLength: 5)
-        if headerData.count == 5,
-           let header = String(data: headerData, encoding: .ascii) {
-            return header == "%PDF-"
         }
         return false
     }
