@@ -9,6 +9,10 @@ on:
         description: "Publish a GitHub release with the IPA"
         type: boolean
         default: true
+      release_note:
+        description: "One line describing what this build is for"
+        type: string
+        required: false
 
 permissions:
   contents: write
@@ -82,6 +86,14 @@ jobs:
           find "$APP_PATH" -type f \( -name '*.dylib' -o -name 'RootHelper' \) -print0 \
             | xargs -0 -I{} ldid -S "{}" || true
 
+          # Stamp the run number so an installed build is identifiable on the
+          # device. CFBundleShortVersionString stays 1.0; this is the build
+          # counter beside it.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" \
+            "$APP_PATH/Info.plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" \
+                 "$APP_PATH/Info.plist"
+
           rm -rf Payload Argo.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
@@ -91,6 +103,7 @@ jobs:
           VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" 2>/dev/null || echo 1.0)"
           echo "IPA_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_TAG=build-$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -98,14 +111,23 @@ jobs:
           name: Argo-ipa
           path: Argo.ipa
 
+      # Releases are cut by hand, from the Actions tab, when a build is actually
+      # going onto the Apple TV. A push only proves the code compiles and leaves
+      # the IPA as a run artifact.
       - name: Publish release
-        if: github.event_name == 'push' || inputs.make_release
+        if: github.event_name == 'workflow_dispatch' && inputs.make_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.BUILD_TAG }}
-          name: Argo ${{ env.IPA_VERSION }} (${{ env.BUILD_TAG }})
+          name: Argo ${{ env.IPA_VERSION }} build ${{ github.run_number }} (${{ env.SHORT_SHA }})
           body: |
-            Unsigned, fakesigned build of Argo - a tvOS file browser with WebDAV support.
+            ${{ inputs.release_note }}
 
+            Unsigned, fakesigned build of Argo - a tvOS file browser.
             Install with TrollStore on your Apple TV.
+
+            - Build: ${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+
+            Test checklist: docs/TEST_CHECKLIST.md
           files: Argo.ipa

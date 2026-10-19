@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA2361DC23CAA58F5531CC25 /* CGPDFProbe4.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA234497C71E9B8A26EB8DFA /* CGPDFProbe4.swift */; };
 		DA228CB4A2AFF27B34EF8D06 /* PDFReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA222302DD6E7EA7F6C4FCA3 /* PDFReaderModel.swift */; };
 		DA227E93C5740C7F8D0DC5AE /* PDFPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CEFF9D8382EBF92BFC6D /* PDFPageRenderer.swift */; };
 		DA224B286CDFDE8437AB583C /* PDFReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22EB1B0433C5A4AE349D6F /* PDFReaderView.swift */; };
@@ -84,6 +85,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		DA234497C71E9B8A26EB8DFA /* CGPDFProbe4.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGPDFProbe4.swift; sourceTree = "<group>"; };
 		DA222302DD6E7EA7F6C4FCA3 /* PDFReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderModel.swift; sourceTree = "<group>"; };
 		DA22CEFF9D8382EBF92BFC6D /* PDFPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageRenderer.swift; sourceTree = "<group>"; };
 		DA22EB1B0433C5A4AE349D6F /* PDFReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderView.swift; sourceTree = "<group>"; };
@@ -189,6 +191,7 @@
 		DA21554902E6C31505590BFC /* PDFReader */ = {
 			isa = PBXGroup;
 			children = (
+				DA234497C71E9B8A26EB8DFA /* CGPDFProbe4.swift */,
 				DA222302DD6E7EA7F6C4FCA3 /* PDFReaderModel.swift */,
 				DA22CEFF9D8382EBF92BFC6D /* PDFPageRenderer.swift */,
 				DA22EB1B0433C5A4AE349D6F /* PDFReaderView.swift */,
@@ -512,6 +515,7 @@
 				42B2B5AF2B63845700E19B22 /* TSUtil.m in Sources */,
 				F853AB5529DE8B3B006EA2D5 /* FavoritesView.swift in Sources */,
 				F853AB3129DBCB1A006EA2D5 /* ContentView.swift in Sources */,
+				DA2361DC23CAA58F5531CC25 /* CGPDFProbe4.swift in Sources */,
 				DA228CB4A2AFF27B34EF8D06 /* PDFReaderModel.swift in Sources */,
 				DA227E93C5740C7F8D0DC5AE /* PDFPageRenderer.swift in Sources */,
 				DA224B286CDFDE8437AB583C /* PDFReaderView.swift in Sources */,
