@@ -1,52 +1,97 @@
 //
 //  AddToFavoritesView.swift
-//  Spartan
-//
-//  Created by RealKGB on 4/7/23.
-//  The majority of this document is just strings. All it does is take the [String] containing your favorited files and add a value. Of course since I'm using a String for filepath I have to do cleanup on it... but I'm used to that.
+//  Argo
 //
 
 import SwiftUI
 
 struct AddToFavoritesView: View {
-    
     @State var filePath: String
     @State var displayName: String
-    @State var favoritesDisplayName: [String] = (UserDefaults.favorites.stringArray(forKey: "favoritesDisplayName") ?? ["Documents", "Applications", "UserApplications", "Trash"])
-    @State var favoritesFilePath: [String] = (UserDefaults.favorites.stringArray(forKey: "favoritesFilePath") ?? ["/private/var/mobile/Documents/", "/Applications/", "/private/var/containers/Bundle/Application/", "/private/var/mobile/Media/.Trash/"])
     @Binding var showView: Bool
 
+    @State private var selectedIcon: String = "folder"
+
     var body: some View {
-        Text(NSLocalizedString("FAVORITESADD", comment: "Saves us millions."))
-            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-            }
-        TextField(NSLocalizedString("FAVORITESADD_DISPLAYNAME", comment: "Can anyone work on the Krelman?"), text: $displayName)
-            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-            }
-        TextField(NSLocalizedString("FAVORITESADD_FILEPATH", comment: "Of course. Most bee jobs are small ones."), text: $filePath, onEditingChanged: { (isEditing) in
-            if !isEditing {
-                if(!(filePath.hasSuffix("/")) && UserDefaults.settings.bool(forKey: "autoComplete")){
-                    filePath = filePath + "/"
-                }
-            }
-        })
-        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-        }
-        Button(action: {
-            favoritesDisplayName.append(displayName)
-            favoritesFilePath.append(filePath)
-            UserDefaults.favorites.set(["Documents", "Applications", "UserApplications", "Trash"], forKey: "favoritesDisplayName")
-            UserDefaults.favorites.set(["/private/var/mobile/Documents/", "/Applications/", "/private/var/containers/Bundle/Application/", "/private/var/mobile/Media/.Trash/"], forKey: "favoritesFilePath")
-            UserDefaults.favorites.synchronize()
-            showView = false
-        }) {
-            Text(NSLocalizedString("CONFIRM", comment: "But bees know that every small job, if it's done well, means a lot."))
+        VStack(spacing: 24) {
+            Text(NSLocalizedString("FAVORITESADD", comment: ""))
+                .font(.title2)
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                 }
+
+            TextField(NSLocalizedString("FAVORITESADD_DISPLAYNAME", comment: ""), text: $displayName)
+                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                }
+
+            TextField(NSLocalizedString("FAVORITESADD_FILEPATH", comment: ""), text: $filePath, onEditingChanged: { isEditing in
+                if !isEditing {
+                    filePath = FavoritesStore.normalizePath(filePath)
+                }
+            })
+            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+            }
+
+            VStack(spacing: 12) {
+                Text("Icon")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 16) {
+                    ForEach(FavoritesStore.availableIcons, id: \.self) { iconName in
+                        Button(action: {
+                            selectedIcon = iconName
+                        }) {
+                            VStack(spacing: 6) {
+                                Image(systemName: iconName)
+                                    .font(.title3)
+                                    .frame(width: 50, height: 50)
+                                Image(systemName: selectedIcon == iconName ? "checkmark.circle.fill" : "circle")
+                                    .font(.caption2)
+                                    .foregroundColor(selectedIcon == iconName ? .primary : .secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 24) {
+                Button(action: {
+                    let normalizedPath = FavoritesStore.normalizePath(filePath)
+                    filePath = normalizedPath
+                    FavoritesStore.shared.add(
+                        name: displayName,
+                        path: normalizedPath,
+                        systemImage: selectedIcon
+                    )
+                    showView = false
+                }) {
+                    Text(NSLocalizedString("CONFIRM", comment: ""))
+                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                        }
+                }
+                .disabled(filePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button(action: {
+                    showView = false
+                }) {
+                    Text("Cancel")
+                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                        }
+                }
+            }
+        }
+        .padding(40)
+        .onAppear {
+            filePath = FavoritesStore.normalizePath(filePath)
+            if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let last = URL(fileURLWithPath: filePath).lastPathComponent
+                displayName = (last.isEmpty || last == "/") ? "Root" : last
+            }
         }
     }
 }
