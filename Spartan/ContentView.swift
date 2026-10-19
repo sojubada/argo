@@ -51,7 +51,7 @@ struct ContentView: View {
     
     @State var didChangeDir = false
     
-    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 36)
+    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 38)
     //createFileSelectShow = 0
     //contextMenuShow = 1
     //openInMenu = 2
@@ -88,6 +88,8 @@ struct ContentView: View {
     //htmlViewShow = 33
     //uncompFileShow = 34
     //notJailbrokenView = 35
+    //pdfViewShow = 36
+    //trashViewShow = 37
     
     @Binding var globalAVPlayer: AVPlayer //this is because Spartan has the ability to play music without the AudioPlayerView being shown. It took about a week to get working properly and I'm proud of it
     @State var isGlobalAVPlayerPlaying = false
@@ -283,6 +285,20 @@ struct ContentView: View {
                                 AddToFavoritesView(filePath: newViewFilePath, displayName: newViewFileName, showView: $showSubView[17])
                             })
                         
+                            Button(action: { //trash
+                                showSubView[37] = true
+                            }) {
+                                Image(systemName: "trash")
+                                    .frame(width:50, height:50)
+                            }
+                            .sheet(isPresented: $showSubView[37], onDismiss: {
+                                updateFiles()
+                            }, content: {
+                                TrashView(isPresented: $showSubView[37], onChanged: {
+                                    updateFiles()
+                                })
+                            })
+
                             Button(action: { //settings
                                 showSubView[18] = true
                             }) {
@@ -342,7 +358,7 @@ struct ContentView: View {
                                     }
                                 } else {
                                     for file in multiSelectFiles {
-                                        RootHelperActs.mv(directory + file, "/private/var/mobile/Media/.Trash/" + file)
+                                        TrashManager.shared.moveToTrash(path: directory + file)
                                         updateFiles()
                                     }
                                 }
@@ -790,8 +806,7 @@ struct ContentView: View {
                                         }
                                     } else if (directory == "/private/var/mobile/Media/" && masterFiles[index].name == ".Trash/") {
                                         Button(action: {
-                                            RootHelperActs.rm("/private/var/mobile/Media/.Trash/")
-                                            RootHelperActs.mkdir("/private/var/mobile/Media/.Trash/")
+                                            _ = TrashManager.shared.emptyAll()
                                             updateFiles()
                                         }) {
                                             Text(NSLocalizedString("TRASHYEET", comment: "Yellow, black. Yellow, black."))
@@ -801,8 +816,9 @@ struct ContentView: View {
                                         }
                                     } else {
                                         Button(action: {
-                                            RootHelperActs.mv(masterFiles[index].fullPath, ("/private/var/mobile/Media/.Trash/" + masterFiles[index].name))
-                                            masterFiles.remove(at: index)
+                                            if TrashManager.shared.moveToTrash(path: masterFiles[index].fullPath) {
+                                                masterFiles.remove(at: index)
+                                            }
                                         }) {
                                             Text(NSLocalizedString("GOTOTRASH", comment: "Yellow, black. Yellow, black."))
                                                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
@@ -1102,22 +1118,14 @@ struct ContentView: View {
                         })
                     } else if(directory == "/private/var/mobile/Media/" && masterFiles[newViewFileIndex].name == ".Trash/"){
                         ContextMenuButtonTV(stringKey: "TRASHYEET", action: {
-                            do {
-                                try fileManager.removeItem(atPath: "/private/var/mobile/Media/.Trash/")
-                            } catch {
-                                print("Error emptying Trash: \(error)")
-                            }
-                            do {
-                                try fileManager.createDirectory(atPath: "/private/var/mobile/Media/.Trash/", withIntermediateDirectories: true, attributes: nil)
-                            } catch {
-                                print("Error emptying Trash: \(error)")
-                            }
+                            _ = TrashManager.shared.emptyAll()
                             showSubView[1] = false
                         })
                     } else {
                         ContextMenuButtonTV(stringKey: "GOTOTRASH", action: {
-                            RootHelperActs.mv(masterFiles[newViewFileIndex].fullPath, ("/private/var/mobile/Media/.Trash/" + masterFiles[newViewFileIndex].name))
-                            masterFiles.remove(at: newViewFileIndex)
+                            if TrashManager.shared.moveToTrash(path: masterFiles[newViewFileIndex].fullPath) {
+                                masterFiles.remove(at: newViewFileIndex)
+                            }
                             showSubView[1] = false
                         })
                     }

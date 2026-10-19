@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DA18F4FFA15F2E9355290505 /* TrashManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1841A433A5C12931505747 /* TrashManager.swift */; };
+		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
 		DA17B8E2F203D6193BAF75A7 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1704A1BED4F852B009A51E /* WebDAVClient.swift */; };
 		DA17E24BBAB89B82D06CD005 /* WebDAVStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA179073550B298ED786CD4A /* WebDAVStore.swift */; };
@@ -77,6 +79,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		DA1841A433A5C12931505747 /* TrashManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashManager.swift; sourceTree = "<group>"; };
+		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
 		DA1704A1BED4F852B009A51E /* WebDAVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift; sourceTree = "<group>"; };
 		DA179073550B298ED786CD4A /* WebDAVStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVStore.swift; sourceTree = "<group>"; };
@@ -172,6 +176,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		DA18E847725284F498AD423E /* Trash */ = {
+			isa = PBXGroup;
+			children = (
+				DA1841A433A5C12931505747 /* TrashManager.swift */,
+				DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */,
+			);
+			path = Trash;
+			sourceTree = "<group>";
+		};
 		DA171D28474254F303DA124A /* WebDAV */ = {
 			isa = PBXGroup;
 			children = (
@@ -245,6 +258,7 @@
 				42E7643F2B0BC7E9000D1330 /* FileInfo.swift */,
 				F8EA28D229F8ACCF0063206D /* ButtonActions */,
 				F8EA28D129F8ACAB0063206D /* FileOpeners */,
+				DA18E847725284F498AD423E /* Trash */,
 				DA171D28474254F303DA124A /* WebDAV */,
 				F8CC212629E5206B008C7B88 /* SpareViews.swift */,
 				F845C82E29F6247A0025AC0A /* EThree.swift */,
@@ -467,6 +481,8 @@
 				42B2B5AF2B63845700E19B22 /* TSUtil.m in Sources */,
 				F853AB5529DE8B3B006EA2D5 /* FavoritesView.swift in Sources */,
 				F853AB3129DBCB1A006EA2D5 /* ContentView.swift in Sources */,
+				DA18F4FFA15F2E9355290505 /* TrashManager.swift in Sources */,
+				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
 				DA17B8E2F203D6193BAF75A7 /* WebDAVClient.swift in Sources */,
 				DA17E24BBAB89B82D06CD005 /* WebDAVStore.swift in Sources */,
