@@ -51,7 +51,7 @@ struct ContentView: View {
     
     @State var didChangeDir = false
     
-    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 38)
+    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 39)
     //createFileSelectShow = 0
     //contextMenuShow = 1
     //openInMenu = 2
@@ -90,6 +90,7 @@ struct ContentView: View {
     //notJailbrokenView = 35
     //pdfViewShow = 36
     //trashViewShow = 37
+    //officeDocViewShow = 38
     
     @Binding var globalAVPlayer: AVPlayer //this is because Spartan has the ability to play music without the AudioPlayerView being shown. It took about a week to get working properly and I'm proud of it
     @State var isGlobalAVPlayerPlaying = false
@@ -353,14 +354,14 @@ struct ContentView: View {
                             Button(action: {
                                 if(directory == "/private/var/mobile/Media/.Trash/"){
                                     for file in multiSelectFiles {
-                                        RootHelperActs.rm(directory + file)
-                                        updateFiles()
+                                        TrashManager.shared.deletePathDirectly(directory + file)
                                     }
+                                    updateFiles()
                                 } else {
                                     for file in multiSelectFiles {
                                         TrashManager.shared.moveToTrash(path: directory + file)
-                                        updateFiles()
                                     }
+                                    updateFiles()
                                 }
                             }) {
                                 ZStack {
@@ -471,6 +472,9 @@ struct ContentView: View {
                         })
                         .sheet(isPresented: $showSubView[36], content: {
                             PDFReaderView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[36])
+                        })
+                        .sheet(isPresented: $showSubView[38], content: {
+                            OfficeDocReaderView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
                         })
                 }
                 HStack {
@@ -757,6 +761,12 @@ struct ContentView: View {
                                                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                                                         view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                                                     }
+											case 16:
+												Image(systemName: "doc.text.magnifyingglass")
+												Text(masterFiles[index].name)
+                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                                                    }
                                             default:
                                                 Image(systemName: "doc")
                                                 Text(masterFiles[index].name)
@@ -805,8 +815,9 @@ struct ContentView: View {
                                     
                                     if(directory == "/private/var/mobile/Media/.Trash/"){
                                         Button(action: {
-                                            RootHelperActs.rm(masterFiles[index].fullPath)
-                                            masterFiles.remove(at: index)
+                                            if TrashManager.shared.deletePathDirectly(masterFiles[index].fullPath) {
+                                                updateFiles()
+                                            }
                                         }) {
                                             Text(NSLocalizedString("DELETE", comment: "because bees don't care what humans think is impossible."))
                                                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
@@ -826,7 +837,7 @@ struct ContentView: View {
                                     } else {
                                         Button(action: {
                                             if TrashManager.shared.moveToTrash(path: masterFiles[index].fullPath) {
-                                                masterFiles.remove(at: index)
+                                                updateFiles()
                                             }
                                         }) {
                                             Text(NSLocalizedString("GOTOTRASH", comment: "Yellow, black. Yellow, black."))
@@ -1063,6 +1074,12 @@ struct ContentView: View {
                                                     }
 											case 15:
 												Image(systemName: "doc.richtext")
+												Text(masterFiles[index].name)
+                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                                                    }
+											case 16:
+												Image(systemName: "doc.text.magnifyingglass")
 												Text(masterFiles[index].name)
                                                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                                                         view.scaledFont(name: "BotW Sheikah Regular", size: 40)
@@ -1695,6 +1712,8 @@ struct ContentView: View {
 				showSubView[33] = true
 			case 15:
 				showSubView[36] = true
+			case 16:
+				showSubView[38] = true
             default:
                 masterFiles[index].isLoadingFile = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

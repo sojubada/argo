@@ -7,8 +7,8 @@ import Foundation
 import Combine
 
 struct TrashEntry: Codable, Identifiable, Hashable {
-    let id: String              // UUID 문자열
-    let originalPath: String    // 원본 전체 경로
+    let id: String
+    let originalPath: String
     let originalName: String
     let deletedAt: Date
     let isDirectory: Bool
@@ -16,7 +16,6 @@ struct TrashEntry: Codable, Identifiable, Hashable {
 
     var storedPath: String {
         if originalPath.isEmpty {
-            // 레거시 항목: .Trash/ 바로 아래에 존재하는 파일 또는 폴더
             return "\(TrashManager.trashRootPath)/\(originalName)"
         }
         return "\(TrashManager.itemsRootPath)/\(id)/\(originalName)"
@@ -35,9 +34,9 @@ struct TrashEntry: Codable, Identifiable, Hashable {
 }
 
 enum TrashRestoreResult {
-    case restored(String)          // 복원된 최종 경로
-    case renamed(String)           // 이름 충돌로 바꿔서 복원한 경로
-    case failed(String)            // 사유
+    case restored(String)
+    case renamed(String)
+    case failed(String)
 }
 
 private struct TrashIndexFile: Codable {
@@ -63,13 +62,77 @@ final class TrashManager: ObservableObject {
         reload()
     }
 
+    // MARK: - Dual File Operations (FileManager First + RootHelperActs Fallback)
+
+    private func robustMkdir(_ path: String) {
+        let norm = normalizePath(path)
+        guard !norm.isEmpty else { return }
+        if fileManager.fileExists(atPath: norm) { return }
+        do {
+            try fileManager.createDirectory(atPath: norm, withIntermediateDirectories: true, attributes: nil)
+        } catch {
+            RootHelperActs.mkdir(norm)
+        }
+    }
+
+    private func robustRemove(_ path: String) {
+        let norm = normalizePath(path)
+        guard !norm.isEmpty, fileManager.fileExists(atPath: norm) else { return }
+        do {
+            try fileManager.removeItem(atPath: norm)
+        } catch {
+            RootHelperActs.rm(norm)
+        }
+        if fileManager.fileExists(atPath: norm) {
+            RootHelperActs.rm(norm)
+        }
+    }
+
+    private func robustMove(from src: String, to dst: String) -> Bool {
+        let normSrc = normalizePath(src)
+        let normDst = normalizePath(dst)
+        guard !normSrc.isEmpty, !normDst.isEmpty else { return false }
+        guard fileManager.fileExists(atPath: normSrc) else { return false }
+
+        if fileManager.fileExists(atPath: normDst) {
+            robustRemove(normDst)
+        }
+
+        // 1차 시도: FileManager 직접 이동
+        do {
+            try fileManager.moveItem(atPath: normSrc, toPath: normDst)
+            if fileManager.fileExists(atPath: normDst) {
+                return true
+            }
+        } catch {
+            // 2차 시도: RootHelperActs.mv
+            RootHelperActs.mv(normSrc, normDst)
+            if fileManager.fileExists(atPath: normDst) {
+                return true
+            }
+        }
+
+        // 3차 시도: 복사 후 원본 삭제 (다른 볼륨/마운트 간 이동 대응)
+        do {
+            try fileManager.copyItem(atPath: normSrc, toPath: normDst)
+            if fileManager.fileExists(atPath: normDst) {
+                robustRemove(normSrc)
+                return !fileManager.fileExists(atPath: normSrc)
+            }
+        } catch {
+            RootHelperActs.cp(normSrc, normDst)
+            if fileManager.fileExists(atPath: normDst) {
+                robustRemove(normSrc)
+                return !fileManager.fileExists(atPath: normSrc)
+            }
+        }
+
+        return fileManager.fileExists(atPath: normDst)
+    }
+
     private func ensureDirectories() {
-        if !fileManager.fileExists(atPath: Self.trashRootPath) {
-            RootHelperActs.mkdir(Self.trashRootPath)
-        }
-        if !fileManager.fileExists(atPath: Self.itemsRootPath) {
-            RootHelperActs.mkdir(Self.itemsRootPath)
-        }
+        robustMkdir(Self.trashRootPath)
+        robustMkdir(Self.itemsRootPath)
     }
 
     func reload() {
@@ -90,7 +153,6 @@ final class TrashManager: ObservableObject {
         guard let indexFile = try? decoder.decode(TrashIndexFile.self, from: data) else {
             return []
         }
-        // 실제 디스크에 남아 있는 항목만 유지
         return indexFile.entries.filter { fileManager.fileExists(atPath: $0.storedPath) }
     }
 
@@ -101,11 +163,26 @@ final class TrashManager: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted]
         encoder.dateEncodingStrategy = .secondsSince1970
         guard let data = try? encoder.encode(indexFile) else { return }
+
+        // 1차 시도: 직접 쓰기
         do {
-            try data.write(to: URL(fileURLWithPath: tempPath))
-            RootHelperActs.mvtemp(Self.indexFilePath)
+            try data.write(to: URL(fileURLWithPath: Self.indexFilePath))
+            return
         } catch {
-            print("TrashManager: Failed to write index file: \(error)")
+            // 2차 시도: 앱 샌드박스 임시 경로 및 전역 tempPath 경유
+            let sandboxTemp = (NSTemporaryDirectory() as NSString).appendingPathComponent("argo-trash-index.tmp")
+            if let _ = try? data.write(to: URL(fileURLWithPath: sandboxTemp)) {
+                robustRemove(Self.indexFilePath)
+                _ = robustMove(from: sandboxTemp, to: Self.indexFilePath)
+                robustRemove(sandboxTemp)
+                if fileManager.fileExists(atPath: Self.indexFilePath) {
+                    return
+                }
+            }
+            if let _ = try? data.write(to: URL(fileURLWithPath: tempPath)) {
+                robustRemove(Self.indexFilePath)
+                RootHelperActs.mvtemp(Self.indexFilePath)
+            }
         }
     }
 
@@ -142,7 +219,6 @@ final class TrashManager: ObservableObject {
         let normalized = normalizePath(path)
         guard !normalized.isEmpty else { return false }
 
-        // 휴지통 자체나 휴지통 내부 항목을 다시 버리려 하면 거부
         if normalized == Self.trashRootPath || normalized.hasPrefix(Self.trashRootPath + "/") {
             return false
         }
@@ -162,12 +238,10 @@ final class TrashManager: ObservableObject {
         let uuidDir = "\(Self.itemsRootPath)/\(uuid)"
         let destPath = "\(uuidDir)/\(originalName)"
 
-        RootHelperActs.mkdir(uuidDir)
-        RootHelperActs.mv(normalized, destPath)
+        robustMkdir(uuidDir)
 
-        // 이동 성공 여부 확인 (실패 시 유령 항목 방지)
-        guard fileManager.fileExists(atPath: destPath) else {
-            RootHelperActs.rm(uuidDir)
+        guard robustMove(from: normalized, to: destPath) else {
+            robustRemove(uuidDir)
             return false
         }
 
@@ -225,15 +299,12 @@ final class TrashManager: ObservableObject {
             didRename = true
         }
 
-        RootHelperActs.mv(sourcePath, finalPath)
-
-        guard fileManager.fileExists(atPath: finalPath) else {
-            reload()
+        guard robustMove(from: sourcePath, to: finalPath) else {
             return .failed("Failed to move item to \(finalPath)")
         }
 
         let uuidDir = "\(Self.itemsRootPath)/\(entry.id)"
-        RootHelperActs.rm(uuidDir)
+        robustRemove(uuidDir)
 
         var currentIndexed = loadIndexedEntries()
         currentIndexed.removeAll { $0.id == entry.id }
@@ -250,13 +321,13 @@ final class TrashManager: ObservableObject {
     func deleteForever(_ entry: TrashEntry) -> Bool {
         if entry.isLegacy {
             let target = entry.storedPath
-            RootHelperActs.rm(target)
+            robustRemove(target)
             let ok = !fileManager.fileExists(atPath: target)
             reload()
             return ok
         } else {
             let uuidDir = "\(Self.itemsRootPath)/\(entry.id)"
-            RootHelperActs.rm(uuidDir)
+            robustRemove(uuidDir)
             let ok = !fileManager.fileExists(atPath: uuidDir)
             var currentIndexed = loadIndexedEntries()
             currentIndexed.removeAll { $0.id == entry.id }
@@ -266,10 +337,19 @@ final class TrashManager: ObservableObject {
         }
     }
 
+    /// 일반 파일 브라우저에서 휴지통을 거치지 않고 즉시 영구 삭제할 때 사용하는 헬퍼
+    @discardableResult
+    func deletePathDirectly(_ path: String) -> Bool {
+        let norm = normalizePath(path)
+        guard !norm.isEmpty else { return false }
+        robustRemove(norm)
+        return !fileManager.fileExists(atPath: norm)
+    }
+
     func emptyAll() -> Bool {
-        RootHelperActs.rm(Self.trashRootPath)
-        RootHelperActs.mkdir(Self.trashRootPath)
-        RootHelperActs.mkdir(Self.itemsRootPath)
+        robustRemove(Self.trashRootPath)
+        robustMkdir(Self.trashRootPath)
+        robustMkdir(Self.itemsRootPath)
         saveIndexedEntries([])
         reload()
         return entries.isEmpty
@@ -295,7 +375,7 @@ final class TrashManager: ObservableObject {
         for comp in components {
             current += "/" + comp
             if !fileManager.fileExists(atPath: current) {
-                RootHelperActs.mkdir(current)
+                robustMkdir(current)
             }
         }
     }

@@ -39,6 +39,9 @@ class FileInfo {
             return 15 //pdf - ahead of the executable and archive checks, which
                        //would otherwise claim a PDF carrying the +x bit and
                        //would read the whole file to do it
+        } else if (isOfficeDoc(filePath: file)) {
+            return 16 //office & hwp document - docx/xlsx/pptx/hwpx are ZIP
+                       //containers, so this has to beat isArchive to them
         } else if (doesFileHaveFileExtension(filePath: file, extensions: [".dmg"])) {
             return 13 //dmg
         } else if (doesFileHaveFileExtension(filePath: file, extensions: [".svg"])) {
@@ -211,6 +214,16 @@ class FileInfo {
         }
         return false
     }
+class func isOfficeDoc(filePath: String) -> Bool {
+        let ext = (filePath as NSString).pathExtension.lowercased()
+        let officeExtensions: Set<String> = [
+            "doc", "docx",
+            "xls", "xlsx",
+            "ppt", "pptx",
+            "hwp", "hwpx"
+        ]
+        return officeExtensions.contains(ext)
+    }
     class func isPDF(filePath: String) -> Bool {
         if doesFileHaveFileExtension(filePath: filePath, extensions: [".pdf"]) {
             return true
@@ -268,9 +281,13 @@ class FileInfo {
         archive_read_free(archive)
         return false
     }
-    class func doesFileHaveFileExtension(filePath: String, extensions: [String]) -> Bool {
-        for x in extensions {
-            return filePath.substring(fromIndex: filePath.count - x.count) == x
+class func doesFileHaveFileExtension(filePath: String, extensions: [String]) -> Bool {
+        let lowerPath = filePath.lowercased()
+        for ext in extensions {
+            let normalizedExt = ext.hasPrefix(".") ? ext.lowercased() : ("." + ext.lowercased())
+            if lowerPath.hasSuffix(normalizedExt) {
+                return true
+            }
         }
         return false
     }

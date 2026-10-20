@@ -2,6 +2,11 @@
 //  PDFReaderModel.swift
 //  Argo
 //
+//  Simplified PDF Reader Model:
+//  - Single Page / Two Pages (Book)
+//  - Day (Original) / Night (Inverted)
+//  - Page Flip Animation State & Resume Progress
+//
 
 import Foundation
 import CoreGraphics
@@ -10,39 +15,11 @@ import SwiftUI
 import Combine
 import CryptoKit
 
-enum PDFDisplayModeOption: String, CaseIterable, Identifiable {
-    case singlePage = "Single Page"
-    case continuous = "Continuous Scroll"
-    case twoUp = "Two Pages (Book)"
+enum PDFBookLayoutMode: String, CaseIterable, Identifiable {
+    case singlePage = "1 Page"
+    case twoPagesBook = "2 Pages (Book)"
 
     var id: String { rawValue }
-}
-
-enum PDFFitPolicy: String, CaseIterable, Identifiable {
-    case fitPage = "Fit Entire Page"
-    case fitWidth = "Fit Width"
-
-    var id: String { rawValue }
-}
-
-enum PDFThemeOption: String, CaseIterable, Identifiable {
-    case original = "Original"
-    case night = "Night (Inverted)"
-    case sepia = "Sepia"
-
-    var id: String { rawValue }
-}
-
-enum PDFInteractionMode: Equatable {
-    case reading
-    case zoomPan
-}
-
-struct PDFOutlineEntry: Identifiable, Hashable {
-    let id = UUID()
-    let title: String
-    let pageIndex: Int // 0-based
-    let level: Int
 }
 
 final class PDFReaderModel: ObservableObject {
@@ -55,33 +32,23 @@ final class PDFReaderModel: ObservableObject {
     @Published var isLocked: Bool = false
     @Published var loadError: String? = nil
 
-    @Published var currentPageIndex: Int = 0 // 0-based (CGPDFDocument 호출 시 +1)
+    @Published var currentPageIndex: Int = 0 // 0-based
     @Published var totalPages: Int = 0
 
-    @Published var displayModeOption: PDFDisplayModeOption = .singlePage
-    @Published var fitPolicy: PDFFitPolicy = .fitPage
-    @Published var theme: PDFThemeOption = .original
-    @Published var brightness: Double = 1.0
-
-    @Published var interactionMode: PDFInteractionMode = .reading
-    @Published var zoomStepIndex: Int = 0 // 0 = Fit, 1 = 100%, 2 = 150%, 3 = 200%
-    let zoomMultipliers: [CGFloat] = [1.0, 1.0, 1.5, 2.0]
-    @Published var panOffset: CGSize = .zero
+    @Published var layoutMode: PDFBookLayoutMode = .twoPagesBook
+    @Published var isNightMode: Bool = false
 
     @Published var primaryPageImage: UIImage? = nil
     @Published var secondaryPageImage: UIImage? = nil
-    @Published var isRenderingPrimary: Bool = false
+    @Published var isRendering: Bool = false
 
-    @Published var continuousScrollJumpTarget: Int? = nil
-
-    @Published var bookmarks: [Int] = []
-    @Published var outlineEntries: [PDFOutlineEntry] = []
+    /// 책장 넘기기 효과 방향 (-1: 이전 페이지로 넘김, 0: 정지, 1: 다음 페이지로 넘김)
+    @Published var pageTurnDirection: Int = 0
+    @Published var pageTurnAngle: Double = 0.0
 
     @Published var resumeBannerText: String? = nil
-    @Published var autoAdvanceEnabled: Bool = false
 
     private var isRestoringProgress: Bool = false
-    private var autoAdvanceTimer: Timer?
 
     init(filePath: String, fileName: String) {
         let combined: String
@@ -96,12 +63,8 @@ final class PDFReaderModel: ObservableObject {
         self.fileName = fileName
         self.fileHash = Self.computeSHA256(for: combined)
 
-        loadSavedPreferences()
+        loadPreferences()
         loadDocument()
-    }
-
-    deinit {
-        autoAdvanceTimer?.invalidate()
     }
 
     static func computeSHA256(for input: String) -> String {
@@ -110,7 +73,7 @@ final class PDFReaderModel: ObservableObject {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    // MARK: - Document Loading & Unlocking
+    // MARK: - Document Loading
 
     func loadDocument() {
         let cfURL = URL(fileURLWithPath: fullPath) as CFURL
@@ -149,8 +112,6 @@ final class PDFReaderModel: ObservableObject {
         }
         totalPages = count
         PDFPageRenderer.shared.clearCache()
-        loadBookmarks()
-        buildOutline(from: doc)
 
         let savedPage = UserDefaults.settings.integer(forKey: progressKey)
         if savedPage > 0 && savedPage < totalPages {
@@ -168,69 +129,43 @@ final class PDFReaderModel: ObservableObject {
         renderCurrentPages()
     }
 
-    // MARK: - Rendering Current View
-
-    var currentRenderScaleMultiplier: CGFloat {
-        var mult: CGFloat = 1.0
-        if fitPolicy == .fitWidth {
-            mult = 1.35
-        }
-        if interactionMode == .zoomPan {
-            let z = zoomMultipliers[zoomStepIndex]
-            mult = max(mult, z)
-        }
-        return mult
-    }
-
-    var currentDisplayScaleEffect: CGFloat {
-        var scale: CGFloat = (fitPolicy == .fitWidth) ? 1.35 : 1.0
-        if interactionMode == .zoomPan {
-            scale *= zoomMultipliers[zoomStepIndex]
-        }
-        return scale
-    }
+    // MARK: - Rendering
 
     func renderCurrentPages() {
         guard let doc = document, !isLocked, totalPages > 0 else { return }
 
-        if displayModeOption == .continuous {
-            return
+        let targetSize = (layoutMode == .twoPagesBook)
+            ? CGSize(width: 940, height: 1040)
+            : CGSize(width: 1840, height: 1040)
+
+        if primaryPageImage == nil {
+            isRendering = true
         }
 
-        let mult = currentRenderScaleMultiplier
-        let baseWidth: CGFloat = (displayModeOption == .twoUp) ? 960.0 : 1920.0
-        let baseHeight: CGFloat = 1080.0
-        let targetSize = CGSize(
-            width: min(4096.0, baseWidth * mult),
-            height: min(4096.0, baseHeight * mult)
-        )
-
-        isRenderingPrimary = (primaryPageImage == nil)
-
-        let primaryIndex = currentPageIndex
+        let primaryIdx = currentPageIndex
         PDFPageRenderer.shared.renderPage(
             document: doc,
             docKey: fileHash,
-            pageIndex: primaryIndex,
+            pageIndex: primaryIdx,
             targetSize: targetSize,
             slot: "primary"
-        ) { [weak self] image in
+        ) { [weak self] img in
             guard let self = self else { return }
-            self.primaryPageImage = image
-            self.isRenderingPrimary = false
+            self.primaryPageImage = img
+            self.isRendering = false
         }
 
-        if displayModeOption == .twoUp {
-            let secondIndex = primaryIndex + 1
-            if secondIndex < totalPages {
+        if layoutMode == .twoPagesBook {
+            let secondIdx = primaryIdx + 1
+            if secondIdx < totalPages {
                 PDFPageRenderer.shared.renderPage(
                     document: doc,
                     docKey: fileHash,
-                    pageIndex: secondIndex,
+                    pageIndex: secondIdx,
                     targetSize: targetSize,
                     slot: "secondary"
-                ) { [weak self] image in
-                    self?.secondaryPageImage = image
+                ) { [weak self] img in
+                    self?.secondaryPageImage = img
                 }
             } else {
                 _ = PDFPageRenderer.shared.nextToken(for: "secondary")
@@ -239,130 +174,88 @@ final class PDFReaderModel: ObservableObject {
         } else {
             _ = PDFPageRenderer.shared.nextToken(for: "secondary")
             secondaryPageImage = nil
-
-            // 한 쪽 보기에서는 인접(±1) 페이지를 백그라운드에서 미리 캐시
-            PDFPageRenderer.shared.prefetchAdjacent(
-                document: doc,
-                docKey: fileHash,
-                around: primaryIndex,
-                totalPages: totalPages,
-                targetSize: targetSize
-            )
         }
+
+        PDFPageRenderer.shared.prefetchAdjacent(
+            document: doc,
+            docKey: fileHash,
+            around: primaryIdx,
+            totalPages: totalPages,
+            targetSize: targetSize
+        )
     }
 
-    // MARK: - Navigation
+    // MARK: - Navigation & Page Flip Effect
 
-    func goToPage(_ index: Int) {
+    var pageStep: Int {
+        return (layoutMode == .twoPagesBook) ? 2 : 1
+    }
+
+    var canGoPrevious: Bool {
+        return currentPageIndex > 0
+    }
+
+    var canGoNext: Bool {
+        return currentPageIndex + pageStep < totalPages
+    }
+
+    func nextPageWithCurl() {
+        guard canGoNext else { return }
+        let nextIdx = min(totalPages - 1, currentPageIndex + pageStep)
+        performPageTurn(to: nextIdx, direction: 1)
+    }
+
+    func previousPageWithCurl() {
+        guard canGoPrevious else { return }
+        let prevIdx = max(0, currentPageIndex - pageStep)
+        performPageTurn(to: prevIdx, direction: -1)
+    }
+
+    func jumpToPage(_ index: Int) {
         guard totalPages > 0 else { return }
         let clamped = max(0, min(totalPages - 1, index))
-        panOffset = .zero
-        currentPageIndex = clamped
-        saveProgress(clamped)
+        guard clamped != currentPageIndex else { return }
+        let dir = (clamped > currentPageIndex) ? 1 : -1
+        performPageTurn(to: clamped, direction: dir)
+    }
 
-        if displayModeOption == .continuous {
-            continuousScrollJumpTarget = clamped
-        } else {
-            renderCurrentPages()
+    private func performPageTurn(to targetIndex: Int, direction: Int) {
+        pageTurnDirection = direction
+        withAnimation(.easeIn(duration: 0.14)) {
+            pageTurnAngle = (direction > 0) ? -55.0 : 55.0
         }
-    }
 
-    func nextPage() {
-        let step = (displayModeOption == .twoUp) ? 2 : 1
-        if currentPageIndex + step < totalPages {
-            goToPage(currentPageIndex + step)
-        } else if currentPageIndex < totalPages - 1 {
-            goToPage(totalPages - 1)
-        }
-    }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { [weak self] in
+            guard let self = self else { return }
+            self.currentPageIndex = targetIndex
+            self.saveProgress(targetIndex)
+            self.renderCurrentPages()
+            self.pageTurnAngle = (direction > 0) ? 55.0 : -55.0
 
-    func previousPage() {
-        let step = (displayModeOption == .twoUp) ? 2 : 1
-        if currentPageIndex - step >= 0 {
-            goToPage(currentPageIndex - step)
-        } else if currentPageIndex > 0 {
-            goToPage(0)
-        }
-    }
-
-    func updateVisibleContinuousPage(_ pageIndex: Int) {
-        guard displayModeOption == .continuous,
-              pageIndex >= 0,
-              pageIndex < totalPages else { return }
-        if currentPageIndex != pageIndex {
-            currentPageIndex = pageIndex
-            saveProgress(pageIndex)
-        }
-    }
-
-    // MARK: - Zoom & Pan (Expanded Mode)
-
-    func cycleZoomStep() {
-        zoomStepIndex = (zoomStepIndex + 1) % zoomMultipliers.count
-        if zoomStepIndex == 0 {
-            panOffset = .zero
-        } else {
-            clampPanOffset()
-        }
-        renderCurrentPages()
-    }
-
-    var zoomStepLabel: String {
-        switch zoomStepIndex {
-        case 0: return "Fit"
-        case 1: return "100%"
-        case 2: return "150%"
-        case 3: return "200%"
-        default: return "Fit"
-        }
-    }
-
-    func pan(dx: CGFloat, dy: CGFloat) {
-        // 리모컨 우측/하단 입력 시 문서의 우측/하단 영역을 볼 수 있도록 오프셋 이동
-        panOffset = CGSize(
-            width: panOffset.width - dx,
-            height: panOffset.height - dy
-        )
-        clampPanOffset()
-    }
-
-    private func clampPanOffset() {
-        let scale = currentDisplayScaleEffect
-        let maxX = max(0, (1920.0 * max(1.0, scale) - 1920.0) / 2.0 + 360.0)
-        let maxY = max(0, (1080.0 * max(1.0, scale) - 1080.0) / 2.0 + 360.0)
-        panOffset.width = max(-maxX, min(maxX, panOffset.width))
-        panOffset.height = max(-maxY, min(maxY, panOffset.height))
-    }
-
-    // MARK: - Auto Advance (Play/Pause)
-
-    func toggleAutoAdvance() {
-        autoAdvanceEnabled.toggle()
-        autoAdvanceTimer?.invalidate()
-        autoAdvanceTimer = nil
-
-        if autoAdvanceEnabled {
-            autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: true) { [weak self] _ in
-                guard let self = self else { return }
-                if self.currentPageIndex < self.totalPages - 1 {
-                    self.nextPage()
-                } else {
-                    self.autoAdvanceEnabled = false
-                    self.autoAdvanceTimer?.invalidate()
-                    self.autoAdvanceTimer = nil
-                }
+            withAnimation(.easeOut(duration: 0.18)) {
+                self.pageTurnAngle = 0.0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                self?.pageTurnDirection = 0
             }
         }
     }
 
-    // MARK: - Progress & Bookmarks Persistence
+    // MARK: - Toggles & Persistence
+
+    func toggleLayoutMode() {
+        layoutMode = (layoutMode == .singlePage) ? .twoPagesBook : .singlePage
+        savePreferences()
+        renderCurrentPages()
+    }
+
+    func toggleNightMode() {
+        isNightMode.toggle()
+        savePreferences()
+    }
 
     private var progressKey: String {
         "pdfProgress.\(fileHash)"
-    }
-
-    private var bookmarksKey: String {
-        "pdfBookmarks.\(fileHash)"
     }
 
     private func saveProgress(_ pageIndex: Int) {
@@ -371,174 +264,27 @@ final class PDFReaderModel: ObservableObject {
         UserDefaults.settings.synchronize()
     }
 
-    private func loadBookmarks() {
-        if let saved = UserDefaults.settings.array(forKey: bookmarksKey) as? [Int] {
-            bookmarks = saved.filter { $0 >= 0 && $0 < totalPages }.sorted()
-        } else {
-            bookmarks = []
-        }
-    }
-
-    private func persistBookmarks() {
-        UserDefaults.settings.set(bookmarks, forKey: bookmarksKey)
-        UserDefaults.settings.synchronize()
-    }
-
-    var isCurrentPageBookmarked: Bool {
-        bookmarks.contains(currentPageIndex)
-    }
-
-    func toggleBookmarkForCurrentPage() {
-        if let idx = bookmarks.firstIndex(of: currentPageIndex) {
-            bookmarks.remove(at: idx)
-        } else {
-            bookmarks.append(currentPageIndex)
-            bookmarks.sort()
-        }
-        persistBookmarks()
-    }
-
-    func removeBookmark(pageIndex: Int) {
-        bookmarks.removeAll { $0 == pageIndex }
-        persistBookmarks()
-    }
-
-    // MARK: - Preferences Persistence
-
-    func savePreferences() {
+    private func savePreferences() {
         let defaults = UserDefaults.settings
-        defaults.set(displayModeOption.rawValue, forKey: "pdfPref.displayMode")
-        defaults.set(fitPolicy.rawValue, forKey: "pdfPref.fitPolicy")
-        defaults.set(theme.rawValue, forKey: "pdfPref.theme")
-        defaults.set(brightness, forKey: "pdfPref.brightness")
+        defaults.set(layoutMode.rawValue, forKey: "pdfSimple.layoutMode")
+        defaults.set(isNightMode, forKey: "pdfSimple.isNightMode")
         defaults.synchronize()
     }
 
-    private func loadSavedPreferences() {
+    private func loadPreferences() {
         let defaults = UserDefaults.settings
-        if let modeRaw = defaults.string(forKey: "pdfPref.displayMode"),
-           let mode = PDFDisplayModeOption(rawValue: modeRaw) {
-            displayModeOption = mode
+        if let raw = defaults.string(forKey: "pdfSimple.layoutMode"),
+           let mode = PDFBookLayoutMode(rawValue: raw) {
+            layoutMode = mode
         }
-        if let fitRaw = defaults.string(forKey: "pdfPref.fitPolicy"),
-           let fit = PDFFitPolicy(rawValue: fitRaw) {
-            fitPolicy = fit
-        }
-        if let themeRaw = defaults.string(forKey: "pdfPref.theme"),
-           let th = PDFThemeOption(rawValue: themeRaw) {
-            theme = th
-        }
-        let savedBrightness = defaults.double(forKey: "pdfPref.brightness")
-        if savedBrightness >= 0.3 && savedBrightness <= 1.0 {
-            brightness = savedBrightness
-        } else {
-            brightness = 1.0
-        }
+        isNightMode = defaults.bool(forKey: "pdfSimple.isNightMode")
     }
 
-    // MARK: - Outline Extraction (Core Graphics Catalog Dictionary Walk)
-
-    private func buildOutline(from doc: CGPDFDocument) {
-        guard let catalog = doc.catalog else {
-            outlineEntries = []
-            return
+    var pageStatusText: String {
+        guard totalPages > 0 else { return "0 / 0" }
+        if layoutMode == .twoPagesBook && currentPageIndex + 1 < totalPages {
+            return "Pages \(currentPageIndex + 1)–\(currentPageIndex + 2) / \(totalPages)"
         }
-
-        var outlines: CGPDFDictionaryRef?
-        guard CGPDFDictionaryGetDictionary(catalog, "Outlines", &outlines),
-              let root = outlines else {
-            outlineEntries = []
-            return
-        }
-
-        // 페이지 딕셔너리 포인터 → 0-based 페이지 인덱스 맵 생성 (1회)
-        var pageMap: [UnsafeRawPointer: Int] = [:]
-        if doc.numberOfPages > 0 {
-            for i in 1...doc.numberOfPages {
-                if let p = doc.page(at: i), let d = p.dictionary {
-                    pageMap[UnsafeRawPointer(d)] = i - 1
-                }
-            }
-        }
-
-        var entries: [PDFOutlineEntry] = []
-        var firstRef: CGPDFDictionaryRef?
-        if CGPDFDictionaryGetDictionary(root, "First", &firstRef), let first = firstRef {
-            walkOutline(node: first, depth: 0, pageMap: pageMap, into: &entries)
-        }
-        outlineEntries = entries
-    }
-
-    private func walkOutline(
-        node: CGPDFDictionaryRef,
-        depth: Int,
-        pageMap: [UnsafeRawPointer: Int],
-        into list: inout [PDFOutlineEntry]
-    ) {
-        guard depth < 16 else { return }
-
-        var titleText = ""
-        var titleRef: CGPDFStringRef?
-        if CGPDFDictionaryGetString(node, "Title", &titleRef), let titleRaw = titleRef {
-            if let cf = CGPDFStringCopyTextString(titleRaw) {
-                titleText = (cf as String).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-
-        // /Dest 배열 또는 /A 액션 내부의 /D 배열에서 첫 번째 원소(페이지 딕셔너리) 추출
-        var targetPageIndex: Int? = nil
-
-        var destArray: CGPDFArrayRef?
-        if CGPDFDictionaryGetArray(node, "Dest", &destArray), let arr = destArray {
-            if CGPDFArrayGetCount(arr) > 0 {
-                var pageRef: CGPDFDictionaryRef?
-                if CGPDFArrayGetDictionary(arr, 0, &pageRef), let pDict = pageRef {
-                    targetPageIndex = pageMap[UnsafeRawPointer(pDict)]
-                }
-            }
-        }
-
-        if targetPageIndex == nil {
-            var actionRef: CGPDFDictionaryRef?
-            if CGPDFDictionaryGetDictionary(node, "A", &actionRef), let action = actionRef {
-                var innerDest: CGPDFArrayRef?
-                if CGPDFDictionaryGetArray(action, "D", &innerDest), let arr = innerDest {
-                    if CGPDFArrayGetCount(arr) > 0 {
-                        var pageRef: CGPDFDictionaryRef?
-                        if CGPDFArrayGetDictionary(arr, 0, &pageRef), let pDict = pageRef {
-                            targetPageIndex = pageMap[UnsafeRawPointer(pDict)]
-                        }
-                    }
-                }
-            }
-        }
-
-        // 해석에 성공한 항목만 추가 (실패 시 목록에서 제외)
-        if !titleText.isEmpty, let validPageIndex = targetPageIndex {
-            list.append(PDFOutlineEntry(title: titleText, pageIndex: validPageIndex, level: depth))
-        }
-
-        var childRef: CGPDFDictionaryRef?
-        if CGPDFDictionaryGetDictionary(node, "First", &childRef), let child = childRef {
-            walkOutline(node: child, depth: depth + 1, pageMap: pageMap, into: &list)
-        }
-
-        var siblingRef: CGPDFDictionaryRef?
-        if CGPDFDictionaryGetDictionary(node, "Next", &siblingRef), let sibling = siblingRef {
-            walkOutline(node: sibling, depth: depth, pageMap: pageMap, into: &list)
-        }
-    }
-
-    // MARK: - Progress Helpers
-
-    var progressFraction: Double {
-        guard totalPages > 0 else { return 0 }
-        return Double(currentPageIndex + 1) / Double(totalPages)
-    }
-
-    var remainingPercentageInt: Int {
-        guard totalPages > 0 else { return 0 }
-        let remainingPages = max(0, totalPages - (currentPageIndex + 1))
-        return Int(round((Double(remainingPages) / Double(totalPages)) * 100.0))
+        return "Page \(currentPageIndex + 1) / \(totalPages)"
     }
 }
