@@ -8,3 +8,4 @@
 #import "ObjCFunctions.h"
 #import "TSUtil.h"
 #import "WebKitProbe.h"
+#import "WebDocProbe.h"

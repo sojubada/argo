@@ -11,6 +11,9 @@
 		A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */; };
 		FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */; };
 		F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */; };
+		788067B142BB476A813CCC47 /* webdoc in Resources */ = {isa = PBXBuildFile; fileRef = 0088223C4B9D41DAB59EC316 /* webdoc */; };
+		FB208380C5EE4EBE8D3F154B /* WebDocProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA4D1923CBB436EB544EB4C /* WebDocProbeView.swift */; };
+		B325AFE190E94B1FA33292D6 /* WebDocProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = D917B437B6C841CF8BD444F7 /* WebDocProbe.m */; };
 		DA228CB4A2AFF27B34EF8D06 /* PDFReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA222302DD6E7EA7F6C4FCA3 /* PDFReaderModel.swift */; };
 		DA227E93C5740C7F8D0DC5AE /* PDFPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CEFF9D8382EBF92BFC6D /* PDFPageRenderer.swift */; };
 		DA224B286CDFDE8437AB583C /* PDFReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22EB1B0433C5A4AE349D6F /* PDFReaderView.swift */; };
@@ -91,6 +94,10 @@
 		2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocPipelineProbe.swift; sourceTree = "<group>"; };
 		13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebKitProbeView.swift; sourceTree = "<group>"; };
 		6EB20E17101440D182E71F24 /* WebKitProbe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebKitProbe.h; sourceTree = "<group>"; };
+		0088223C4B9D41DAB59EC316 /* webdoc */ = {isa = PBXFileReference; lastKnownFileType = folder; name = webdoc; path = Spartan/webdoc; sourceTree = SOURCE_ROOT; };
+		BBA4D1923CBB436EB544EB4C /* WebDocProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDocProbeView.swift; sourceTree = "<group>"; };
+		343134CAB58640EDA258CBBA /* WebDocProbe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebDocProbe.h; sourceTree = "<group>"; };
+		D917B437B6C841CF8BD444F7 /* WebDocProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebDocProbe.m; sourceTree = "<group>"; };
 		5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebKitProbe.m; sourceTree = "<group>"; };
 		DA222302DD6E7EA7F6C4FCA3 /* PDFReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderModel.swift; sourceTree = "<group>"; };
 		DA22CEFF9D8382EBF92BFC6D /* PDFPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageRenderer.swift; sourceTree = "<group>"; };
@@ -225,6 +232,10 @@
 				2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */,
 				13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */,
 				6EB20E17101440D182E71F24 /* WebKitProbe.h */,
+				0088223C4B9D41DAB59EC316 /* webdoc */,
+				BBA4D1923CBB436EB544EB4C /* WebDocProbeView.swift */,
+				343134CAB58640EDA258CBBA /* WebDocProbe.h */,
+				D917B437B6C841CF8BD444F7 /* WebDocProbe.m */,
 				5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */,
 			);
 			path = Diagnostics;
@@ -505,6 +516,7 @@
 				F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */,
 				F845C82829F4D77C0025AC0A /* Localizable.strings in Resources */,
 				F853AB3329DBCB1E006EA2D5 /* Assets.xcassets in Resources */,
+				788067B142BB476A813CCC47 /* webdoc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -543,6 +555,8 @@
 				A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */,
 				FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */,
 				F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */,
+				FB208380C5EE4EBE8D3F154B /* WebDocProbeView.swift in Sources */,
+				B325AFE190E94B1FA33292D6 /* WebDocProbe.m in Sources */,
 						DA228CB4A2AFF27B34EF8D06 /* PDFReaderModel.swift in Sources */,
 				DA227E93C5740C7F8D0DC5AE /* PDFPageRenderer.swift in Sources */,
 				DA224B286CDFDE8437AB583C /* PDFReaderView.swift in Sources */,

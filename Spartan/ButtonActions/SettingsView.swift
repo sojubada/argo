@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @State private var showView: [Bool] = [Bool](repeating: false, count: 4)
+    @State private var showView: [Bool] = [Bool](repeating: false, count: 5)
     @State private var descriptiveTitlesPre = UserDefaults.settings.bool(forKey: "descriptiveTitles")
     @State private var descriptiveTimestampsPre = UserDefaults.settings.bool(forKey: "verboseTimestamps")
     @State private var autoCompletePre = UserDefaults.settings.bool(forKey: "autoComplete")
@@ -118,6 +118,23 @@ struct SettingsView: View {
 			}
 			.fullScreenCover(isPresented: $showView[3]) {
 				WebKitProbeView(isPresented: $showView[3])
+					.edgesIgnoringSafeArea(.all)
+			}
+
+			Button(action: { //document render probe
+				showView[4] = true
+			}) {
+				HStack {
+					Image(systemName: "doc.viewfinder")
+						.frame(width: 50, height: 50)
+					Text("문서 렌더링 탐침 (Lab)")
+						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+						}
+				}
+			}
+			.fullScreenCover(isPresented: $showView[4]) {
+				WebDocProbeView(isPresented: $showView[4])
 					.edgesIgnoringSafeArea(.all)
 			}
 

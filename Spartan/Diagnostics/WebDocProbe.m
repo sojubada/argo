@@ -1,0 +1,442 @@
+//
+//  WebDocProbe.m
+//  Argo
+//
+
+#import "WebDocProbe.h"
+#import <dlfcn.h>
+#import <objc/message.h>
+
+@interface ArgoWebDocProbeViewController ()
+@property (nonatomic, strong) UITextView *logView;
+@property (nonatomic, strong) UIView *webHost;
+@property (nonatomic, strong) id webView;
+@property (nonatomic, strong) NSString *foundDocument;
+@property (nonatomic, strong) NSString *stageDir;
+@property (nonatomic, assign) NSTimeInterval renderStart;
+@end
+
+@implementation ArgoWebDocProbeViewController
+
+#pragma mark - Screen
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = [UIColor blackColor];
+
+    NSArray *titles = @[ @"1. 번들 자원 확인",
+                         @"2. 문서 찾기",
+                         @"3. 웹뷰 준비",
+                         @"4. 문서 렌더링",
+                         @"5. 쪽 정보 읽기",
+                         @"6. ↓ 스크롤",
+                         @"7. ↑ 스크롤",
+                         @"8. 그려졌는지 확인",
+                         @"0. 로그 저장",
+                         @"× 닫기" ];
+    NSArray *sels = @[ @"doCheckBundle", @"doFindDocument", @"doPrepareWebView",
+                       @"doRenderDocument", @"doPageInfo", @"doScrollDown",
+                       @"doScrollUp", @"doVerifyPainted", @"doSaveLog", @"doClose" ];
+
+    UIStackView *buttons = [[UIStackView alloc] init];
+    buttons.axis = UILayoutConstraintAxisVertical;
+    buttons.spacing = 6;
+    buttons.translatesAutoresizingMaskIntoConstraints = NO;
+    for (NSUInteger i = 0; i < titles.count; i++) {
+        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+        [b setTitle:titles[i] forState:UIControlStateNormal];
+        [b addTarget:self action:NSSelectorFromString(sels[i])
+    forControlEvents:UIControlEventPrimaryActionTriggered];
+        [buttons addArrangedSubview:b];
+    }
+
+    self.logView = [[UITextView alloc] init];
+    self.logView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+    self.logView.textColor = [UIColor greenColor];
+    self.logView.font = [UIFont fontWithName:@"Menlo" size:20];
+    self.logView.userInteractionEnabled = NO;
+    self.logView.translatesAutoresizingMaskIntoConstraints = NO;
+
+    self.webHost = [[UIView alloc] init];
+    self.webHost.backgroundColor = [UIColor darkGrayColor];
+    self.webHost.clipsToBounds = YES;
+    self.webHost.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [self.view addSubview:buttons];
+    [self.view addSubview:self.logView];
+    [self.view addSubview:self.webHost];
+
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [buttons.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:40],
+        [buttons.topAnchor constraintEqualToAnchor:g.topAnchor constant:20],
+        [buttons.widthAnchor constraintEqualToConstant:380],
+
+        [self.logView.leadingAnchor constraintEqualToAnchor:buttons.trailingAnchor constant:24],
+        [self.logView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-40],
+        [self.logView.topAnchor constraintEqualToAnchor:g.topAnchor constant:20],
+        [self.logView.heightAnchor constraintEqualToConstant:380],
+
+        [self.webHost.leadingAnchor constraintEqualToAnchor:self.logView.leadingAnchor],
+        [self.webHost.trailingAnchor constraintEqualToAnchor:self.logView.trailingAnchor],
+        [self.webHost.topAnchor constraintEqualToAnchor:self.logView.bottomAnchor constant:16],
+        [self.webHost.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-20],
+    ]];
+
+    UITapGestureRecognizer *menu = [[UITapGestureRecognizer alloc]
+                                    initWithTarget:self action:@selector(doClose)];
+    menu.allowedPressTypes = @[ @(UIPressTypeMenu) ];
+    [self.view addGestureRecognizer:menu];
+
+    [self log:@"문서 렌더링 탐침. 1번부터 순서대로."];
+    [self log:@"4번에서 원본 그대로 나오면 길이 열린 것입니다."];
+}
+
+- (void)log:(NSString *)fmt, ... {
+    va_list args; va_start(args, fmt);
+    NSString *s = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+    NSLog(@"[ArgoWebDoc] %@", s);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.logView.text = [self.logView.text stringByAppendingFormat:@"\n%@", s];
+        if (self.logView.text.length > 0) {
+            [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length - 1, 1)];
+        }
+    });
+}
+
+#pragma mark - 1. Is the renderer in the app
+
+- (NSString *)bundledScript:(NSString *)name {
+    NSString *p = [[NSBundle mainBundle] pathForResource:name ofType:@"js" inDirectory:@"webdoc"];
+    if (!p) { p = [[NSBundle mainBundle] pathForResource:name ofType:@"js"]; }
+    return p;
+}
+
+- (void)doCheckBundle {
+    [self log:@"\n--- 1. 번들 자원 ---"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *n in @[ @"jszip.min", @"docx-preview.min" ]) {
+        NSString *p = [self bundledScript:n];
+        if (p) {
+            unsigned long long sz = [[fm attributesOfItemAtPath:p error:nil] fileSize];
+            [self log:@"있음 %@.js  %llu bytes", n, sz];
+        } else {
+            [self log:@"없음 %@.js  ← 번들에 안 들어갔습니다", n];
+        }
+    }
+}
+
+#pragma mark - 2. Find something real to open
+
+- (void)doFindDocument {
+    [self log:@"\n--- 2. 문서 찾기 ---"];
+    NSArray *roots = @[ @"/var/mobile/Media",
+                        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
+                                                            NSUserDomainMask, YES).firstObject,
+                        @"/var/mobile/Media/Downloads",
+                        NSTemporaryDirectory() ];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray *hits = [NSMutableArray array];
+
+    for (NSString *root in roots) {
+        if (!root) { continue; }
+        NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+        NSString *sub;
+        int scanned = 0;
+        while ((sub = [en nextObject]) && scanned < 4000) {
+            scanned++;
+            if (en.level > 3) { [en skipDescendants]; continue; }
+            NSString *ext = sub.pathExtension.lowercaseString;
+            if ([ext isEqualToString:@"docx"]) {
+                [hits addObject:[root stringByAppendingPathComponent:sub]];
+                if (hits.count >= 8) { break; }
+            }
+        }
+        if (hits.count >= 8) { break; }
+    }
+
+    if (hits.count == 0) {
+        [self log:@"docx 파일을 못 찾았습니다."];
+        [self log:@"→ Argo 파일 탐색기로 /var/mobile/Media 에 .docx 를 하나 두십시오."];
+        return;
+    }
+    for (NSString *h in hits) {
+        unsigned long long sz = [[fm attributesOfItemAtPath:h error:nil] fileSize];
+        [self log:@"%@  (%llu KB)", h.lastPathComponent, sz / 1024];
+    }
+    self.foundDocument = hits.firstObject;
+    [self log:@"→ 첫 번째 것을 씁니다: %@", self.foundDocument];
+}
+
+#pragma mark - 3. A web view that may read from disk
+
+- (void)doPrepareWebView {
+    [self log:@"\n--- 3. 웹뷰 준비 ---"];
+    dlopen("/System/Library/Frameworks/WebKit.framework/WebKit", RTLD_NOW);
+
+    Class cfgClass = NSClassFromString(@"WKWebViewConfiguration");
+    Class wkClass  = NSClassFromString(@"WKWebView");
+    if (!cfgClass || !wkClass) { [self log:@"WebKit 클래스가 없습니다."]; return; }
+
+    id cfg = [[cfgClass alloc] init];
+
+    // A file:// page may not XHR its siblings unless this is on. It is a
+    // private preference, so it is set by name and checked afterwards
+    // rather than trusted.
+    id prefs = [cfg valueForKey:@"preferences"];
+    for (NSString *key in @[ @"allowFileAccessFromFileURLs", @"_allowFileAccessFromFileURLs" ]) {
+        @try {
+            [prefs setValue:@YES forKey:key];
+            [self log:@"설정됨 preferences.%@", key];
+        } @catch (NSException *e) {
+            [self log:@"없는 설정 %@", key];
+        }
+    }
+    @try {
+        [cfg setValue:@YES forKey:@"allowUniversalAccessFromFileURLs"];
+        [self log:@"설정됨 configuration.allowUniversalAccessFromFileURLs"];
+    } @catch (NSException *e) {
+        [self log:@"없는 설정 allowUniversalAccessFromFileURLs"];
+    }
+
+    CGRect frame = self.webHost.bounds;
+    if (CGRectIsEmpty(frame)) { frame = CGRectMake(0, 0, 1280, 400); }
+    id (*create)(id, SEL, CGRect, id) = (id (*)(id, SEL, CGRect, id))objc_msgSend;
+    id web = create([wkClass alloc], @selector(initWithFrame:configuration:), frame, cfg);
+    if (!web) { [self log:@"생성 실패"]; return; }
+
+    self.webView = web;
+    [web performSelector:@selector(setNavigationDelegate:) withObject:self];
+
+    UIView *v = (UIView *)web;
+    v.frame = self.webHost.bounds;
+    v.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.webHost addSubview:v];
+
+    BOOL canLoadFile = [web respondsToSelector:
+                        @selector(loadFileURL:allowingReadAccessToURL:)];
+    [self log:@"loadFileURL:allowingReadAccessToURL: %@", canLoadFile ? @"있음" : @"없음"];
+    [self log:@"웹뷰 준비됨."];
+}
+
+#pragma mark - 4. The question that matters
+
+- (void)doRenderDocument {
+    [self log:@"\n--- 4. 문서 렌더링 ---"];
+    if (!self.webView) { [self log:@"3번을 먼저."]; return; }
+    if (!self.foundDocument) { [self log:@"2번을 먼저."]; return; }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                     [NSString stringWithFormat:@"argo_webdoc_%@", [[NSUUID UUID] UUIDString]]];
+    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    self.stageDir = dir;
+
+    for (NSString *n in @[ @"jszip.min", @"docx-preview.min" ]) {
+        NSString *src = [self bundledScript:n];
+        if (!src) { [self log:@"번들에 %@.js 가 없습니다.", n]; return; }
+        [fm copyItemAtPath:src
+                    toPath:[dir stringByAppendingPathComponent:
+                            [n stringByAppendingString:@".js"]]
+                     error:nil];
+    }
+
+    // file:// pages are not allowed to fetch their siblings, so the
+    // document travels as a script the page is permitted to load.
+    NSData *doc = [NSData dataWithContentsOfFile:self.foundDocument];
+    if (!doc) { [self log:@"문서를 읽지 못했습니다."]; return; }
+    [self log:@"문서 %lu KB 를 base64 로 싣습니다…", (unsigned long)(doc.length / 1024)];
+
+    NSString *b64 = [doc base64EncodedStringWithOptions:0];
+    NSString *dataJS = [NSString stringWithFormat:@"window.__argoDoc=\"%@\";", b64];
+    [dataJS writeToFile:[dir stringByAppendingPathComponent:@"data.js"]
+             atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    NSString *html =
+    @"<!doctype html><html><head><meta charset='utf-8'>"
+    "<style>"
+    "html,body{margin:0;padding:0;background:#555;}"
+    ".docx-wrapper{background:#555;padding:20px 0;}"
+    ".docx-wrapper>section.docx{box-shadow:0 0 12px rgba(0,0,0,.6);margin-bottom:20px;}"
+    "#err{color:#f66;font:24px -apple-system;padding:20px;white-space:pre-wrap;}"
+    "</style></head><body>"
+    "<div id='err'></div><div id='c'></div>"
+    "<script src='jszip.min.js'></script>"
+    "<script src='docx-preview.min.js'></script>"
+    "<script src='data.js'></script>"
+    "<script>"
+    "window.__argoState='starting';"
+    "try{"
+    " var raw=atob(window.__argoDoc);"
+    " var arr=new Uint8Array(raw.length);"
+    " for(var i=0;i<raw.length;i++){arr[i]=raw.charCodeAt(i);}"
+    " var blob=new Blob([arr]);"
+    " docx.renderAsync(blob,document.getElementById('c'),null,"
+    "   {className:'docx',inWrapper:true,ignoreWidth:false,ignoreHeight:false,"
+    "    breakPages:true,experimental:true,useBase64URL:true})"
+    "  .then(function(){window.__argoState='done';})"
+    "  .catch(function(e){window.__argoState='error';"
+    "    document.getElementById('err').textContent=String(e);});"
+    "}catch(e){window.__argoState='error';"
+    " document.getElementById('err').textContent=String(e);}"
+    "</script></body></html>";
+
+    NSString *htmlPath = [dir stringByAppendingPathComponent:@"shell.html"];
+    [html writeToFile:htmlPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    self.renderStart = [NSDate timeIntervalSinceReferenceDate];
+    NSURL *fileURL = [NSURL fileURLWithPath:htmlPath];
+    NSURL *dirURL  = [NSURL fileURLWithPath:dir isDirectory:YES];
+
+    if ([self.webView respondsToSelector:@selector(loadFileURL:allowingReadAccessToURL:)]) {
+        [self.webView performSelector:@selector(loadFileURL:allowingReadAccessToURL:)
+                           withObject:fileURL withObject:dirURL];
+        [self log:@"loadFileURL 보냄. 그려지기까지 몇 초 걸립니다…"];
+    } else {
+        [self log:@"loadFileURL 이 없어 중단합니다."];
+    }
+}
+
+- (void)webView:(id)webView didFinishNavigation:(id)navigation {
+    NSTimeInterval took = [NSDate timeIntervalSinceReferenceDate] - self.renderStart;
+    [self log:@"불러오기 완료 (%.2f초). 렌더링 상태를 묻습니다…", took];
+    [self pollState:0];
+}
+- (void)webView:(id)webView didFailProvisionalNavigation:(id)nav withError:(NSError *)error {
+    [self log:@"불러오기 실패: %@", error.localizedDescription];
+}
+- (void)webViewWebContentProcessDidTerminate:(id)webView {
+    [self log:@"WebContent 프로세스가 죽었습니다 — 문서가 너무 크거나 메모리 부족입니다."];
+}
+
+// renderAsync is a promise, so the page is not finished when the
+// navigation is. Ask it until it says so, and give up rather than hang.
+- (void)pollState:(int)attempt {
+    if (attempt > 40) { [self log:@"30초가 지나도 끝나지 않았습니다."]; return; }
+    [self js:@"window.__argoState + '|' + (document.querySelectorAll('section.docx').length)"
+        then:^(id result) {
+        NSString *s = [NSString stringWithFormat:@"%@", result];
+        if ([s hasPrefix:@"done"]) {
+            NSTimeInterval took = [NSDate timeIntervalSinceReferenceDate] - self.renderStart;
+            [self log:@"★ 렌더링 완료 — %.2f초, 쪽 %@개",
+                took, [s componentsSeparatedByString:@"|"].lastObject];
+            [self log:@"→ 아래 칸을 보십시오. 원본 서식 그대로여야 합니다."];
+        } else if ([s hasPrefix:@"error"]) {
+            [self js:@"document.getElementById('err').textContent" then:^(id e) {
+                [self log:@"렌더링 오류: %@", e];
+            }];
+        } else {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [self pollState:attempt + 1];
+            });
+        }
+    }];
+}
+
+- (void)js:(NSString *)script then:(void (^)(id result))then {
+    if (!self.webView) { return; }
+    void (^handler)(id, NSError *) = ^(id result, NSError *error) {
+        if (error) { [self log:@"JS 오류: %@", error.localizedDescription]; }
+        else if (then) { then(result); }
+    };
+    @try {
+        [self.webView performSelector:@selector(evaluateJavaScript:completionHandler:)
+                           withObject:script withObject:handler];
+    } @catch (NSException *ex) {
+        [self log:@"예외: %@", ex.reason];
+    }
+}
+
+#pragma mark - 5~7. Moving around with a remote
+
+- (void)doPageInfo {
+    [self log:@"\n--- 5. 쪽 정보 ---"];
+    [self js:@"[document.body.scrollHeight, window.innerHeight,"
+           " document.querySelectorAll('section.docx').length,"
+           " document.querySelectorAll('img').length,"
+           " document.querySelectorAll('table').length].join(' / ')"
+        then:^(id r) {
+        [self log:@"전체높이 / 화면높이 / 쪽 / 그림 / 표"];
+        [self log:@"%@", r];
+    }];
+}
+
+- (void)doScrollDown { [self scrollBy:600]; }
+- (void)doScrollUp   { [self scrollBy:-600]; }
+
+- (void)scrollBy:(int)delta {
+    NSString *s = [NSString stringWithFormat:
+                   @"window.scrollBy(0,%d); Math.round(window.scrollY) + ' / ' + "
+                   "Math.round(document.body.scrollHeight - window.innerHeight)", delta];
+    [self js:s then:^(id r) {
+        [self log:@"스크롤 %@", r];
+    }];
+}
+
+#pragma mark - 8. Pixels again
+
+- (void)doVerifyPainted {
+    [self log:@"\n--- 8. 그려졌는지 ---"];
+    UIView *v = (UIView *)self.webView;
+    if (!v) { [self log:@"3번을 먼저."]; return; }
+    UIGraphicsBeginImageContextWithOptions(v.bounds.size, NO, 1.0);
+    [v.layer renderInContext:UIGraphicsGetCurrentContext()];
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    if (!img.CGImage) { [self log:@"이미지를 못 얻었습니다."]; return; }
+
+    size_t w = 80, h = 45, bpr = w * 4;
+    uint8_t *buf = calloc(h * bpr, 1);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(buf, w, h, 8, bpr, cs,
+                                             kCGImageAlphaPremultipliedLast);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img.CGImage);
+    NSMutableSet *colours = [NSMutableSet set];
+    double sum = 0;
+    for (size_t i = 0; i < w * h; i++) {
+        uint8_t r = buf[i*4], g = buf[i*4+1], b = buf[i*4+2];
+        sum += (0.299*r + 0.587*g + 0.114*b) / 255.0;
+        [colours addObject:@((r/16)*256 + (g/16)*16 + (b/16))];
+    }
+    CGContextRelease(ctx); CGColorSpaceRelease(cs); free(buf);
+    [self log:@"평균밝기 %.3f, 색 %lu가지", sum / (double)(w*h), (unsigned long)colours.count];
+    [self log:colours.count <= 2 ? @"→ 단색. 그려지지 않았습니다."
+                                 : @"→ ★ 문서가 그려졌습니다 ★"];
+}
+
+#pragma mark - 0
+
+- (void)doSaveLog {
+    NSDateFormatter *df = [[NSDateFormatter alloc] init];
+    df.dateFormat = @"yyyyMMdd-HHmmss";
+    NSString *name = [NSString stringWithFormat:@"argo-webdoc-probe-%@.log",
+                      [df stringFromDate:[NSDate date]]];
+    for (NSString *dest in @[ [@"/var/mobile/Media" stringByAppendingPathComponent:name],
+                              [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
+                                NSUserDomainMask, YES).firstObject
+                               stringByAppendingPathComponent:name] ]) {
+        if ([self.logView.text writeToFile:dest atomically:YES
+                                  encoding:NSUTF8StringEncoding error:nil]) {
+            [self log:@"\n저장됨: %@", dest];
+            return;
+        }
+    }
+    [self log:@"저장 실패"];
+}
+
+- (void)doClose {
+    if (self.webView) {
+        [(UIView *)self.webView removeFromSuperview];
+        self.webView = nil;
+    }
+    if (self.stageDir) {
+        [[NSFileManager defaultManager] removeItemAtPath:self.stageDir error:nil];
+        self.stageDir = nil;
+    }
+    if (self.onClose) { self.onClose(); }
+    else { [self dismissViewControllerAnimated:YES completion:nil]; }
+}
+
+@end
