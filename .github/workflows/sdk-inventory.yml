@@ -1,0 +1,72 @@
+name: tvOS SDK inventory
+
+# What does the tvOS SDK actually ship? Apple's documentation says PDFKit
+# is available on tvOS 11+. It is not in the SDK, and finding that out
+# cost a rewrite. This workflow answers the question from the SDK itself
+# so it never has to be guessed again.
+#
+# Run it from the Actions tab. The answer lands in the run's artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      grep:
+        description: "Optional: only show entries matching this (e.g. PDF, Web, Office)"
+        type: string
+        required: false
+
+jobs:
+  inventory:
+    runs-on: macos-14
+    steps:
+      - name: Select Xcode 15
+        run: |
+          for candidate in /Applications/Xcode_15.4.app /Applications/Xcode_15.3.app /Applications/Xcode_15.2.app; do
+            if [ -d "$candidate" ]; then sudo xcode-select -s "$candidate"; break; fi
+          done
+          xcodebuild -version
+
+      - name: List what the SDK ships
+        run: |
+          SDK=$(xcrun --sdk appletvos --show-sdk-path)
+          echo "SDK: $SDK"
+          echo "Version: $(xcrun --sdk appletvos --show-sdk-version)"
+          mkdir -p out
+
+          echo "=== Public frameworks ===" | tee out/inventory.txt
+          ls "$SDK/System/Library/Frameworks" | sed 's/\.framework$//' | sort | tee -a out/inventory.txt
+
+          echo "" | tee -a out/inventory.txt
+          echo "=== Private frameworks ===" | tee -a out/inventory.txt
+          ls "$SDK/System/Library/PrivateFrameworks" 2>/dev/null | sed 's/\.framework$//' | sort | tee -a out/inventory.txt
+
+          echo "" | tee -a out/inventory.txt
+          echo "=== Swift modules ===" | tee -a out/inventory.txt
+          ls "$SDK/usr/lib/swift" 2>/dev/null | sort | tee -a out/inventory.txt
+
+          echo "" | tee -a out/inventory.txt
+          echo "=== Shipped dylibs ===" | tee -a out/inventory.txt
+          ls "$SDK/usr/lib" 2>/dev/null | sort | tee -a out/inventory.txt
+
+          if [ -n "${{ inputs.grep }}" ]; then
+            echo ""
+            echo "=== Matching '${{ inputs.grep }}' ==="
+            grep -i "${{ inputs.grep }}" out/inventory.txt || echo "(no match — it is not in the SDK)"
+          fi
+
+          echo ""
+          echo "=== Quick answers ==="
+          for f in PDFKit WebKit QuickLook CoreText CoreGraphics SafariServices \
+                   UIKit AVFoundation Compression libarchive libxml2 libz; do
+            if ls "$SDK/System/Library/Frameworks" | grep -qi "^${f}\.framework$" \
+               || ls "$SDK/usr/lib" 2>/dev/null | grep -qi "^${f}\."; then
+              echo "  $f: PRESENT"
+            else
+              echo "  $f: ABSENT"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tvos-sdk-inventory
+          path: out/inventory.txt
