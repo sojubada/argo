@@ -1612,12 +1612,13 @@ struct ContentView: View {
     func quitArgo() {
         let app = UIApplication.shared
         let suspend = Selector(("suspend"))
-        if app.responds(to: suspend) {
-            app.perform(suspend)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                exit(0)
-            }
-        } else {
+        guard app.responds(to: suspend) else {
+            exit(0)
+        }
+        // perform() hands back an Unmanaged<AnyObject>; discard it
+        // explicitly or the if-branch looks like a value to infer from.
+        _ = app.perform(suspend)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             exit(0)
         }
     }
