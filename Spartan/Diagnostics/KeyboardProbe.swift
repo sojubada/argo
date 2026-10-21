@@ -22,28 +22,31 @@ import UIKit
 final class KeyboardProbeResponder: UIViewController {
 
     override var keyCommands: [UIKeyCommand]? {
-        return [
-            UIKeyCommand(title: "Copy",
-                         action: #selector(probeCopy),
-                         input: "c",
-                         modifierFlags: .command),
-            UIKeyCommand(title: "Paste",
-                         action: #selector(probePaste),
-                         input: "v",
-                         modifierFlags: .command),
-            UIKeyCommand(title: "Select All",
-                         action: #selector(probeSelectAll),
-                         input: "a",
-                         modifierFlags: .command),
-            UIKeyCommand(title: "Compress",
-                         action: #selector(probeCompress),
-                         input: "z",
-                         modifierFlags: [.command, .shift]),
-            UIKeyCommand(title: "Parent Folder",
-                         action: #selector(probeUp),
-                         input: UIKeyInputUpArrow,
-                         modifierFlags: .command),
-        ]
+        // tvOS has UIKeyCommand but not iOS 13's title: convenience
+        // initialiser — that one wants image: and propertyList: here.
+        // The original three-argument form is the one that exists.
+        let copy = UIKeyCommand(input: "c",
+                                modifierFlags: .command,
+                                action: #selector(probeCopy))
+        let paste = UIKeyCommand(input: "v",
+                                 modifierFlags: .command,
+                                 action: #selector(probePaste))
+        let selectAll = UIKeyCommand(input: "a",
+                                     modifierFlags: .command,
+                                     action: #selector(probeSelectAll))
+        let compress = UIKeyCommand(input: "z",
+                                    modifierFlags: [.command, .shift],
+                                    action: #selector(probeCompress))
+        let up = UIKeyCommand(input: UIKeyInputUpArrow,
+                              modifierFlags: .command,
+                              action: #selector(probeUp))
+
+        // Without a menu bar there is nowhere for tvOS to show these,
+        // but the property is what a help overlay would read.
+        copy.discoverabilityTitle = "Copy"
+        paste.discoverabilityTitle = "Paste"
+
+        return [copy, paste, selectAll, compress, up]
     }
 
     @objc private func probeCopy() {}
