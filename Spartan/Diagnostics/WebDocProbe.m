@@ -327,6 +327,11 @@
     NSData *doc = [NSData dataWithContentsOfFile:self.foundDocument];
     if (!doc) { [self log:@"문서를 읽지 못했습니다."]; return; }
     [self log:@"문서 %lu KB 를 base64 로 싣습니다…", (unsigned long)(doc.length / 1024)];
+    if (doc.length > 10 * 1024 * 1024) {
+        [self log:@"⚠ 10MB가 넘습니다. base64 로 %lu MB 가 되어 느리거나 메모리가 모자랄 수 있습니다.",
+            (unsigned long)(doc.length * 4 / 3 / 1024 / 1024)];
+        [self log:@"  작은 파일로도 한 번 해보십시오 (2번을 눌러 다음 문서로)."];
+    }
 
     NSString *dataJS = [NSString stringWithFormat:@"window.__argoDoc=\"%@\";",
                         [doc base64EncodedStringWithOptions:0]];
@@ -336,7 +341,11 @@
     NSString *html = [NSString stringWithFormat:
     @"<!doctype html><html><head><meta charset='utf-8'>"
     "<style>"
-    "html,body{margin:0;padding:0;background:#555;font:20px -apple-system,sans-serif;color:#fff;}"
+    // The renderers inherit from their container, so the debug chrome's
+    // own colours must not reach it: white text on a white slide is
+    // indistinguishable from a slide that never rendered.
+    "html,body{margin:0;padding:0;background:#555;font:20px -apple-system,sans-serif;}"
+    "#c{color:#000;position:relative;min-height:200px;}"
     ".docx-wrapper{background:#555;padding:20px 0;}"
     ".docx-wrapper>section.docx{box-shadow:0 0 12px rgba(0,0,0,.6);margin-bottom:20px;}"
     "h2{color:#8cf;margin:16px 12px 6px;font-size:22px;}"
@@ -351,7 +360,9 @@
     "window.__argoState='starting';window.__argoInfo='';"
     "function done(info){window.__argoInfo=info||'';window.__argoState='done';}"
     "function fail(e){window.__argoState='error';"
-    " document.getElementById('err').textContent=String(e&&e.stack||e);}"
+    " var m=e?((e.name||'Error')+': '+(e.message||String(e))):String(e);"
+    " window.__argoErr=m;"
+    " document.getElementById('err').textContent=m+'\\n\\n'+((e&&e.stack)||'');}"
     "try{"
     " var raw=atob(window.__argoDoc);"
     " var arr=new Uint8Array(raw.length);"
@@ -396,8 +407,10 @@
                 parts.count > 1 ? parts[1] : @""];
             [self log:@"→ 아래 칸을 보십시오. 원본 서식 그대로여야 합니다."];
         } else if ([s hasPrefix:@"error"]) {
-            [self js:@"document.getElementById('err').textContent" then:^(id e) {
-                [self log:@"렌더링 오류: %@", e];
+            [self js:@"window.__argoErr || ''" then:^(id msg) {
+                [self log:@"렌더링 오류: %@", msg];
+                [self js:@"(document.getElementById('err').textContent||'').split('\\n').slice(2,6).join('\\n')"
+                     then:^(id st) { [self log:@"%@", st]; }];
             }];
         } else {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)),
@@ -435,6 +448,30 @@
         then:^(id r) {
         [self log:@"전체높이 / 화면높이 / 쪽 / 그림 / 표 / 행 / 도형"];
         [self log:@"%@", r];
+    }];
+
+    // When the pane comes back blank, these say whether nothing was
+    // built, or it was built somewhere off-screen, or it was built in
+    // a colour that cannot be seen.
+    [self js:@"(function(){var c=document.getElementById('c');"
+           " var r=c.getBoundingClientRect();"
+           " var k=c.firstElementChild;"
+           " var kr=k?k.getBoundingClientRect():{width:0,height:0,top:0,left:0};"
+           " var cs=k?getComputedStyle(k):null;"
+           " return '컨테이너 '+Math.round(r.width)+'x'+Math.round(r.height)"
+           "  +' | 첫자식 <'+(k?k.tagName.toLowerCase():'없음')+'> '"
+           "  +Math.round(kr.width)+'x'+Math.round(kr.height)"
+           "  +' @'+Math.round(kr.left)+','+Math.round(kr.top)"
+           "  +' | 글자색 '+(cs?cs.color:'-')+' 배경 '+(cs?cs.backgroundColor:'-')"
+           "  +' | 자식수 '+c.children.length;})()"
+        then:^(id r) {
+        [self log:@"%@", r];
+    }];
+
+    [self js:@"(document.getElementById('c').innerText||'').replace(/\\s+/g,' ').slice(0,140)"
+        then:^(id r) {
+        NSString *txt = [NSString stringWithFormat:@"%@", r];
+        [self log:@"글자: %@", txt.length > 0 ? txt : @"(없음 — 도형만 있거나 비었습니다)"];
     }];
 }
 
