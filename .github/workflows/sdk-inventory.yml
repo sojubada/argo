@@ -14,6 +14,10 @@ on:
         description: "Optional: only show entries matching this (e.g. PDF, Web, Office)"
         type: string
         required: false
+      symbols:
+        description: "Optional: comma-separated API names to look for in the SDK headers (e.g. UIKeyCommand,pressesBegan)"
+        type: string
+        required: false
 
 jobs:
   inventory:
@@ -64,6 +68,29 @@ jobs:
             else
               echo "  $f: ABSENT"
             fi
+          done
+
+      - name: Look for specific APIs in the headers
+        if: inputs.symbols != ''
+        run: |
+          SDK=$(xcrun --sdk appletvos --show-sdk-path)
+          echo "=== Looking for each name in the SDK's own headers ==="
+          echo "PRESENT means the tvOS SDK declares it. Nothing else is evidence."
+          echo ""
+          IFS=',' read -ra NAMES <<< "${{ inputs.symbols }}"
+          for raw in "${NAMES[@]}"; do
+            name=$(echo "$raw" | xargs)
+            [ -z "$name" ] && continue
+            hits=$(grep -rl --include='*.h' --include='*.swiftinterface' \
+                     -w "$name" \
+                     "$SDK/System/Library/Frameworks" "$SDK/usr/lib/swift" 2>/dev/null | head -4 || true)
+            if [ -n "$hits" ]; then
+              echo "PRESENT  $name"
+              echo "$hits" | sed "s|$SDK|  |"
+            else
+              echo "ABSENT   $name"
+            fi
+            echo ""
           done
 
       - uses: actions/upload-artifact@v4
