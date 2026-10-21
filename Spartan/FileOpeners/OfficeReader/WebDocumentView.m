@@ -48,6 +48,7 @@
 - (BOOL)isDeck   { return [[self ext] isEqualToString:@"pptx"]; }
 - (BOOL)isSheet  { NSString *e = [self ext];
                    return [e isEqualToString:@"xlsx"] || [e isEqualToString:@"xls"]; }
+- (BOOL)isPDF    { return [[self ext] isEqualToString:@"pdf"]; }
 
 #pragma mark - Screen
 
@@ -324,6 +325,18 @@
                     toPath:[dir stringByAppendingPathComponent:[n stringByAppendingString:@".js"]]
                      error:nil];
         [tags appendFormat:@"<script src='%@.js'></script>", n];
+    }
+
+    // PDF.js fetches its worker by URL rather than through a tag, so it
+    // has to be beside the page without being loaded into it.
+    if (self.isPDF) {
+        NSString *worker = [[NSBundle mainBundle] pathForResource:@"pdf.worker.min"
+                                                           ofType:@"js" inDirectory:@"webdoc"];
+        if (worker) {
+            [fm copyItemAtPath:worker
+                        toPath:[dir stringByAppendingPathComponent:@"pdf.worker.min.js"]
+                         error:nil];
+        }
     }
 
     // Read and encode off the main thread: a large workbook otherwise

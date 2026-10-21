@@ -13,6 +13,7 @@
     if ([ext isEqualToString:@"xlsx"] || [ext isEqualToString:@"xls"]) { return @[ @"xlsx.min" ]; }
     if ([ext isEqualToString:@"pptx"]) { return @[ @"pptx.min" ]; }
     if ([ext isEqualToString:@"hwp"]) { return @[ @"hwp.min" ]; }
+    if ([ext isEqualToString:@"pdf"]) { return @[ @"pdf.min" ]; }
     return @[];
 }
 
@@ -105,6 +106,49 @@
                 "})();";
     }
 
+    if ([ext isEqualToString:@"pdf"]) {
+        // Every page is rasterised once at twice the CSS size, which is
+        // what a 55-inch screen at three metres needs, and kept. A long
+        // document would be slow drawn all at once, so pages are added
+        // a few at a time and the rest follow after the first is up.
+        return @"pdfjsLib.GlobalWorkerOptions.workerSrc='pdf.worker.min.js';"
+                "pdfjsLib.getDocument({data:arr}).promise.then(function(pdf){"
+                " var total=pdf.numPages;"
+                " var boxes=[];"
+                " for(var n=1;n<=total;n++){"
+                "  var d=document.createElement('div');"
+                "  d.className='pdfpage';d.dataset.n=n;"
+                "  C.appendChild(d);boxes.push(d);"
+                " }"
+                " nav.units=function(){return boxes;};"
+                " nav.label=function(){return (nav.i+1)+' / '+total+' 쪽';};"
+                " function draw(n){"
+                "  return pdf.getPage(n).then(function(page){"
+                "   var vp=page.getViewport({scale:1});"
+                "   var scale=Math.min(2.4,(window.innerWidth-80)/vp.width*2);"
+                "   var v=page.getViewport({scale:scale});"
+                "   var cv=document.createElement('canvas');"
+                "   cv.width=v.width;cv.height=v.height;"
+                "   cv.style.width=(v.width/2)+'px';"
+                "   cv.style.height=(v.height/2)+'px';"
+                "   boxes[n-1].appendChild(cv);"
+                "   return page.render({canvasContext:cv.getContext('2d'),viewport:v}).promise;"
+                "  });"
+                " }"
+                " function drawFrom(n){"
+                "  if(n>total)return Promise.resolve();"
+                "  return draw(n).then(function(){"
+                "   return new Promise(function(r){setTimeout(function(){"
+                "    drawFrom(n+1).then(r);},0);});"
+                "  }).catch(function(){});"
+                " }"
+                " return draw(1).then(function(){"
+                "  ready(total+'쪽');"
+                "  drawFrom(2);"
+                " });"
+                "}).catch(fail);";
+    }
+
     return @"fail(new Error('지원하지 않는 형식'));";
 }
 
@@ -127,6 +171,8 @@
     ".docx-wrapper{background:transparent;padding:24px 0;}"
     ".docx-wrapper>section.docx{box-shadow:0 0 16px rgba(0,0,0,.55);margin-bottom:24px;}"
     ".sheet{padding:16px 24px 48px;}"
+    ".pdfpage{display:flex;justify-content:center;padding:14px 0;min-height:40px;}"
+    ".pdfpage canvas{box-shadow:0 0 16px rgba(0,0,0,.55);background:#fff;}"
     "table{border-collapse:collapse;background:#fff;color:#000;}"
     "td,th{border:1px solid #b0b0b0;padding:6px 12px;font-size:19px;"
     " white-space:nowrap;font-family:-apple-system,sans-serif;}"

@@ -479,7 +479,7 @@ struct ContentView: View {
                             HTMLView(filePath: newViewFilePath, fileName: newViewFileName)
                         })
                         .sheet(isPresented: $showSubView[36], content: {
-                            PDFReaderView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[36])
+                            WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[36])
                         })
                         .sheet(isPresented: $showSubView[38], content: {
                             WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
