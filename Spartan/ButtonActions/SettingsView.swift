@@ -110,7 +110,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "stethoscope")
 						.frame(width: 50, height: 50)
-					Text("WebKit 탐침 (Lab)")
+					Text("Lab ① WebKit 탐침 — 확인 완료")
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
@@ -127,7 +127,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "doc.viewfinder")
 						.frame(width: 50, height: 50)
-					Text("문서 렌더링 탐침 (Lab)")
+					Text("Lab ② 문서 렌더링 탐침 ← 지금 이것")
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
