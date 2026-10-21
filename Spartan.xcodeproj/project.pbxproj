@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		DA24CDDFDA45886378A078F2 /* OfficeDocReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA24D0B6A893E1F874B5B457 /* OfficeDocReaderView.swift */; };
+		166490773A8A4A65B00AC81A /* WebDocumentSwiftView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7542162C47234211AA1410E6 /* WebDocumentSwiftView.swift */; };
+		603B7A48642245CFBC4262C2 /* WebDocumentShell.m in Sources */ = {isa = PBXBuildFile; fileRef = 2B24EFA729574E97AEE91629 /* WebDocumentShell.m */; };
+		2E8144A5E07049BB8E563C6B /* WebDocumentView.m in Sources */ = {isa = PBXBuildFile; fileRef = 15FA0B8D9C684035B8C6B258 /* WebDocumentView.m */; };
 		A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */; };
 		FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */; };
 		F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */; };
@@ -92,6 +95,11 @@
 
 /* Begin PBXFileReference section */
 		DA24D0B6A893E1F874B5B457 /* OfficeDocReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeDocReaderView.swift; sourceTree = "<group>"; };
+		7542162C47234211AA1410E6 /* WebDocumentSwiftView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDocumentSwiftView.swift; sourceTree = "<group>"; };
+		0650DA66DE4F48458B36A4B8 /* WebDocumentShell.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebDocumentShell.h; sourceTree = "<group>"; };
+		2B24EFA729574E97AEE91629 /* WebDocumentShell.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebDocumentShell.m; sourceTree = "<group>"; };
+		AB3B2E5E54F74BC98FCB924F /* WebDocumentView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebDocumentView.h; sourceTree = "<group>"; };
+		15FA0B8D9C684035B8C6B258 /* WebDocumentView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebDocumentView.m; sourceTree = "<group>"; };
 		2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocPipelineProbe.swift; sourceTree = "<group>"; };
 		13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebKitProbeView.swift; sourceTree = "<group>"; };
 		6EB20E17101440D182E71F24 /* WebKitProbe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebKitProbe.h; sourceTree = "<group>"; };
@@ -206,6 +214,11 @@
 			isa = PBXGroup;
 			children = (
 				DA24D0B6A893E1F874B5B457 /* OfficeDocReaderView.swift */,
+				7542162C47234211AA1410E6 /* WebDocumentSwiftView.swift */,
+				0650DA66DE4F48458B36A4B8 /* WebDocumentShell.h */,
+				2B24EFA729574E97AEE91629 /* WebDocumentShell.m */,
+				AB3B2E5E54F74BC98FCB924F /* WebDocumentView.h */,
+				15FA0B8D9C684035B8C6B258 /* WebDocumentView.m */,
 			);
 			path = OfficeReader;
 			sourceTree = "<group>";
@@ -555,6 +568,9 @@
 				F853AB5529DE8B3B006EA2D5 /* FavoritesView.swift in Sources */,
 				F853AB3129DBCB1A006EA2D5 /* ContentView.swift in Sources */,
 				DA24CDDFDA45886378A078F2 /* OfficeDocReaderView.swift in Sources */,
+				166490773A8A4A65B00AC81A /* WebDocumentSwiftView.swift in Sources */,
+				603B7A48642245CFBC4262C2 /* WebDocumentShell.m in Sources */,
+				2E8144A5E07049BB8E563C6B /* WebDocumentView.m in Sources */,
 				A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */,
 				FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */,
 				F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */,

@@ -482,7 +482,7 @@ struct ContentView: View {
                             PDFReaderView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[36])
                         })
                         .sheet(isPresented: $showSubView[38], content: {
-                            OfficeDocReaderView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
+                            WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
                         })
                 }
                 HStack {
