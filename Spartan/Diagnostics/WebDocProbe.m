@@ -35,11 +35,13 @@
                          @"7. ↑ 스크롤",
                          @"8. 그려졌는지 확인",
                          @"9. DOM 구조 보기",
+                         @"10. 배경 채우기 시험",
                          @"0. 로그 저장",
                          @"× 닫기" ];
     NSArray *sels = @[ @"doCheckBundle", @"doFindDocument", @"doPrepareWebView",
                        @"doRenderDocument", @"doPageInfo", @"doScrollDown",
-                       @"doScrollUp", @"doVerifyPainted", @"doDumpStructure", @"doSaveLog", @"doClose" ];
+                       @"doScrollUp", @"doVerifyPainted", @"doDumpStructure",
+                       @"doFillBackground", @"doSaveLog", @"doClose" ];
 
     UIStackView *buttons = [[UIStackView alloc] init];
     buttons.axis = UILayoutConstraintAxisVertical;
@@ -295,10 +297,18 @@
         // HWPViewer's third argument defaults to {type:'binary'}, which
         // means a binary string to the CFB layer underneath — hand it a
         // Uint8Array and it calls .split("") on it. Say 'array'.
-        return @"try{ new hwpjs.Viewer(document.getElementById('c'),arr,{type:'array'}); }"
-                "catch(e1){ try{ new hwpjs.Viewer(document.getElementById('c'),window.__argoDoc,{type:'base64'}); }"
-                "catch(e2){ fail(e2); return; } }"
-                "done(document.querySelectorAll('.hwpjs-page,.hwpjs-viewer,div').length+' 요소');";
+        // Wrapped in a function because a bare `return` at the top level
+        // of a script is a syntax error — which silently killed the whole
+        // block last time, so nothing ran and nothing reported.
+        return @"(function(){"
+                " var el=document.getElementById('c');"
+                " try{ new hwpjs.Viewer(el,arr,{type:'array'}); }"
+                " catch(e1){"
+                "  try{ new hwpjs.Viewer(el,window.__argoDoc,{type:'base64'}); }"
+                "  catch(e2){ fail(e2); return; }"
+                " }"
+                " done(el.querySelectorAll('*').length+' 요소');"
+                "})();";
     }
     return @"fail('지원하지 않는 형식입니다');";
 }
@@ -564,6 +574,36 @@
            " }"
            " return '글자를 가진 요소가 없습니다 (도형으로만 그려졌습니다)';})()"
         then:^(id r) { [self log:@"%@", r]; }];
+}
+
+#pragma mark - 10. Is it white text on a white slide
+
+// The deck's first text span is rgb(255,255,255) and slide-master-wrapper
+// has no children: the master, which carries the dark background this
+// theme's white text was written for, did not render. Painting the
+// slide dark is not a fix, but it settles whether that is the reason.
+- (void)doFillBackground {
+    [self log:@"\n--- 10. 배경 채우기 ---"];
+    [self js:@"(function(){"
+           " var imgs=document.querySelectorAll('#c img');"
+           " var broken=0,src='';"
+           " for(var i=0;i<imgs.length;i++){"
+           "  if(!imgs[i].naturalWidth)broken++;"
+           "  if(!src&&imgs[i].src)src=imgs[i].src.slice(0,28);"
+           " }"
+           " return '그림 '+imgs.length+'개 중 '+broken+'개가 안 떴습니다 | src: '+(src||'-');})()"
+        then:^(id r) { [self log:@"%@", r]; }];
+
+    [self js:@"(function(){"
+           " var st=document.createElement('style');"
+           " st.textContent='.slide-background{background:#1f3864 !important;}';"
+           " document.head.appendChild(st);"
+           " return '슬라이드 배경을 남색으로 칠했습니다.';})()"
+        then:^(id r) {
+        [self log:@"%@", r];
+        [self log:@"→ 이제 글자가 보이면, 원인은 마스터 배경이 안 그려진 것입니다."];
+        [self log:@"→ 그래도 백지면 글자가 다른 곳에 있습니다."];
+    }];
 }
 
 #pragma mark - 0
