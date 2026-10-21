@@ -1604,7 +1604,6 @@ struct ContentView: View {
                 }
     }
     
-    @ViewBuilder
     // The Menu button walks up one folder at a time, so leaving from
     // somewhere deep means pressing it over and over. Suspending first
     // gives the same animation as the Home button before the process
@@ -1623,6 +1622,7 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     var debugMenu: some View {
         VStack {
 			if E { //i need e
