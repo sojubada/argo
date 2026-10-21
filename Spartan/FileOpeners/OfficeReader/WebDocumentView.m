@@ -8,6 +8,21 @@
 #import <dlfcn.h>
 #import <objc/message.h>
 
+// The focused view is where a press arrives first. Handling it on the
+// view controller meant it had already been spent moving focus.
+@interface ArgoCanvasButton : UIButton
+@property (nonatomic, copy) BOOL (^onPress)(UIPressType type);
+@end
+
+@implementation ArgoCanvasButton
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    for (UIPress *press in presses) {
+        if (self.onPress && self.onPress(press.type)) { return; }
+    }
+    [super pressesBegan:presses withEvent:event];
+}
+@end
+
 @interface ArgoWebDocumentViewController ()
 @property (nonatomic, strong) id webView;
 @property (nonatomic, strong) UIView *webHost;
@@ -15,7 +30,7 @@
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
-@property (nonatomic, strong) UIButton *canvas;
+@property (nonatomic, strong) ArgoCanvasButton *canvas;
 @property (nonatomic, strong) UIButton *prevButton;
 @property (nonatomic, strong) UIButton *nextButton;
 @property (nonatomic, strong) UIButton *nightButton;
@@ -48,10 +63,14 @@
     // One focusable thing over the page. The remote talks to the
     // document through it, because tvOS gives a web view no focus of
     // its own and there is nothing in a document to focus on anyway.
-    self.canvas = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.canvas = [ArgoCanvasButton buttonWithType:UIButtonTypeCustom];
     self.canvas.translatesAutoresizingMaskIntoConstraints = NO;
     [self.canvas addTarget:self action:@selector(toggleToolbar)
           forControlEvents:UIControlEventPrimaryActionTriggered];
+    __weak typeof(self) weakSelf = self;
+    self.canvas.onPress = ^BOOL(UIPressType type) {
+        return [weakSelf handlePress:type];
+    };
     [self.view addSubview:self.canvas];
 
     [self buildToolbar];
@@ -64,7 +83,7 @@
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
         [self.toolbar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:40],
-        [self.toolbar.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor constant:-40],
+        [self.toolbar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-40],
         [self.toolbar.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
 
         [self.webHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -82,6 +101,14 @@
     ]];
 
     [self.view bringSubviewToFront:self.toolbar];
+
+    for (NSNumber *dir in @[ @(UISwipeGestureRecognizerDirectionUp),
+                            @(UISwipeGestureRecognizerDirectionDown) ]) {
+        UISwipeGestureRecognizer *sw = [[UISwipeGestureRecognizer alloc]
+                                        initWithTarget:self action:@selector(didSwipe:)];
+        sw.direction = (UISwipeGestureRecognizerDirection)dir.unsignedIntegerValue;
+        [self.canvas addGestureRecognizer:sw];
+    }
 
     UITapGestureRecognizer *menu = [[UITapGestureRecognizer alloc]
                                     initWithTarget:self action:@selector(closeOrHideToolbar)];
@@ -120,9 +147,11 @@
     self.nextButton  = [self barButton:nextTitle action:@selector(goNext)];
     self.nightButton = [self barButton:@"야간" action:@selector(toggleNight)];
 
+    // Controls first. With the filename leading, a long one pushed the
+    // navigation buttons off the right of the screen entirely.
     NSMutableArray *items = [NSMutableArray arrayWithObjects:
-                             self.titleLabel, self.statusLabel,
-                             self.prevButton, self.nextButton, self.nightButton, nil];
+                             self.prevButton, self.nextButton,
+                             self.statusLabel, self.nightButton, nil];
     if (self.isDeck) {
         // pptx-preview does not draw the slide master, so a deck whose
         // theme writes light text loses it against the unpainted page.
@@ -130,10 +159,13 @@
         [items addObject:self.paintButton];
     }
     [items addObject:[self barButton:@"× 닫기" action:@selector(closeNow)]];
+    self.titleLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    [items addObject:self.titleLabel];
 
     self.toolbar = [[UIStackView alloc] initWithArrangedSubviews:items];
     self.toolbar.axis = UILayoutConstraintAxisHorizontal;
     self.toolbar.spacing = 26;
+    self.toolbar.distribution = UIStackViewDistributionFill;
     self.toolbar.alignment = UIStackViewAlignmentCenter;
     self.toolbar.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.toolbar];
@@ -142,10 +174,18 @@
 - (void)setToolbarVisible:(BOOL)visible animated:(BOOL)animated {
     self.toolbarVisible = visible;
     [self.hideTimer invalidate];
+    // A disabled button cannot take focus, so with the toolbar away the
+    // canvas is the only focusable thing and every arrow reaches it.
+    for (UIView *sub in self.toolbar.arrangedSubviews) {
+        if ([sub isKindOfClass:[UIControl class]]) {
+            ((UIControl *)sub).enabled = visible;
+        }
+    }
+    if (!visible) { [self setNeedsFocusUpdate]; [self updateFocusIfNeeded]; }
     void (^apply)(void) = ^{ self.toolbar.alpha = visible ? 1.0 : 0.0; };
     if (animated) { [UIView animateWithDuration:0.2 animations:apply]; } else { apply(); }
     if (visible) {
-        self.hideTimer = [NSTimer scheduledTimerWithTimeInterval:6.0 repeats:NO
+        self.hideTimer = [NSTimer scheduledTimerWithTimeInterval:8.0 repeats:NO
                                                          block:^(NSTimer *t) {
             [self setToolbarVisible:NO animated:YES];
         }];
@@ -154,32 +194,34 @@
 
 - (void)toggleToolbar { [self setToolbarVisible:!self.toolbarVisible animated:YES]; }
 
-- (BOOL)shouldUpdateFocusInContext:(UIFocusUpdateContext *)context {
-    // Focus may only leave the canvas while the toolbar is on screen.
-    if (!self.toolbarVisible && context.nextFocusedView != self.canvas) { return NO; }
-    return YES;
-}
-
 - (NSArray<id<UIFocusEnvironment>> *)preferredFocusEnvironments {
     return @[ self.canvas ];
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self setNeedsFocusUpdate];
+    [self updateFocusIfNeeded];
+}
+
 #pragma mark - Remote
 
-- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
-    BOOL handled = NO;
-    for (UIPress *press in presses) {
-        if (!self.canvas.focused && self.toolbarVisible) { break; }
-        switch (press.type) {
-            case UIPressTypeUpArrow:    [self scrollBy:-420]; handled = YES; break;
-            case UIPressTypeDownArrow:  [self scrollBy:420];  handled = YES; break;
-            case UIPressTypeLeftArrow:  [self goPrev];        handled = YES; break;
-            case UIPressTypeRightArrow: [self goNext];        handled = YES; break;
-            case UIPressTypePlayPause:  [self toggleNight];   handled = YES; break;
-            default: break;
-        }
+- (BOOL)handlePress:(UIPressType)type {
+    // While the toolbar is up, Up is how focus reaches it. Everything
+    // else keeps working, so paging does not need the toolbar dismissed.
+    if (type == UIPressTypeUpArrow && self.toolbarVisible) { return NO; }
+    switch (type) {
+        case UIPressTypeUpArrow:    [self scrollBy:-420]; return YES;
+        case UIPressTypeDownArrow:  [self scrollBy:420];  return YES;
+        case UIPressTypeLeftArrow:  [self goPrev];        return YES;
+        case UIPressTypeRightArrow: [self goNext];        return YES;
+        case UIPressTypePlayPause:  [self toggleNight];   return YES;
+        default: return NO;
     }
-    if (!handled) { [super pressesBegan:presses withEvent:event]; }
+}
+
+- (void)didSwipe:(UISwipeGestureRecognizer *)g {
+    [self scrollBy:(g.direction == UISwipeGestureRecognizerDirectionUp) ? 420 : -420];
 }
 
 - (void)scrollBy:(int)dy {
