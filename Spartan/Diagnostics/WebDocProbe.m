@@ -34,11 +34,12 @@
                          @"6. ↓ 스크롤",
                          @"7. ↑ 스크롤",
                          @"8. 그려졌는지 확인",
+                         @"9. DOM 구조 보기",
                          @"0. 로그 저장",
                          @"× 닫기" ];
     NSArray *sels = @[ @"doCheckBundle", @"doFindDocument", @"doPrepareWebView",
                        @"doRenderDocument", @"doPageInfo", @"doScrollDown",
-                       @"doScrollUp", @"doVerifyPainted", @"doSaveLog", @"doClose" ];
+                       @"doScrollUp", @"doVerifyPainted", @"doDumpStructure", @"doSaveLog", @"doClose" ];
 
     UIStackView *buttons = [[UIStackView alloc] init];
     buttons.axis = UILayoutConstraintAxisVertical;
@@ -291,7 +292,12 @@
                 " .catch(fail);";
     }
     if ([ext isEqualToString:@"hwp"] || [ext isEqualToString:@"hwpx"]) {
-        return @"new hwpjs.Viewer(document.getElementById('c'),arr);"
+        // HWPViewer's third argument defaults to {type:'binary'}, which
+        // means a binary string to the CFB layer underneath — hand it a
+        // Uint8Array and it calls .split("") on it. Say 'array'.
+        return @"try{ new hwpjs.Viewer(document.getElementById('c'),arr,{type:'array'}); }"
+                "catch(e1){ try{ new hwpjs.Viewer(document.getElementById('c'),window.__argoDoc,{type:'base64'}); }"
+                "catch(e2){ fail(e2); return; } }"
                 "done(document.querySelectorAll('.hwpjs-page,.hwpjs-viewer,div').length+' 요소');";
     }
     return @"fail('지원하지 않는 형식입니다');";
@@ -516,6 +522,48 @@
     [self log:@"평균밝기 %.3f, 색 %lu가지", sum / (double)(w*h), (unsigned long)colours.count];
     [self log:colours.count <= 2 ? @"→ 단색. 그려지지 않았습니다."
                                  : @"→ ★ 문서가 그려졌습니다 ★"];
+}
+
+#pragma mark - 9. The shape of what was built
+
+// A pane that is blank while the DOM is full of shapes and text means
+// the content is somewhere, in some colour, clipped by something. Only
+// the tree says which.
+- (void)doDumpStructure {
+    [self log:@"\n--- 9. DOM 구조 ---"];
+    [self js:@"(function(){var out=[];"
+           " function walk(el,d){"
+           "  if(d>3||out.length>13)return;"
+           "  var r=el.getBoundingClientRect(),cs=getComputedStyle(el);"
+           "  var cls=(typeof el.className==='string'&&el.className)?"
+           "    '.'+el.className.trim().split(/\\s+/).slice(0,2).join('.'):'';"
+           "  out.push('  '.repeat(d)+'<'+el.tagName.toLowerCase()+cls+'> '"
+           "   +Math.round(r.width)+'x'+Math.round(r.height)"
+           "   +' @'+Math.round(r.left)+','+Math.round(r.top)"
+           "   +' ov:'+cs.overflow+' pos:'+cs.position"
+           "   +' n='+el.children.length);"
+           "  for(var i=0;i<Math.min(el.children.length,3);i++)walk(el.children[i],d+1);"
+           " }"
+           " walk(document.getElementById('c'),0);"
+           " return out.join('\\n');})()"
+        then:^(id r) { [self log:@"%@", r]; }];
+
+    [self js:@"(function(){"
+           " var all=document.querySelectorAll('#c *');"
+           " for(var i=0;i<all.length;i++){"
+           "  var e=all[i];"
+           "  if(e.children.length===0&&(e.textContent||'').trim().length>1){"
+           "   var cs=getComputedStyle(e),r=e.getBoundingClientRect();"
+           "   return '첫 글자요소 <'+e.tagName.toLowerCase()+'> \"'"
+           "    +(e.textContent||'').trim().slice(0,24)+'\" '"
+           "    +Math.round(r.width)+'x'+Math.round(r.height)"
+           "    +' @'+Math.round(r.left)+','+Math.round(r.top)"
+           "    +' | '+cs.color+' '+cs.fontSize"
+           "    +' vis:'+cs.visibility+' op:'+cs.opacity+' disp:'+cs.display;"
+           "  }"
+           " }"
+           " return '글자를 가진 요소가 없습니다 (도형으로만 그려졌습니다)';})()"
+        then:^(id r) { [self log:@"%@", r]; }];
 }
 
 #pragma mark - 0
