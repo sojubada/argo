@@ -1,14 +1,23 @@
 # webdoc
 
 JavaScript renderers, bundled so the Apple TV never has to reach the
-network to open a document. Copied from npm tarballs, unmodified.
+network to open a document.
 
-| file | package | version | licence |
-|---|---|---|---|
-| jszip.min.js | jszip | 3.10.2 | MIT / GPLv3 |
-| docx-preview.min.js | docx-preview | 0.4.1 | Apache-2.0 |
+| file | package | version | licence | global |
+|---|---|---|---|---|
+| jszip.min.js | jszip | 3.10.2 | MIT | `JSZip` |
+| docx-preview.min.js | docx-preview | 0.4.1 | Apache-2.0 | `docx` |
+| xlsx.min.js | xlsx (SheetJS) | 0.18.5 | Apache-2.0 | `XLSX` |
+| pptx.min.js | pptx-preview | 1.0.7 | ISC | `pptxPreview` |
+| hwp.min.js | hwp.js | 0.0.3 | Apache-2.0 | `hwpjs` |
 
-These exist because the tvOS SDK ships no WebKit, but the device does:
-the probe in Spartan/Diagnostics reached it through dlopen, loaded a
-page, ran JavaScript and came back with pixels. Everything in this
-folder runs inside that web view.
+jszip, docx-preview and xlsx ship browser builds and are copied from
+the npm tarball unmodified. pptx-preview and hwp.js ship only ES
+modules against Node built-ins, so they were bundled with esbuild into
+IIFEs with `fs`, `stream`, `events`, `buffer` and `util` stubbed —
+nothing in the rendering path uses them.
+
+These exist because the tvOS SDK ships no WebKit, but the device does.
+A .docx of 52 KB renders in 0.89 seconds with its highlighting intact,
+which is the fidelity that re-typesetting the text was always going to
+lose.

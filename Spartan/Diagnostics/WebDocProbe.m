@@ -12,6 +12,8 @@
 @property (nonatomic, strong) UIView *webHost;
 @property (nonatomic, strong) id webView;
 @property (nonatomic, strong) NSString *foundDocument;
+@property (nonatomic, strong) NSArray<NSString *> *foundDocuments;
+@property (nonatomic, assign) NSUInteger documentIndex;
 @property (nonatomic, strong) NSString *stageDir;
 @property (nonatomic, assign) NSTimeInterval renderStart;
 @end
@@ -25,7 +27,7 @@
     self.view.backgroundColor = [UIColor blackColor];
 
     NSArray *titles = @[ @"1. 번들 자원 확인",
-                         @"2. 문서 찾기",
+                         @"2. 문서 찾기 / 다음 문서",
                          @"3. 웹뷰 준비",
                          @"4. 문서 렌더링",
                          @"5. 쪽 정보 읽기",
@@ -116,7 +118,8 @@
 - (void)doCheckBundle {
     [self log:@"\n--- 1. 번들 자원 ---"];
     NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *n in @[ @"jszip.min", @"docx-preview.min" ]) {
+    for (NSString *n in @[ @"jszip.min", @"docx-preview.min",
+                           @"xlsx.min", @"pptx.min", @"hwp.min" ]) {
         NSString *p = [self bundledScript:n];
         if (p) {
             unsigned long long sz = [[fm attributesOfItemAtPath:p error:nil] fileSize];
@@ -130,12 +133,24 @@
 #pragma mark - 2. Find something real to open
 
 - (void)doFindDocument {
+    // Pressing again steps to the next document rather than rescanning,
+    // so one button covers "what is here" and "try that other one".
+    if (self.foundDocuments.count > 0) {
+        self.documentIndex = (self.documentIndex + 1) % self.foundDocuments.count;
+        self.foundDocument = self.foundDocuments[self.documentIndex];
+        [self log:@"\n→ 다음 문서 (%lu/%lu): %@",
+            (unsigned long)(self.documentIndex + 1),
+            (unsigned long)self.foundDocuments.count,
+            self.foundDocument.lastPathComponent];
+        return;
+    }
+
     [self log:@"\n--- 2. 문서 찾기 ---"];
+    NSArray *wanted = @[ @"docx", @"xlsx", @"pptx", @"hwp", @"hwpx" ];
     NSArray *roots = @[ @"/var/mobile/Media",
                         NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                             NSUserDomainMask, YES).firstObject,
-                        @"/var/mobile/Media/Downloads",
-                        NSTemporaryDirectory() ];
+                        @"/var/mobile/Media/Downloads" ];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray *hits = [NSMutableArray array];
 
@@ -144,29 +159,46 @@
         NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
         NSString *sub;
         int scanned = 0;
-        while ((sub = [en nextObject]) && scanned < 4000) {
+        while ((sub = [en nextObject]) && scanned < 6000) {
             scanned++;
             if (en.level > 3) { [en skipDescendants]; continue; }
-            NSString *ext = sub.pathExtension.lowercaseString;
-            if ([ext isEqualToString:@"docx"]) {
+            if ([sub.lastPathComponent hasPrefix:@"."]) { continue; }
+            if ([wanted containsObject:sub.pathExtension.lowercaseString]) {
                 [hits addObject:[root stringByAppendingPathComponent:sub]];
-                if (hits.count >= 8) { break; }
+                if (hits.count >= 20) { break; }
             }
         }
-        if (hits.count >= 8) { break; }
+        if (hits.count >= 20) { break; }
     }
 
     if (hits.count == 0) {
-        [self log:@"docx 파일을 못 찾았습니다."];
-        [self log:@"→ Argo 파일 탐색기로 /var/mobile/Media 에 .docx 를 하나 두십시오."];
+        [self log:@"문서를 못 찾았습니다."];
+        [self log:@"→ /var/mobile/Media 에 docx·xlsx·pptx·hwp 를 두십시오."];
         return;
     }
-    for (NSString *h in hits) {
-        unsigned long long sz = [[fm attributesOfItemAtPath:h error:nil] fileSize];
-        [self log:@"%@  (%llu KB)", h.lastPathComponent, sz / 1024];
+
+    // Group the log by format so it is obvious what is missing.
+    for (NSString *ext in wanted) {
+        NSArray *ofType = [hits filteredArrayUsingPredicate:
+                           [NSPredicate predicateWithBlock:^BOOL(NSString *p, NSDictionary *b) {
+            return [p.pathExtension.lowercaseString isEqualToString:ext];
+        }]];
+        if (ofType.count == 0) {
+            [self log:@".%@ : 없음", ext];
+            continue;
+        }
+        [self log:@".%@ : %lu개", ext, (unsigned long)ofType.count];
+        for (NSString *h in ofType) {
+            unsigned long long sz = [[fm attributesOfItemAtPath:h error:nil] fileSize];
+            [self log:@"   %@  (%llu KB)", h.lastPathComponent, sz / 1024];
+        }
     }
+
+    self.foundDocuments = hits;
+    self.documentIndex = 0;
     self.foundDocument = hits.firstObject;
-    [self log:@"→ 첫 번째 것을 씁니다: %@", self.foundDocument];
+    [self log:@"→ 1/%lu: %@", (unsigned long)hits.count, self.foundDocument.lastPathComponent];
+    [self log:@"→ 이 버튼을 다시 누르면 다음 문서로 넘어갑니다."];
 }
 
 #pragma mark - 3. A web view that may read from disk
@@ -222,80 +254,121 @@
 
 #pragma mark - 4. The question that matters
 
+// Which scripts each format needs, in load order.
+- (NSArray<NSString *> *)scriptsForExtension:(NSString *)ext {
+    if ([ext isEqualToString:@"docx"]) { return @[ @"jszip.min", @"docx-preview.min" ]; }
+    if ([ext isEqualToString:@"xlsx"]) { return @[ @"xlsx.min" ]; }
+    if ([ext isEqualToString:@"pptx"]) { return @[ @"pptx.min" ]; }
+    if ([ext isEqualToString:@"hwp"] || [ext isEqualToString:@"hwpx"]) { return @[ @"hwp.min" ]; }
+    return @[];
+}
+
+// The page's body differs per format; everything around it does not.
+- (NSString *)renderScriptForExtension:(NSString *)ext {
+    if ([ext isEqualToString:@"docx"]) {
+        return @"docx.renderAsync(blob,document.getElementById('c'),null,"
+                "{className:'docx',inWrapper:true,breakPages:true,experimental:true,useBase64URL:true})"
+                " .then(function(){done(document.querySelectorAll('section.docx').length+' 쪽');})"
+                " .catch(fail);";
+    }
+    if ([ext isEqualToString:@"xlsx"]) {
+        // SheetJS gives values and merges but not cell styling, so the
+        // grid is drawn here rather than taken from the file.
+        return @"var wb=XLSX.read(arr,{type:'array'});"
+                "var out='';"
+                "wb.SheetNames.forEach(function(name,i){"
+                "  var ws=wb.Sheets[name];"
+                "  out+=\"<h2>\"+(i+1)+\". \"+name+\"</h2>\";"
+                "  out+=XLSX.utils.sheet_to_html(ws,{editable:false});"
+                "});"
+                "document.getElementById('c').innerHTML=out;"
+                "done(wb.SheetNames.length+' 시트: '+wb.SheetNames.join(', '));";
+    }
+    if ([ext isEqualToString:@"pptx"]) {
+        return @"var p=pptxPreview.init(document.getElementById('c'),{width:1100,height:619});"
+                "Promise.resolve(p.preview(arr.buffer))"
+                " .then(function(){done(document.querySelectorAll('.pptx-preview-slide,section,svg').length+' 요소');})"
+                " .catch(fail);";
+    }
+    if ([ext isEqualToString:@"hwp"] || [ext isEqualToString:@"hwpx"]) {
+        return @"new hwpjs.Viewer(document.getElementById('c'),arr);"
+                "done(document.querySelectorAll('.hwpjs-page,.hwpjs-viewer,div').length+' 요소');";
+    }
+    return @"fail('지원하지 않는 형식입니다');";
+}
+
 - (void)doRenderDocument {
     [self log:@"\n--- 4. 문서 렌더링 ---"];
     if (!self.webView) { [self log:@"3번을 먼저."]; return; }
     if (!self.foundDocument) { [self log:@"2번을 먼저."]; return; }
 
+    NSString *ext = self.foundDocument.pathExtension.lowercaseString;
+    NSArray *scripts = [self scriptsForExtension:ext];
+    if (scripts.count == 0) { [self log:@".%@ 는 아직 지원하지 않습니다.", ext]; return; }
+    [self log:@"형식 .%@ — %@", ext, [scripts componentsJoinedByString:@", "]];
+
     NSFileManager *fm = [NSFileManager defaultManager];
+    if (self.stageDir) { [fm removeItemAtPath:self.stageDir error:nil]; }
     NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:
                      [NSString stringWithFormat:@"argo_webdoc_%@", [[NSUUID UUID] UUIDString]]];
     [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     self.stageDir = dir;
 
-    for (NSString *n in @[ @"jszip.min", @"docx-preview.min" ]) {
+    NSMutableString *tags = [NSMutableString string];
+    for (NSString *n in scripts) {
         NSString *src = [self bundledScript:n];
         if (!src) { [self log:@"번들에 %@.js 가 없습니다.", n]; return; }
         [fm copyItemAtPath:src
-                    toPath:[dir stringByAppendingPathComponent:
-                            [n stringByAppendingString:@".js"]]
+                    toPath:[dir stringByAppendingPathComponent:[n stringByAppendingString:@".js"]]
                      error:nil];
+        [tags appendFormat:@"<script src='%@.js'></script>", n];
     }
 
-    // file:// pages are not allowed to fetch their siblings, so the
-    // document travels as a script the page is permitted to load.
     NSData *doc = [NSData dataWithContentsOfFile:self.foundDocument];
     if (!doc) { [self log:@"문서를 읽지 못했습니다."]; return; }
     [self log:@"문서 %lu KB 를 base64 로 싣습니다…", (unsigned long)(doc.length / 1024)];
 
-    NSString *b64 = [doc base64EncodedStringWithOptions:0];
-    NSString *dataJS = [NSString stringWithFormat:@"window.__argoDoc=\"%@\";", b64];
+    NSString *dataJS = [NSString stringWithFormat:@"window.__argoDoc=\"%@\";",
+                        [doc base64EncodedStringWithOptions:0]];
     [dataJS writeToFile:[dir stringByAppendingPathComponent:@"data.js"]
              atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
-    NSString *html =
+    NSString *html = [NSString stringWithFormat:
     @"<!doctype html><html><head><meta charset='utf-8'>"
     "<style>"
-    "html,body{margin:0;padding:0;background:#555;}"
+    "html,body{margin:0;padding:0;background:#555;font:20px -apple-system,sans-serif;color:#fff;}"
     ".docx-wrapper{background:#555;padding:20px 0;}"
     ".docx-wrapper>section.docx{box-shadow:0 0 12px rgba(0,0,0,.6);margin-bottom:20px;}"
-    "#err{color:#f66;font:24px -apple-system;padding:20px;white-space:pre-wrap;}"
+    "h2{color:#8cf;margin:16px 12px 6px;font-size:22px;}"
+    "table{border-collapse:collapse;background:#fff;color:#000;margin:0 12px 24px;}"
+    "td,th{border:1px solid #999;padding:4px 10px;font-size:17px;white-space:nowrap;}"
+    "#err{color:#f66;padding:20px;white-space:pre-wrap;}"
     "</style></head><body>"
     "<div id='err'></div><div id='c'></div>"
-    "<script src='jszip.min.js'></script>"
-    "<script src='docx-preview.min.js'></script>"
+    "%@"
     "<script src='data.js'></script>"
     "<script>"
-    "window.__argoState='starting';"
+    "window.__argoState='starting';window.__argoInfo='';"
+    "function done(info){window.__argoInfo=info||'';window.__argoState='done';}"
+    "function fail(e){window.__argoState='error';"
+    " document.getElementById('err').textContent=String(e&&e.stack||e);}"
     "try{"
     " var raw=atob(window.__argoDoc);"
     " var arr=new Uint8Array(raw.length);"
     " for(var i=0;i<raw.length;i++){arr[i]=raw.charCodeAt(i);}"
     " var blob=new Blob([arr]);"
-    " docx.renderAsync(blob,document.getElementById('c'),null,"
-    "   {className:'docx',inWrapper:true,ignoreWidth:false,ignoreHeight:false,"
-    "    breakPages:true,experimental:true,useBase64URL:true})"
-    "  .then(function(){window.__argoState='done';})"
-    "  .catch(function(e){window.__argoState='error';"
-    "    document.getElementById('err').textContent=String(e);});"
-    "}catch(e){window.__argoState='error';"
-    " document.getElementById('err').textContent=String(e);}"
-    "</script></body></html>";
+    " %@"
+    "}catch(e){fail(e);}"
+    "</script></body></html>", tags, [self renderScriptForExtension:ext]];
 
     NSString *htmlPath = [dir stringByAppendingPathComponent:@"shell.html"];
     [html writeToFile:htmlPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
     self.renderStart = [NSDate timeIntervalSinceReferenceDate];
-    NSURL *fileURL = [NSURL fileURLWithPath:htmlPath];
-    NSURL *dirURL  = [NSURL fileURLWithPath:dir isDirectory:YES];
-
-    if ([self.webView respondsToSelector:@selector(loadFileURL:allowingReadAccessToURL:)]) {
-        [self.webView performSelector:@selector(loadFileURL:allowingReadAccessToURL:)
-                           withObject:fileURL withObject:dirURL];
-        [self log:@"loadFileURL 보냄. 그려지기까지 몇 초 걸립니다…"];
-    } else {
-        [self log:@"loadFileURL 이 없어 중단합니다."];
-    }
+    [self.webView performSelector:@selector(loadFileURL:allowingReadAccessToURL:)
+                       withObject:[NSURL fileURLWithPath:htmlPath]
+                       withObject:[NSURL fileURLWithPath:dir isDirectory:YES]];
+    [self log:@"loadFileURL 보냄. 그려지기까지 몇 초 걸립니다…"];
 }
 
 - (void)webView:(id)webView didFinishNavigation:(id)navigation {
@@ -313,14 +386,14 @@
 // renderAsync is a promise, so the page is not finished when the
 // navigation is. Ask it until it says so, and give up rather than hang.
 - (void)pollState:(int)attempt {
-    if (attempt > 40) { [self log:@"30초가 지나도 끝나지 않았습니다."]; return; }
-    [self js:@"window.__argoState + '|' + (document.querySelectorAll('section.docx').length)"
-        then:^(id result) {
+    if (attempt > 60) { [self log:@"45초가 지나도 끝나지 않았습니다."]; return; }
+    [self js:@"window.__argoState + '|' + window.__argoInfo" then:^(id result) {
         NSString *s = [NSString stringWithFormat:@"%@", result];
         if ([s hasPrefix:@"done"]) {
             NSTimeInterval took = [NSDate timeIntervalSinceReferenceDate] - self.renderStart;
-            [self log:@"★ 렌더링 완료 — %.2f초, 쪽 %@개",
-                took, [s componentsSeparatedByString:@"|"].lastObject];
+            NSArray *parts = [s componentsSeparatedByString:@"|"];
+            [self log:@"★ 렌더링 완료 — %.2f초, %@", took,
+                parts.count > 1 ? parts[1] : @""];
             [self log:@"→ 아래 칸을 보십시오. 원본 서식 그대로여야 합니다."];
         } else if ([s hasPrefix:@"error"]) {
             [self js:@"document.getElementById('err').textContent" then:^(id e) {
@@ -356,9 +429,11 @@
     [self js:@"[document.body.scrollHeight, window.innerHeight,"
            " document.querySelectorAll('section.docx').length,"
            " document.querySelectorAll('img').length,"
-           " document.querySelectorAll('table').length].join(' / ')"
+           " document.querySelectorAll('table').length,"
+           " document.querySelectorAll('tr').length,"
+           " document.querySelectorAll('svg,canvas').length].join(' / ')"
         then:^(id r) {
-        [self log:@"전체높이 / 화면높이 / 쪽 / 그림 / 표"];
+        [self log:@"전체높이 / 화면높이 / 쪽 / 그림 / 표 / 행 / 도형"];
         [self log:@"%@", r];
     }];
 }
