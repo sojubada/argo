@@ -37,7 +37,7 @@ final class KeyboardProbeResponder: UIViewController {
         let compress = UIKeyCommand(input: "z",
                                     modifierFlags: [.command, .shift],
                                     action: #selector(probeCompress))
-        let up = UIKeyCommand(input: UIKeyInputUpArrow,
+        let up = UIKeyCommand(input: UIKeyCommand.inputUpArrow,
                               modifierFlags: .command,
                               action: #selector(probeUp))
 
