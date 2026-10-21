@@ -324,10 +324,12 @@
 // until it says it is finished rather than assumed to be.
 - (void)pollReady:(int)attempt {
     if (attempt > 80) { [self showError:@"여는 데 너무 오래 걸립니다."]; return; }
-    [self js:@"window.__argoState+'\\u0001'+(window.__argoInfo||'')+'\\u0001'+(window.__argoErr||'')"
+    // A plain separator, because a universal character name may not
+    // refer to a control character in an Objective-C literal.
+    [self js:@"window.__argoState+'@@'+(window.__argoInfo||'')+'@@'+(window.__argoErr||'')"
          then:^(id result) {
         NSArray *parts = [[NSString stringWithFormat:@"%@", result]
-                          componentsSeparatedByString:@"\u0001"];
+                          componentsSeparatedByString:@"@@"];
         NSString *state = parts.firstObject ?: @"";
         if ([state isEqualToString:@"done"]) {
             [self.spinner stopAnimating];
