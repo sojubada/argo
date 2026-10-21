@@ -13,6 +13,7 @@
 		F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */; };
 		788067B142BB476A813CCC47 /* webdoc in Resources */ = {isa = PBXBuildFile; fileRef = 0088223C4B9D41DAB59EC316 /* webdoc */; };
 		FB208380C5EE4EBE8D3F154B /* WebDocProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA4D1923CBB436EB544EB4C /* WebDocProbeView.swift */; };
+		35F6ECF7073243AA9C2F52CE /* KeyboardProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62239477760F41CEBC855DE2 /* KeyboardProbe.swift */; };
 		B325AFE190E94B1FA33292D6 /* WebDocProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = D917B437B6C841CF8BD444F7 /* WebDocProbe.m */; };
 		DA228CB4A2AFF27B34EF8D06 /* PDFReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA222302DD6E7EA7F6C4FCA3 /* PDFReaderModel.swift */; };
 		DA227E93C5740C7F8D0DC5AE /* PDFPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22CEFF9D8382EBF92BFC6D /* PDFPageRenderer.swift */; };
@@ -96,6 +97,7 @@
 		6EB20E17101440D182E71F24 /* WebKitProbe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebKitProbe.h; sourceTree = "<group>"; };
 		0088223C4B9D41DAB59EC316 /* webdoc */ = {isa = PBXFileReference; lastKnownFileType = folder; name = webdoc; path = Spartan/webdoc; sourceTree = SOURCE_ROOT; };
 		BBA4D1923CBB436EB544EB4C /* WebDocProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDocProbeView.swift; sourceTree = "<group>"; };
+		62239477760F41CEBC855DE2 /* KeyboardProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardProbe.swift; sourceTree = "<group>"; };
 		343134CAB58640EDA258CBBA /* WebDocProbe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebDocProbe.h; sourceTree = "<group>"; };
 		D917B437B6C841CF8BD444F7 /* WebDocProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebDocProbe.m; sourceTree = "<group>"; };
 		5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebKitProbe.m; sourceTree = "<group>"; };
@@ -234,6 +236,7 @@
 				6EB20E17101440D182E71F24 /* WebKitProbe.h */,
 				0088223C4B9D41DAB59EC316 /* webdoc */,
 				BBA4D1923CBB436EB544EB4C /* WebDocProbeView.swift */,
+				62239477760F41CEBC855DE2 /* KeyboardProbe.swift */,
 				343134CAB58640EDA258CBBA /* WebDocProbe.h */,
 				D917B437B6C841CF8BD444F7 /* WebDocProbe.m */,
 				5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */,
@@ -556,6 +559,7 @@
 				FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */,
 				F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */,
 				FB208380C5EE4EBE8D3F154B /* WebDocProbeView.swift in Sources */,
+				35F6ECF7073243AA9C2F52CE /* KeyboardProbe.swift in Sources */,
 				B325AFE190E94B1FA33292D6 /* WebDocProbe.m in Sources */,
 						DA228CB4A2AFF27B34EF8D06 /* PDFReaderModel.swift in Sources */,
 				DA227E93C5740C7F8D0DC5AE /* PDFPageRenderer.swift in Sources */,
