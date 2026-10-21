@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import UIKit
 import Foundation
 import AVKit
 import AVFoundation
@@ -150,6 +151,13 @@ struct ContentView: View {
                     })
                 }
                 HStack {
+                    Button(action: { //quit
+                        quitArgo()
+                    }) {
+                        Image(systemName: "power")
+                            .frame(width: 50, height: 50)
+                    }
+
                     debugMenu
                         .frame(alignment: .leading)
                     HStack {
@@ -1597,6 +1605,23 @@ struct ContentView: View {
     }
     
     @ViewBuilder
+    // The Menu button walks up one folder at a time, so leaving from
+    // somewhere deep means pressing it over and over. Suspending first
+    // gives the same animation as the Home button before the process
+    // goes; if that private selector is ever gone, exit still works.
+    func quitArgo() {
+        let app = UIApplication.shared
+        let suspend = Selector(("suspend"))
+        if app.responds(to: suspend) {
+            app.perform(suspend)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                exit(0)
+            }
+        } else {
+            exit(0)
+        }
+    }
+
     var debugMenu: some View {
         VStack {
 			if E { //i need e
