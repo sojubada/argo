@@ -49,6 +49,7 @@ enum ArgoCommand: String {
     case showHelp
     case goHome
     case goRoot
+    case undo
 
     static let notification = Notification.Name("ArgoKeyCommandNotification")
 
@@ -85,6 +86,7 @@ enum ArgoCommand: String {
         case .showHelp:          return "단축키 도움말"
         case .goHome:            return "미디어 폴더로"
         case .goRoot:            return "최상위로"
+        case .undo:              return "되돌리기 (이동·이름)"
         }
     }
 
@@ -145,6 +147,8 @@ enum ArgoCommand: String {
         case .showHelp:          return ("/", .command)
         case .goHome:            return ("h", [.command, .shift])
         case .goRoot:            return ("/", [.command, .shift])
+        // ⌘Z는 모든 프로그램에서 되돌리기다. 압축은 ⌘⇧Z로 뒀다.
+        case .undo:              return ("z", .command)
         }
     }
 
@@ -153,7 +157,7 @@ enum ArgoCommand: String {
         ("이동", [.goUp, .goBack, .goForward, .goHome, .goRoot, .focusPathField, .refresh]),
         ("두 칸", [.toggleDualPane, .switchPane, .copyToOtherPane, .moveToOtherPane, .syncPanes]),
         ("고르기", [.toggleMultiSelect, .selectAll]),
-        ("파일", [.newFolder, .newFile, .rename, .fileInfo, .deleteSelection, .compress, .extractArchive]),
+        ("파일", [.newFolder, .newFile, .rename, .fileInfo, .deleteSelection, .compress, .extractArchive, .undo]),
         ("보기", [.toggleHidden, .sortByName, .sortBySize, .sortByDate, .sortByKind, .reverseSort, .search]),
         ("도움말", [.showHelp])
     ]

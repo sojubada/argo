@@ -23,6 +23,7 @@ struct ContentView: View {
     @StateObject var leftPane: FilePaneModel
     @StateObject var rightPane: FilePaneModel
     @State var activeSide: PaneSide = .left
+    @StateObject var transfer = PaneTransfer()
     /// 두 칸을 함께 보일지. 끄면 한 칸만 나와 기존 동작과 같다.
     @AppStorage("dualPaneEnabled") var dualPaneEnabled = false
 
@@ -1103,6 +1104,26 @@ struct ContentView: View {
                 KeyboardHelpView(isPresented: $showSubView[39])
             })
             
+            // 진행률. 큰 파일을 복사하는 동안 멈춘 것처럼 보이면 안 된다.
+            if transfer.isRunning {
+                VStack(spacing: 16) {
+                    Text(transfer.currentName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    ProgressView(value: transfer.progress)
+                        .frame(width: 600)
+                    Text("\(transfer.completed) / \(transfer.total)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button(action: { transfer.cancel() }) {
+                        Text("취소")
+                    }
+                }
+                .padding(40)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(16)
+            }
+
             // 배너
             if showSafetyBanner {
                 VStack {
@@ -1407,6 +1428,8 @@ struct ContentView: View {
         case .reverseSort:
             pane.ascending.toggle()
             pane.applySortAndFilter()
+        case .undo:
+            undoLastAction()
 
         case .focusPathField:
             // 경로 칸은 TextField라 포커스를 코드로 줄 수 없다.
@@ -1488,31 +1511,51 @@ struct ContentView: View {
             return
         }
 
+        // 큰 파일을 복사하는 동안 화면이 멈추면 안 된다. 뒷줄에서 돌리고 진행률만 올린다.
         let destination = otherPane.directory
-        switch FileGuard.authorize(action: move ? "move" : "copy",
-                                   paths: sources.map { destination + ($0 as NSString).lastPathComponent }) {
-        case .failure(let err):
-            alertTitle = move ? "이동이 차단되었습니다" : "복사가 차단되었습니다"
-            alertMsg = err.localizedDescription
+        let destinationPane = otherPane
+        let sourcePane = pane
+        transfer.run(sources: sources,
+                     destination: destination,
+                     move: move,
+                     onBlocked: { reason in
+                        alertTitle = move ? "이동이 차단되었습니다" : "복사가 차단되었습니다"
+                        alertMsg = reason
+                        showAlert = true
+                     },
+                     onFinish: { done, failed in
+                        destinationPane.updateFiles()
+                        if move { sourcePane.updateFiles() }
+                        sourcePane.multiSelect = false
+                        if !failed.isEmpty {
+                            alertTitle = "일부를 옮기지 못했습니다"
+                            alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
+                            showAlert = true
+                        }
+                     })
+    }
+
+    /// 마지막 이동·이름 변경을 되돌린다.
+    func undoLastAction() {
+        guard transfer.canUndo else {
+            alertTitle = "되돌릴 작업이 없습니다"
+            alertMsg = "이동과 이름 바꾸기만 되돌릴 수 있습니다."
             showAlert = true
             return
-        case .success:
-            break
         }
-
-        for source in sources {
-            let name = (source as NSString).lastPathComponent
-            let target = destination + name
-            if move {
-                RootHelperActs.mv(source, target)
-            } else {
-                RootHelperActs.cp(source, target)
+        transfer.undoLast(onBlocked: { reason in
+            alertTitle = "되돌리기가 차단되었습니다"
+            alertMsg = reason
+            showAlert = true
+        }, onFinish: { ok in
+            leftPane.updateFiles()
+            rightPane.updateFiles()
+            if !ok {
+                alertTitle = "되돌리지 못했습니다"
+                alertMsg = "원래 자리에 같은 이름이 있거나 경로가 사라졌습니다."
+                showAlert = true
             }
-        }
-
-        otherPane.updateFiles()
-        if move { pane.updateFiles() }
-        pane.multiSelect = false
+        })
     }
 
     /// 활성 칸을 반대 칸과 같은 폴더로 보낸다. 양쪽을 맞춰 볼 때 쓴다.
