@@ -11,4 +11,5 @@
 #import "WebDocProbe.h"
 #import "PrintProbe.h"
 #import "ArgoTheme.h"
+#import "AirDropBridge.h"
 #import "WebDocumentView.h"

@@ -45,6 +45,9 @@
 @property (nonatomic, assign) BOOL isNight;
 @property (nonatomic, assign) BOOL slidePainted;
 @property (nonatomic, assign) BOOL toolbarVisible;
+/// 보이는 것과 입력을 받는 것은 다릅니다. 열자마자 버튼이 포커스를
+/// 가져가면 화살표가 버튼 사이만 오가고 쪽은 꼼짝도 하지 않습니다.
+@property (nonatomic, assign) BOOL toolbarInteractive;
 @property (nonatomic, strong) NSTimer *hideTimer;
 @end
 
@@ -239,36 +242,54 @@
 }
 
 - (void)setToolbarVisible:(BOOL)visible animated:(BOOL)animated {
+    [self setToolbarVisible:visible interactive:NO animated:animated];
+}
+
+- (void)setToolbarVisible:(BOOL)visible
+              interactive:(BOOL)interactive
+                 animated:(BOOL)animated {
     self.toolbarVisible = visible;
+    self.toolbarInteractive = visible && interactive;
     [self.hideTimer invalidate];
-    // A disabled button cannot take focus, so with the toolbar away the
-    // canvas is the only focusable thing and every arrow reaches it.
+
+    // 꺼진 버튼은 포커스를 못 받습니다. 이것이 캔버스가 화살표를 받는
+    // 유일한 방법입니다.
     for (UIView *sub in self.toolbar.arrangedSubviews) {
         if ([sub isKindOfClass:[UIControl class]]) {
-            ((UIControl *)sub).enabled = visible;
+            ((UIControl *)sub).enabled = self.toolbarInteractive;
         }
     }
-    if (!visible) { [self setNeedsFocusUpdate]; [self updateFocusIfNeeded]; }
+    [self setNeedsFocusUpdate];
+    [self updateFocusIfNeeded];
+
     void (^apply)(void) = ^{
-        self.toolbar.alpha = visible ? 1.0 : 0.0;
-        self.toolbarSurface.alpha = visible ? 1.0 : 0.0;
+        // 보이기만 할 때는 옅게 — 지금 눌리지 않는다는 뜻입니다.
+        CGFloat a = visible ? (self.toolbarInteractive ? 1.0 : 0.55) : 0.0;
+        self.toolbar.alpha = a;
+        self.toolbarSurface.alpha = a;
     };
     if (animated) { [UIView animateWithDuration:0.2 animations:apply]; } else { apply(); }
+
     if (visible) {
-        self.hideTimer = [NSTimer scheduledTimerWithTimeInterval:8.0 repeats:NO
-                                                         block:^(NSTimer *t) {
-            [self setToolbarVisible:NO animated:YES];
+        NSTimeInterval wait = self.toolbarInteractive ? 12.0 : 5.0;
+        self.hideTimer = [NSTimer scheduledTimerWithTimeInterval:wait repeats:NO
+                                                           block:^(NSTimer *t) {
+            [self setToolbarVisible:NO interactive:NO animated:YES];
         }];
     }
 }
 
-- (void)toggleToolbar { [self setToolbarVisible:!self.toolbarVisible animated:YES]; }
+/// 선택 버튼. 도구 모음을 띄우고 포커스를 그쪽으로 넘깁니다.
+- (void)toggleToolbar {
+    [self setToolbarVisible:YES interactive:!self.toolbarInteractive animated:YES];
+}
 
 - (NSArray<id<UIFocusEnvironment>> *)preferredFocusEnvironments {
     // 패널이 열리면 포커스가 그 안에 머물러야 합니다. 뒤에 있는
     // 캔버스로 빠지면 방향키가 문서를 움직여 패널을 쓸 수 없습니다.
     if (self.errorView) { return @[ self.errorView ]; }
     if (self.panelView) { return @[ self.panelView ]; }
+    if (self.toolbarInteractive) { return @[ self.toolbar ]; }
     return @[ self.canvas ];
 }
 
@@ -455,9 +476,9 @@
 #pragma mark - Remote
 
 - (BOOL)handlePress:(UIPressType)type {
-    // While the toolbar is up, Up is how focus reaches it. Everything
-    // else keeps working, so paging does not need the toolbar dismissed.
-    if (type == UIPressTypeUpArrow && self.toolbarVisible) { return NO; }
+    // 네 방향 모두 여기서 받습니다. 도구 모음은 선택 버튼으로만 갑니다 —
+    // 도구 모음을 화면 아래로 옮기면서, 위쪽을 넘겨 줘도 갈 곳이 없어
+    // 아무 일도 일어나지 않게 됐습니다. 쪽 넘김이 안 되던 이유입니다.
     switch (type) {
         case UIPressTypeUpArrow:    [self scrollBy:-420]; return YES;
         case UIPressTypeDownArrow:  [self scrollBy:420];  return YES;
@@ -502,8 +523,11 @@
 - (void)closeOrHideToolbar {
     // 메뉴 버튼은 한 겹씩 벗깁니다. 패널 -> 도구 모음 -> 닫기.
     if (self.panelView) { [self hidePanel]; return; }
-    if (self.toolbarVisible) { [self setToolbarVisible:NO animated:YES]; }
-    else { [self closeNow]; }
+    if (self.toolbarInteractive) {
+        [self setToolbarVisible:NO interactive:NO animated:YES];
+    } else {
+        [self closeNow];
+    }
 }
 
 - (void)closeNow {

@@ -33,6 +33,9 @@ final class ArgoTextReaderController: UIViewController {
     private var toolbar = UIStackView()
     private var statusLabel = UILabel()
     private var toolbarVisible = true
+    /// 보이는 것과 입력을 받는 것은 다르다. 열자마자 버튼이 포커스를
+    /// 가져가면 화살표가 버튼 사이만 오가고 글은 꼼짝도 하지 않는다.
+    private var toolbarInteractive = false
     private var hideTimer: Timer?
 
     private var fontSize: CGFloat = 28
@@ -110,10 +113,12 @@ final class ArgoTextReaderController: UIViewController {
         view.addGestureRecognizer(menu)
 
         loadFile()
-        setToolbarVisible(true, animated: false)
+        setToolbar(visible: true, interactive: false, animated: false)
     }
 
-    override var preferredFocusEnvironments: [UIFocusEnvironment] { [canvas] }
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        toolbarInteractive ? [toolbar] : [canvas]
+    }
 
     // MARK: 읽기
 
@@ -205,8 +210,8 @@ final class ArgoTextReaderController: UIViewController {
     // MARK: 리모컨
 
     private func handlePress(_ type: UIPress.PressType) -> Bool {
-        if type == .upArrow && toolbarVisible { return false }
-
+        // 네 방향 모두 여기서 받는다. 도구 모음은 선택 버튼으로만 간다 —
+        // 화면 아래에 있어서 위쪽을 넘겨 줘 봐야 갈 곳이 없다.
         let page = textView.bounds.height * 0.85
         switch type {
         case .upArrow:    scrollBy(-page);      return true
@@ -233,7 +238,7 @@ final class ArgoTextReaderController: UIViewController {
         fontSize = sizes[(i + 1) % sizes.count]
         UserDefaults.settings.set(Double(fontSize), forKey: "readerFontSize")
         textView.attributedText = styled(textView.text ?? "")
-        setToolbarVisible(true, animated: true)
+        setToolbar(visible: true, interactive: false, animated: true)
         updateStatus()
     }
 
@@ -281,33 +286,45 @@ final class ArgoTextReaderController: UIViewController {
         statusLabel.text = "\(min(100, max(0, percent)))%  ·  \(lineCount)줄  ·  \(Int(fontSize))pt"
     }
 
+    /// 선택 버튼. 도구 모음을 띄우고 포커스를 넘긴다.
     @objc private func toggleToolbar() {
-        setToolbarVisible(!toolbarVisible, animated: true)
+        setToolbar(visible: true, interactive: !toolbarInteractive, animated: true)
     }
 
-    private func setToolbarVisible(_ visible: Bool, animated: Bool) {
+    private func setToolbar(visible: Bool, interactive: Bool, animated: Bool) {
         toolbarVisible = visible
+        toolbarInteractive = visible && interactive
         hideTimer?.invalidate()
+
+        // 꺼진 버튼은 포커스를 못 받는다. 이것이 캔버스가 화살표를 받는
+        // 유일한 방법이다.
         for sub in toolbar.arrangedSubviews {
-            (sub as? UIControl)?.isEnabled = visible
+            (sub as? UIControl)?.isEnabled = toolbarInteractive
         }
-        if !visible { setNeedsFocusUpdate(); updateFocusIfNeeded() }
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
 
         let apply = {
-            self.toolbar.alpha = visible ? 1 : 0
-            self.toolbarSurface.alpha = visible ? 1 : 0
+            let a: CGFloat = visible ? (self.toolbarInteractive ? 1.0 : 0.55) : 0
+            self.toolbar.alpha = a
+            self.toolbarSurface.alpha = a
         }
         if animated { UIView.animate(withDuration: 0.2, animations: apply) } else { apply() }
 
         if visible {
-            hideTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
-                self?.setToolbarVisible(false, animated: true)
+            let wait: TimeInterval = toolbarInteractive ? 12 : 5
+            hideTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
+                self?.setToolbar(visible: false, interactive: false, animated: true)
             }
         }
     }
 
     @objc private func menuPressed() {
-        if toolbarVisible { setToolbarVisible(false, animated: true) } else { closeNow() }
+        if toolbarInteractive {
+            setToolbar(visible: false, interactive: false, animated: true)
+        } else {
+            closeNow()
+        }
     }
 
     @objc private func editNow() {

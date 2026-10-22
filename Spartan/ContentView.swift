@@ -31,6 +31,13 @@ struct ContentView: View {
     }
     @StateObject var transfer = PaneTransfer()
     @StateObject var clipboard = ArgoClipboard()
+    @StateObject var airdrop = AirDropState()
+
+    /// 알림은 한 번만 뜨고 닫히면 지워진다.
+    var airdropFailureBinding: Binding<Bool> {
+        Binding(get: { airdrop.lastFailure != nil },
+                set: { if !$0 { airdrop.lastFailure = nil } })
+    }
     /// 두 칸을 함께 보일지. 끄면 한 칸만 나와 기존 동작과 같다.
     @AppStorage("dualPaneEnabled") var dualPaneEnabled = false
     /// 툴바에 나머지 아이콘을 펼칠지. 기본은 접어 둔다 —
@@ -314,13 +321,31 @@ struct ContentView: View {
                         })
                     })
 
-                    Button(action: { //숨긴 항목
-                        pane.showHidden.toggle()
-                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
-                        pane.applySortAndFilter()
-                    }) {
-                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
-                            .frame(width: 50, height: 50)
+                    // AirDrop. 쓸 수 없는 기기에서는 아예 보이지 않는다 —
+                    // 눌러도 안 되는 버튼을 두는 것보다 없는 편이 낫다.
+                    if airdrop.isAvailable {
+                        Button(action: {
+                            airdrop.toggle()
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                if airdrop.isReceiving {
+                                    // 남은 시간을 같이 보여 준다. 받는 중이면
+                                    // 저절로 늘어나므로 멈춘 것처럼 보이지 않는다.
+                                    Text(airdrop.countdownLabel)
+                                        .font(.caption)
+                                }
+                            }
+                            .frame(height: 50)
+                            .padding(.horizontal, airdrop.isReceiving ? 12 : 0)
+                            .frame(minWidth: 50)
+                            .foregroundColor(airdrop.isReceiving ? Theme.airdropOn : nil)
+                        }
+                        .alert(isPresented: airdropFailureBinding) {
+                            Alert(title: Text("AirDrop"),
+                                  message: Text(airdrop.lastFailure ?? ""),
+                                  dismissButton: .default(Text(NSLocalizedString("DISMISS", comment: ""))))
+                        }
                     }
 
                     Button(action: { //settings
@@ -365,6 +390,15 @@ struct ContentView: View {
                     }
 
                     Group {
+                    Button(action: { //숨긴 항목
+                        pane.showHidden.toggle()
+                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                        pane.applySortAndFilter()
+                    }) {
+                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
+                            .frame(width: 50, height: 50)
+                    }
+
                     Button(action: { //정렬 기준 돌리기. 같은 기준을 다시 누르면 오르내림이 뒤집힌다
                         let keys = SortKey.allCases
                         if let i = keys.firstIndex(of: pane.sort) {
@@ -1659,6 +1693,22 @@ struct ContentView: View {
             more: { index in
                 guard focusItem(index) != nil else { return }
                 showSubView[1] = true
+            },
+            canAirDrop: { index in
+                guard AirDropBridge.isAvailable,
+                      model.masterFiles.indices.contains(index) else { return false }
+                // 폴더는 tvOS 에서 동작이 불확실하다. 압축해서 보내면 된다.
+                return !model.masterFiles[index].name.hasSuffix("/")
+            },
+            airDrop: { index in
+                guard let path = focusItem(index) else { return }
+                AirDropBridge.send(filePath: path) { error in
+                    if let error = error {
+                        alertTitle = "AirDrop"
+                        alertMsg = error.localizedDescription
+                        showAlert = true
+                    }
+                }
             }
         )
     }

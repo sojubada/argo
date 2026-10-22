@@ -21,6 +21,7 @@
 
 /// 차분한 청록. 애플TV의 짙은 바탕에서 초록·파랑보다 눈이 덜 피곤합니다.
 + (UIColor *)accent          { return [UIColor colorWithRed:0.29 green:0.69 blue:0.78 alpha:1.0]; }
++ (UIColor *)airdropOn       { return [UIColor colorWithRed:0.20 green:0.52 blue:0.98 alpha:1.0]; }
 
 + (UIColor *)riskCaution     { return [UIColor colorWithRed:0.95 green:0.73 blue:0.25 alpha:1.0]; }
 + (UIColor *)riskForbidden   { return [UIColor colorWithRed:0.90 green:0.35 blue:0.32 alpha:1.0]; }

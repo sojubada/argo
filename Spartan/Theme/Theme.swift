@@ -23,6 +23,7 @@ enum Theme {
     static var textDisabled: Color    { Color(ArgoTheme.textDisabled()) }
 
     static var accent: Color          { Color(ArgoTheme.accent()) }
+    static var airdropOn: Color       { Color(ArgoTheme.airdropOn()) }
     static var riskCaution: Color     { Color(ArgoTheme.riskCaution()) }
     static var riskForbidden: Color   { Color(ArgoTheme.riskForbidden()) }
     static var danger: Color          { Color(ArgoTheme.danger()) }

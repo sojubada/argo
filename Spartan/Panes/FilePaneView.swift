@@ -51,6 +51,9 @@ struct PaneRowMenu {
     let info: (Int) -> Void
     let delete: (Int) -> Void
     let more: (Int) -> Void
+    /// AirDrop 으로 보낼 수 있는 항목인가 (쓸 수 있는 기기이고, 폴더가 아닐 것).
+    let canAirDrop: (Int) -> Bool
+    let airDrop: (Int) -> Void
 }
 
 @available(tvOS 13.0, *)
@@ -195,6 +198,11 @@ struct FilePaneView: View {
                         }
                         Button(action: { onFocus(); menu.sendToOtherPane(index, true) }) {
                             Text("반대 칸으로 이동")
+                        }
+                    }
+                    if menu.canAirDrop(index) {
+                        Button(action: { onFocus(); menu.airDrop(index) }) {
+                            Text("AirDrop 으로 보내기")
                         }
                     }
                     Button(action: { onFocus(); menu.rename(index) }) {

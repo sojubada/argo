@@ -37,6 +37,10 @@
 /// 포인트 색. 하나만 씁니다.
 + (UIColor *)accent;
 
+/// AirDrop 이 켜져 있을 때의 파랑. 포인트 색(청록)과 구별되어야 합니다 —
+/// 켜짐은 상태이지 강조가 아닙니다.
++ (UIColor *)airdropOn;
+
 /// 위험도 — 탐색기의 배지와 같은 값을 씁니다.
 + (UIColor *)riskCaution;
 + (UIColor *)riskForbidden;
