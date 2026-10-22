@@ -75,7 +75,17 @@ jobs:
         run: |
           SDK=$(xcrun --sdk appletvos --show-sdk-path)
           echo "=== Looking for each name in the SDK's own headers ==="
-          echo "PRESENT means the tvOS SDK declares it. Nothing else is evidence."
+          echo ""
+          echo "Three verdicts, and the difference between them has already cost"
+          echo "one rewrite and one broken build:"
+          echo ""
+          echo "  USABLE      declared, and not marked unavailable for tvOS."
+          echo "  BLOCKED     declared, but marked API_UNAVAILABLE(tvos) or"
+          echo "              __TVOS_PROHIBITED. The compiler refuses it. The class"
+          echo "              may still exist in the shipped binary, reachable"
+          echo "              through the Objective-C runtime -- that is a separate"
+          echo "              question and only a device probe answers it."
+          echo "  ABSENT      not in the SDK at all."
           echo ""
           IFS=',' read -ra NAMES <<< "${{ inputs.symbols }}"
           for raw in "${NAMES[@]}"; do
@@ -84,11 +94,35 @@ jobs:
             hits=$(grep -rl --include='*.h' --include='*.swiftinterface' \
                      -w "$name" \
                      "$SDK/System/Library/Frameworks" "$SDK/usr/lib/swift" 2>/dev/null | head -4 || true)
-            if [ -n "$hits" ]; then
-              echo "PRESENT  $name"
-              echo "$hits" | sed "s|$SDK|  |"
-            else
+            if [ -z "$hits" ]; then
               echo "ABSENT   $name"
+              echo ""
+              continue
+            fi
+
+            # Read the declaring line and the few around it: the availability
+            # attribute usually sits on the same line or just above.
+            blocked=""
+            for f in $hits; do
+              ctx=$(grep -n -w "$name" "$f" 2>/dev/null | head -3 | cut -d: -f1 | while read -r ln; do
+                      start=$((ln > 3 ? ln - 3 : 1))
+                      sed -n "${start},$((ln + 1))p" "$f"
+                    done)
+              if echo "$ctx" | grep -qE 'API_UNAVAILABLE\([^)]*tvos|__TVOS_PROHIBITED|@available\([^)]*tvOS[^)]*unavailable'; then
+                blocked="$f"
+                break
+              fi
+            done
+
+            if [ -n "$blocked" ]; then
+              echo "BLOCKED  $name"
+              echo "  marked unavailable for tvOS in:"
+              echo "  $blocked" | sed "s|$SDK|  |"
+              echo "  -> the compiler will refuse it. Only a device probe through"
+              echo "     the ObjC runtime can say whether it exists anyway."
+            else
+              echo "USABLE   $name"
+              echo "$hits" | sed "s|$SDK|  |"
             fi
             echo ""
           done

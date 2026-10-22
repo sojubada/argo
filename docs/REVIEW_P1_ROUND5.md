@@ -135,19 +135,52 @@ pendingMessages.append(message)
 |---|---|
 | m1 | `OperationLog.record` 가 기본 경로에 못 쓸 때마다 `createFile` 을 다시 시도합니다. 한 번 실패하면 세션 내내 폴백만 쓰도록 기억해 두십시오 |
 | m2 | `effectivePathForWriteCheck` 가 호출마다 `attributesOfItem` 을 칩니다. 일괄 작업에서 파일 수만큼 디스크를 칩니다 |
-| m3 | `GuardError.isSafeMode` 를 만들어 두고 아무도 안 씁니다. `RootHelperActs.checkAuth` 가 아직 `localizedDescription.contains("Safe Mode")` 로 영어를 찾고 있어 **영원히 false** 입니다. `isSafeMode` 로 바꾸십시오 |
+| m3 | ~~`checkAuth` 가 영어 `"Safe Mode"` 문자열을 찾고 있다~~ — **제 오독입니다.** 그 코드는 없습니다. `GuardError.isSafeMode` 가 아무 데서도 안 쓰이는 죽은 코드인 것만 사실이고, 해로울 건 없습니다 |
+
+---
+
+## 참고 — 공개 소스 파일 관리자와 비교
+
+Filza 는 **소스가 없습니다.** TIGI Software 의 상용 비공개 앱이고, GitHub 의 `FilzaJailedDS` · `Filza26Maker` 같은 저장소는 **배포 바이너리를 IPA 로 재포장하는 도구**지 소스가 아닙니다.
+
+소스가 공개된 동급 앱은 `NSAntoine/Santander`(Swift, 샌드박스 밖 파일 관리자) 하나입니다. 받아서 봤습니다. **삭제가 이게 전부입니다.**
+
+```swift
+struct Delete: ParsableCommand {
+    @Argument var paths: [URL]
+    func run() throws {
+        for path in paths {
+            try FileManager.default.removeItem(at: path)
+        }
+    }
+}
+```
+
+경로 검사도, 심볼릭 링크 선처리도, Zip Slip 검사도 없습니다. `/System` · `..` · `safeMode` 전부 검색했지만 한 건도 안 나옵니다. 압축 해제도 `Compression.shared.extract(path:to:)` 한 줄입니다.
+
+**R2 에 대한 함의:** 루트 헬퍼까지 갖춘 앱이 `removeItem` 을 그냥 부릅니다. 폴더 안의 심볼릭 링크를 미리 끊는 코드를 **아무도 쓰지 않습니다.** 정황 증거일 뿐이지만 "지우는" 쪽에 무게가 실립니다. 확정은 여전히 위의 30초 실기기 시험입니다 — `removeItem` 이 tvOS 16 에서 하위 링크를 따라가는지는 남의 코드로 알 수 없습니다.
+
+**R1 에 대한 함의:** 없습니다. Santander 가 Zip Slip 을 안 막는다고 우리 검사가 괜찮아지지 않습니다. **검사가 없는 것보다 열려 있는 검사가 더 나쁩니다** — 막고 있다고 착각하게 만들기 때문입니다.
 
 ---
 
 ## 정리
 
-**반영했습니다.** 빌드 통과, `main` 병합 완료.
+**4차 패키지 반영 완료**, 빌드 통과, `main` 병합 완료.
 
-다만 **R1 과 R2 는 릴리즈 전에 고치는 쪽을 권합니다.**
+**R1 · R1-b · R3 · R4 · R5 · R6 은 제미나이에게 넘기지 않고 제가 직접 고쳤습니다** (`review/p1-round5`). `return .success(())` 를 `.failure` 로 바꾸는 수준이라 왕복 비용이 수정 비용보다 큽니다. 내용은 위 각 항목 그대로입니다.
 
-- **R1** 은 S4 를 무력화할 수 있습니다. 방어를 만들어 놓고 문이 열려 있는 상태입니다
-- **R2 는 이번에 새로 생긴 자료 손실 위험입니다.** 이전에 없던 것이라, 고치기 전에는 **심볼릭 링크가 든 폴더를 옮기거나 지우지 마십시오**
+| 항목 | 처리 |
+|---|---|
+| R1 (fail-open) | `refuseUncheckable` 하나로 모아 **막는** 쪽으로 전환 |
+| R1-b (순회 종료) | `readStatus` 보존, `ARCHIVE_EOF` 일 때만 `.success` |
+| R3 (하드링크) | `archive_entry_hardlink` 를 심볼릭 링크와 같은 검사에 포함 |
+| R4 (메시지 적재) | 건수는 따로 세고 메시지는 20개 상한 |
+| R5 (디바운스) | 첫 차단으로부터 2초 상한 추가 |
+| R6 (로그 용량) | 1MB 초과 시 뒤쪽 절반만 유지, 폴백 전환 1회 기억 |
 
-R2 는 위의 30초 시험으로 "지울 것인가 고칠 것인가"가 바로 갈립니다. **그 시험부터 해보시는 것을 권합니다.**
+**남은 것은 R2 하나입니다.** 이것만 결정이 안 됩니다.
 
-R3~R6 은 다음 묶음으로 미뤄도 됩니다. 2단계와 같이 하셔도 되고요.
+**R2 는 이번에 새로 생긴 자료 손실 위험입니다.** 고치기 전에는 **심볼릭 링크가 든 폴더를 옮기거나 지우지 마십시오.** 위의 30초 실기기 시험으로 "지울 것인가 고칠 것인가"가 바로 갈립니다.
+
+제미나이는 **R2 를 기다리지 않고 2단계로 가면 됩니다.** R2 는 `TrashManager` 안의 함수 하나라 2단계(`ContentView` 분해, 이중 창)와 겹치지 않습니다.

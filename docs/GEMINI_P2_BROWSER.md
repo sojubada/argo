@@ -120,6 +120,19 @@ SwiftUI에서 리스폰더 체인에 끼려면 `UIHostingController` 를 상속�
 
 ---
 
+## 1단계 안전장치와 맞물리는 지점
+
+1단계가 끝났습니다. **2-B 에서 반대 칸 복사·이동을 만들 때 관문을 우회하지 마십시오.**
+
+- 모든 파괴적 쓰기는 **`FileGuard.authorize`** 를 지나야 합니다. 새 경로를 만들면 그 경로도 지나야 합니다
+- 압축 해제는 `FileGuard.validateArchiveBeforeExtract` 입니다. **이 함수는 이제 검사할 수 없으면 막습니다**(실패 시 통과가 아닙니다). 두 칸에서 압축을 다룰 때 `.failure` 를 삼키지 말고 사용자에게 보여주십시오
+- 차단은 `Notification.Name.fileGuardBlocked` 로 올라옵니다. `ContentView` 가 이미 받고 있으니, **두 칸으로 바꿀 때 이 `.onReceive` 를 떨어뜨리지 마십시오**
+- 위험도 표시(초록·노랑·빨강)가 파일 목록에 있습니다. **`FilePaneView` 로 옮길 때 같이 옮기십시오.** 칸이 둘이면 더 필요합니다 — 어느 칸이 시스템 폴더인지 한눈에 보여야 합니다
+
+**R2 는 기다리지 마십시오.** `TrashManager` 안의 함수 하나(`unlinkNestedSymlinksIfDirectory`)이고 실기기 시험 결과를 기다리는 중입니다. 2단계와 겹치지 않습니다.
+
+---
+
 ## 분량이 많습니다 — 나눠서 주십시오
 
 한 번에 다 주지 마십시오. 검수가 밀립니다.

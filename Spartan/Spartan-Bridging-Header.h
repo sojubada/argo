@@ -9,4 +9,6 @@
 #import "TSUtil.h"
 #import "WebKitProbe.h"
 #import "WebDocProbe.h"
+#import "PrintProbe.h"
+#import "ArgoTheme.h"
 #import "WebDocumentView.h"

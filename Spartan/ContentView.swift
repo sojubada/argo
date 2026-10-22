@@ -19,12 +19,68 @@ import AssetCatalogWrapper
 import SVGWrapper
 
 struct ContentView: View {
-    @State var directory: String
+    // 칸 둘. 왼쪽/오른쪽이 각자 폴더와 선택을 들고 있다.
+    @StateObject var leftPane: FilePaneModel
+    @StateObject var rightPane: FilePaneModel
+    @State var activeSide: PaneSide = .left
+    @StateObject var transfer = PaneTransfer()
+    /// 두 칸을 함께 보일지. 끄면 한 칸만 나와 기존 동작과 같다.
+    @AppStorage("dualPaneEnabled") var dualPaneEnabled = false
+
+    /// 활성 칸. 툴바의 모든 동작은 이쪽을 대상으로 한다.
+    var pane: FilePaneModel { activeSide == .left ? leftPane : rightPane }
+    /// 반대 칸. 붙여넣기가 가는 곳이다.
+    var otherPane: FilePaneModel { activeSide == .left ? rightPane : leftPane }
+
+    // 아래 네 개는 기존 코드가 쓰던 이름 그대로다. 안쪽만 활성 칸을 가리킨다.
+    // 구조체이지만 pane이 클래스 참조라 nonmutating set이 성립한다.
+    var directory: String {
+        get { pane.directory }
+        nonmutating set { pane.directory = newValue }
+    }
+    var masterFiles: [SpartanFile] {
+        get { pane.masterFiles }
+        nonmutating set { pane.masterFiles = newValue }
+    }
+    var multiSelect: Bool {
+        get { pane.multiSelect }
+        nonmutating set { pane.multiSelect = newValue }
+    }
+    var multiSelectFiles: [String] {
+        get { pane.multiSelectFiles }
+        nonmutating set { pane.multiSelectFiles = newValue }
+    }
+    var allWereSelected: Bool {
+        get { pane.allWereSelected }
+        nonmutating set { pane.allWereSelected = newValue }
+    }
+    var currentDirRisk: PathRisk { pane.currentDirRisk }
+
+    var directoryBinding: Binding<String> {
+        Binding(get: { pane.directory }, set: { pane.directory = $0 })
+    }
+    var multiSelectBinding: Binding<Bool> {
+        Binding(get: { pane.multiSelect }, set: { pane.multiSelect = $0 })
+    }
+    var multiSelectFilesBinding: Binding<[String]> {
+        Binding(get: { pane.multiSelectFiles }, set: { pane.multiSelectFiles = $0 })
+    }
+
+    init(directory: String = "/var/mobile/Media/",
+         isRootless: Bool = false,
+         scaleFactor: CGFloat = 1,
+         globalAVPlayer: Binding<AVPlayer>) {
+        _leftPane = StateObject(wrappedValue: FilePaneModel(directory: directory))
+        _rightPane = StateObject(wrappedValue: FilePaneModel(directory: directory))
+        _isRootless = State(initialValue: isRootless)
+        _scaleFactor = State(initialValue: scaleFactor)
+        _globalAVPlayer = globalAVPlayer
+    }
+
     @State private var fileInfo: [String] = []
     @State var deleteOverride = false
     @State var E = false
     @State var E2 = false
-    @State var masterFiles: [SpartanFile] = []
     @State var isRootless: Bool
     
     @State var scaleFactor: CGFloat
@@ -35,10 +91,6 @@ struct ContentView: View {
     @State var showAlert = false
     @State var alertTitle = ""
     @State var alertMsg = ""
-    
-    @State var multiSelect = false
-    @State var allWereSelected = false
-    @State var multiSelectFiles: [String] = []
     
     @State var newViewFilePath: String = ""
     @State var newViewArrayNames: [String] = [""]
@@ -52,7 +104,7 @@ struct ContentView: View {
     
     @State var didChangeDir = false
     
-    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 39)
+    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 40)
     //createFileSelectShow = 0
     //contextMenuShow = 1
     //openInMenu = 2
@@ -92,7 +144,7 @@ struct ContentView: View {
     //pdfViewShow = 36
     //trashViewShow = 37
     //officeDocViewShow = 38
-    //batchDeletePreviewShow = 39 (안전장치 오버레이 대신 시트/상태 활용)
+    //keyboardHelpShow = 39
     
     @Binding var globalAVPlayer: AVPlayer 
     @State var isGlobalAVPlayerPlaying = false
@@ -104,20 +156,24 @@ struct ContentView: View {
     
     @State private var isImageSVG: [Bool] = [false, false]
     
-    // Safety Variables
-    @State private var showSafetyBanner = false
-    @State private var safetyBannerRisk: PathRisk = .safe
-    @State private var safetyBannerMsg: String = ""
-    @State private var currentDirRisk: PathRisk = .safe
+    // Safety Variables — 배너는 칸 모델이 들고 있다 (어느 칸이 시스템 폴더인지 보여야 하므로)
+    var showSafetyBanner: Bool { pane.showBanner }
+    var safetyBannerRisk: PathRisk { pane.bannerRisk }
+    var safetyBannerMsg: String { pane.bannerMsg }
     @State private var showBatchDeletePreview = false
     @State private var cautionCountForBatch = 0
     
     var body: some View {
         ZStack {
+            // 화면 바탕. 순검정이 아닌 짙은 차콜 — 순검정은 OLED에서
+            // 패널과 바탕의 경계가 사라집니다.
+            Theme.background
+                .edgesIgnoringSafeArea(.all)
+
             VStack {
                 VStack {
                     HStack { //input directory + refresh
-                    TextField(NSLocalizedString("INPUT_DIRECTORY", comment: "According to all known laws of aviation"), text: $directory, onCommit: {
+                    TextField(NSLocalizedString("INPUT_DIRECTORY", comment: "According to all known laws of aviation"), text: directoryBinding, onCommit: {
                         if directory == "" {
                             directory = "/"
                         }
@@ -149,13 +205,13 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .sheet(isPresented: $showSubView[6], content: {
-                        CreateDirectoryView(directoryPath: $directory, isPresented: $showSubView[6])
+                        CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
                     })
                     .sheet(isPresented: $showSubView[5], content: {
-                        CreateFileView(filePath: $directory, isPresented: $showSubView[5])
+                        CreateFileView(filePath: directoryBinding, isPresented: $showSubView[5])
                     })
                     .sheet(isPresented: $showSubView[20], content: {
-                        CreateSymlinkView(symlinkPath: $directory, isPresented: $showSubView[20])
+                        CreateSymlinkView(symlinkPath: directoryBinding, isPresented: $showSubView[20])
                     })
                 }
                 HStack {
@@ -164,6 +220,84 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "power")
                             .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                    }
+
+                    Button(action: { //두 칸 켜고 끄기
+                        withAnimation { dualPaneEnabled.toggle() }
+                        if dualPaneEnabled && rightPane.masterFiles.isEmpty {
+                            rightPane.updateFiles()
+                        }
+                    }) {
+                        Image(systemName: dualPaneEnabled
+                              ? "rectangle.split.2x1.fill"
+                              : "rectangle.split.2x1")
+                            .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                    }
+
+                    Button(action: { //정렬 기준 돌리기. 같은 기준을 다시 누르면 오르내림이 뒤집힌다
+                        let keys = SortKey.allCases
+                        if let i = keys.firstIndex(of: pane.sort) {
+                            if pane.ascending {
+                                pane.ascending = false
+                                pane.applySortAndFilter()
+                            } else {
+                                setSort(keys[(i + 1) % keys.count])
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: pane.sort.symbol)
+                            Image(systemName: pane.ascending ? "chevron.up" : "chevron.down")
+                        }
+                        .frame(width: 70, height: 50)
+                    }
+
+                    Button(action: { //숨긴 항목
+                        pane.showHidden.toggle()
+                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                        pane.applySortAndFilter()
+                    }) {
+                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
+                            .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                    }
+
+                    Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
+                        showSubView[39] = true
+                    }) {
+                        Image(systemName: "keyboard")
+                            .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                    }
+
+                    if dualPaneEnabled {
+                        Button(action: { //반대 칸으로 복사
+                            copySelectionToOtherPane(move: false)
+                        }) {
+                            Image(systemName: activeSide == .left
+                                  ? "arrow.right.doc.on.clipboard"
+                                  : "arrow.left.circle")
+                                .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                        }
+
+                        Button(action: { //반대 칸으로 이동
+                            copySelectionToOtherPane(move: true)
+                        }) {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                        }
+
+                        Button(action: { //반대 칸을 이 폴더로 맞추기
+                            syncOtherPaneToActive()
+                        }) {
+                            Image(systemName: "equal.square")
+                                .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
+                        }
                     }
 
                     debugMenu
@@ -190,13 +324,16 @@ struct ContentView: View {
                                 if (allWereSelected) {
                                     Image(systemName: "checkmark.circle")
                                         .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                                 } else {
                                     Image(systemName: "circle")
                                         .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                                 }
                             } else {
                                 Image(systemName: "checkmark.circle")
                                     .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                             }
                         }
                         
@@ -220,7 +357,7 @@ struct ContentView: View {
                                     didSearch = false
                                 }
                             }, content: {
-                                SearchView(directory: $directory, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
+                                SearchView(directory: directoryBinding, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
                             }) //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
                             //someday I'll figure it out. It's surprisingly good
                     
@@ -249,7 +386,7 @@ struct ContentView: View {
                                     didChangeDir = false
                                 }
                             }, content: {
-                                MountPointsView(directory: $directory, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
+                                MountPointsView(directory: directoryBinding, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
                             })
 
                             Button(action: { //webdav
@@ -261,7 +398,7 @@ struct ContentView: View {
                             .sheet(isPresented: $showSubView[25], onDismiss: {
                                 updateFiles()
                             }, content: {
-                                WebDAVRootView(directory: $directory, isPresented: $showSubView[25])
+                                WebDAVRootView(directory: directoryBinding, isPresented: $showSubView[25])
                             })
                             
                             /*if #available(tvOS 14.0, *) {
@@ -296,7 +433,7 @@ struct ContentView: View {
                             .sheet(isPresented: $showSubView[16], onDismiss: {
                                 updateFiles() //FavoritesView *can* change directory, but without an updateFiles the changes won't be reflected. it took me awhile to figure this bug out.
                             }, content: {
-                                FavoritesView(directory: $directory, showView: $showSubView[16])
+                                FavoritesView(directory: directoryBinding, showView: $showSubView[16])
                             })
                             .sheet(isPresented: $showSubView[17], content: {
                                 AddToFavoritesView(filePath: newViewFilePath, displayName: newViewFileName, showView: $showSubView[17])
@@ -335,6 +472,7 @@ struct ContentView: View {
                                 ZStack {
                                     Image(systemName: "doc.on.doc")
                                         .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                                     Image(systemName: "arrow.right")
                                         .resizable()
                                         .frame(width: 15, height: 13)
@@ -418,10 +556,10 @@ struct ContentView: View {
                             RenameFileView(fileName: $renameFileCurrentName, newFileName: $renameFileNewName, filePath: $newViewFilePath, isPresented: $showSubView[7])
                         })
                         .sheet(isPresented: $showSubView[8], content: {
-                            MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: $multiSelect, isPresented: $showSubView[8])
+                            MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[8])
                         })
                         .sheet(isPresented: $showSubView[9], content: {
-                            CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: $multiSelect, isPresented: $showSubView[9])
+                            CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[9])
                         })
                         .sheet(isPresented: $showSubView[11], content: {
                             VideoPlayerView(videoPath: $newViewFilePath, videoName: $newViewFileName, isPresented: $showSubView[11], player: globalAVPlayer)
@@ -482,7 +620,7 @@ struct ContentView: View {
                             FontView(filePath: $newViewFilePath, fileName: $newViewFileName) //i was bored i think
                         })
                         .sheet(isPresented: $showSubView[32], content: {
-                            DMGMountView(filePath: newViewFilePath, fileName: newViewFileName, directory: $directory, isPresented: $showSubView[32])
+                            DMGMountView(filePath: newViewFilePath, fileName: newViewFileName, directory: directoryBinding, isPresented: $showSubView[32])
                         })
                         .sheet(isPresented: $showSubView[33], content: {
                             HTMLView(filePath: newViewFilePath, fileName: newViewFileName)
@@ -495,645 +633,38 @@ struct ContentView: View {
                         })
                 }
                 HStack {
-                    List { //directory contents view
-                        if #available(tvOS 14.0, *) {
-                            Button(action: {
-                                goBack()
-                                print(directory)
-                            }) {
-                                HStack {
-                                    Image(systemName: "arrowshape.turn.up.left")
-                                    Text("..") //Originally this was the only way to go back a directory. Using the menu button works now, but it's slower than just spamming this. So I leave it.
-                                }
-                            }
-                            .contextMenu {
-                                Button(action: {
-                                    E.toggle()
-                                }) {
-                                    Text("Toggle Debug")
-                                }
-                                
-                                Button(action: {
-                                    RootHelperActs.rm(directory + metadataName!)
-                                }) {
-                                    Text(localizedString: "CACHE_CLEAR")
-                                }
-                                
-                                Button("Dismiss", action: { } ) //the only way to exit a tvOS context menu is to press a button. nothing else
-                            }
-                        } else {
-                            Button(action: {
-                                goBack()
-                            }) {
-                                HStack {
-                                    Image(systemName: "arrowshape.turn.up.left")
-                                    Text("..")
-                                }
-                            }
+                    // 칸 둘. 활성 칸만 테두리가 켜지고, 툴바의 모든 명령은 그쪽으로 간다.
+                    // 칸 사이 좌우 이동은 tvOS 포커스 엔진이 알아서 한다 — 손대면 싸운다.
+                    if dualPaneEnabled {
+                        HStack(spacing: 12) {
+                            FilePaneView(model: leftPane,
+                                         isActive: activeSide == .left,
+                                         onOpen: { index in openInPane(.left, index: index) },
+                                         onGoUp: { activeSide = .left; leftPane.goUp() },
+                                         onFocus: { activeSide = .left },
+                                         onContextMenu: { index in openContextMenu(.left, index: index) })
+                            FilePaneView(model: rightPane,
+                                         isActive: activeSide == .right,
+                                         onOpen: { index in openInPane(.right, index: index) },
+                                         onGoUp: { activeSide = .right; rightPane.goUp() },
+                                         onFocus: { activeSide = .right },
+                                         onContextMenu: { index in openContextMenu(.right, index: index) })
                         }
-                        ForEach(masterFiles.indices, id: \.self) { index in
-                            if #available(tvOS 14.0, *) { //While the .if modifier does allow displaying on a conditional, it can't be used with if #available as #available is a compile-time check, not a runtime check. Which is annoying because that means a large chunk of this view is duplicated code
-                                Button(action: {
-                                    defaultAction(index: index, isDirectPath: false)
-                                }) {
-                                    HStack {
-                                        if(masterFiles[index].isLoadingFile) {
-                                            ProgressView()
-                                        } else {
-                                            if (multiSelect) {
-                                                Image(systemName: masterFiles[index].isSelected ? "checkmark.circle" : "circle")
-                                                    .transition(.opacity)
-                                            }
-                                            // 위험도 계산 (부모 상속 최적화)
-                                            let isSym = masterFiles[index].fileType == 8
-                                            let itemRisk = PathSafety.fastRisk(parentRisk: currentDirRisk, fullPath: masterFiles[index].fullPath, isSymlink: isSym)
-                                            
-                                            // 위험 배지 UI
-                                            if let symbol = itemRisk.badgeSymbol {
-                                                Image(systemName: symbol)
-                                                    .foregroundColor(itemRisk.badgeColor)
-                                            }
-                                            
-                                            switch masterFiles[index].fileType {
-                                            case 0:
-                                                if (directory == "/Applications/") { //shush.
-                                                    let app = appsManager.application(forBundleURL: URL(fileURLWithPath: masterFiles[index].fullPath))
-                                                    if app != nil {
-                                                        let plistDict = NSDictionary(contentsOfFile: masterFiles[index].fullPath + "Info.plist")
-                                                        let bundleID = plistDict?["CFBundleIdentifier"] as? String ?? "com.apple.TVAppStore" //I know this app will always exist, so I use it as a failover.
-                                                        HStack {
-                                                            let image: UIImage? = appsManager.icon(forApplication: app!)
-                                                            if(image != nil) {
-                                                                Image(uiImage: image!)
-                                                                    .resizable()
-                                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                                    .frame(width: 280 * scaleFactor, height: 168 * scaleFactor)
-                                                            } else {
-                                                                Image("DefaultIcon")
-                                                                    .resizable()
-                                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                                    .frame(width: 280 * scaleFactor, height: 168 * scaleFactor)
-                                                            }
-                                                            VStack(alignment: .leading) {
-                                                                Text(app!.localizedName())
-                                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                                    }
-                                                                    .foregroundColor(.blue)
-                                                                Text(bundleID)
-                                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                                    }
-                                                                Text(removeLastChar(masterFiles[index].name)) //Spartan appends a "/" to every directory element to make other actions easier, but it doesn't look too great when displayed. So removeLastChar just removes the last character in a string (in this case, a slash). no, this wasn't always a function - until beta 2 it was just manual substring stuff on every Text()
-                                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40).foregroundColor(.gray)
-                                                                    }
-                                                                    .foregroundColor(.gray)
-                                                            }
-                                                        }
-                                                    } else {
-                                                        if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 1) {
-                                                            Image(systemName: "folder")
-                                                        } else if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 0) {
-                                                            Image(systemName: "folder.fill")
-                                                        } else {
-                                                            Image(systemName: "folder.badge.questionmark")
-                                                        } //this is a surprisingly useful feature that is one of the first things I implemented. It's subtle but incredibly handy if you realize it - just like the numbers by repos in Sileo that tells you how many packages you have installed. it's funny how many people don't know that that's what it does (i didn't for awhile)
-                                                        Text(removeLastChar(masterFiles[index].name))
-                                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                            } //you'll be seeing this a lot. i might switch it to a separate view modifier that takes a font size as an Int but im lazy and can do that later
-                                                    }
-                                                } else if (directory == "/private/var/containers/Bundle/Application/" || directory == "/private/var/mobile/Containers/Data/Application/" || directory == "/private/var/mobile/Containers/Shared/AppGroup/") {
-                                                    let plistPath: String = masterFiles[index].fullPath + ".com.apple.mobile_container_manager.metadata.plist"
-                                                    if fileManager.fileExists(atPath: plistPath) {
-                                                        let plistDict = NSDictionary(contentsOfFile: plistPath)
-                                                        let bundleID = defineBundleID(plistDict ?? NSDictionary(dictionaryLiteral: ("MCMMetadataIdentifier", "com.whitetailani.Spartan"))) //these optionals are literally never used but otherwise it crashes when you try and open from favorites so L
-                                                        let groupBundleID = plistDict?["MCMMetadataIdentifier"] as? String ?? "com.whitetailani.Spartan"
-                                                        //in every container folder (whether it's the bundle container, data container, or group container) is a file that contains the app's bundle ID. santander macros do support determining an LSApplicationProxy? from bundle/container/data container folder on **iOS** but not tvOS since sandboxing system is different. Reading from bundle ID ensures that the app definitely exists and someone didn't just create a folder in here, so no issues with nil LSApplicationProxy? elements
-                                                        //then the rest of this just reads properties from the LSApplicationProxy.
-                                                        
-                                                        //viewing app icons broke at some point though. not sure why
-                                                        
-                                                        let app = LSApplicationProxy(forIdentifier: bundleID)
-                                                        HStack {
-                                                            let image: UIImage? = appsManager.icon(forApplication: app)
-                                                            if(image != nil) {
-																Image(uiImage: (image ?? UIImage(named: "DefaultIcon"))!)
-                                                                    .resizable()
-                                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                                    .frame(width: 280 * scaleFactor, height: 168 * scaleFactor)
-                                                            } else {
-                                                                Image("DefaultIcon")
-                                                                    .resizable()
-                                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                                    .frame(width: 280 * scaleFactor, height: 168 * scaleFactor)
-                                                            }
-                                                            VStack(alignment: .leading) {
-                                                                Text(app.localizedName())
-                                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                                    }
-                                                                    .foregroundColor(.blue)
-                                                                if (directory == "/private/var/mobile/Containers/Shared/AppGroup/") {
-                                                                    Text(groupBundleID)
-                                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                                        }
-                                                                } else {
-                                                                    Text(bundleID)
-                                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                                        }
-                                                                }
-                                                                Text(removeLastChar(masterFiles[index].name))
-                                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40).foregroundColor(.gray)
-                                                                    }
-                                                                    .foregroundColor(.gray)
-                                                            }
-                                                        }
-                                                    } else {
-                                                        if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 1) {
-                                                            Image(systemName: "folder")
-                                                        } else if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 0) {
-                                                            Image(systemName: "folder.fill")
-                                                        } else {
-                                                            Image(systemName: "folder.badge.questionmark")
-                                                        } //as you can see, more duplicated code. i love tvos 13
-                                                        Text(removeLastChar(masterFiles[index].name))
-                                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                            }
-                                                    }
-                                                } else {
-                                                    if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 1) {
-                                                        Image(systemName: "folder")
-                                                            .foregroundColor(itemRisk == .forbidden ? .red : .cyan)
-                                                    } else if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 0) {
-                                                        Image(systemName: "folder.fill")
-                                                            .foregroundColor(itemRisk == .forbidden ? .red : .cyan)
-                                                    } else {
-                                                        Image(systemName: "folder.badge.questionmark")
-                                                            .foregroundColor(itemRisk == .forbidden ? .red : .cyan)
-                                                    } //It's a small thing but useful. Spartan will check if a directory has contents or not and display a filled or empty folder based on that. If it doesn't know, it will display a question mark (which usually means you don't have permission to access it)
-                                                    
-                                                    //future me wants you to know i forgot i wrote comments. im currently doing nothing in my CS class so I'm actually documenting/explaining stuff for once.
-                                                    //the person behind me is getting confused by string arrays help
-                                                    Text(removeLastChar(masterFiles[index].name))
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                        }
-                                                }
-											//the rest of this switch case is incredibly simple and basically the same thing, just the Image changes. I would just keep the text the same but I can't due to directories.
-                                            case 1:
-                                                Image(systemName: "waveform")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 2:
-                                                Image(systemName: "video")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 3:
-                                                Image(systemName: "photo")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 4:
-                                                Image(systemName: "doc.text")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 5.1:
-                                                Image(systemName: "list.bullet")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 5.9:
-                                                Image(systemName: "list.number")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 6:
-                                                Image(systemName: "doc.zipper")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 7:
-                                                Image(systemName: "terminal")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 8:
-                                                Image(systemName: "link")
-                                                if(FileInfo.isDirectory(filePath: masterFiles[index].fullPath)) {
-                                                    Text(removeLastChar(masterFiles[index].name))
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                        }
-                                                } else {
-                                                    Text(masterFiles[index].name)
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                        }
-                                                }
-                                                /*this handling is done in case a symlink points to a file and not a directory.
-                                                early with symlink support, I assumed symlinks all pointed to directories and it broke BADLY*/
-                                            case 9:
-                                                Image(systemName: "archivebox")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 10:
-                                                Image(systemName: "tray.full")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 11:
-                                                Image(systemName: "textformat")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 12:
-												Image(systemName: "photo.fill")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 13:
-												Image(systemName: "externaldrive")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 14:
-												Image(systemName: "safari")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 15:
-												Image(systemName: "doc.richtext")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 16:
-												Image(systemName: "doc.text.magnifyingglass")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            default:
-                                                Image(systemName: "doc")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            }
-                                        }
-                                    }
-                                }
-                                .contextMenu {
-                                    Button(action: {
-                                        newViewFileIndex = index
-                                        newViewFileName = masterFiles[index].name
-                                        showSubView[3] = true
-                                    }) {
-                                        Text(NSLocalizedString("INFO", comment: "there is no way a bee should be able to fly."))
-                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                            }
-                                    }
-                                    
-                                    Button(action: {
-                                        newViewFilePath = directory
-                                        renameFileCurrentName = masterFiles[index].name
-                                        renameFileNewName = masterFiles[index].name
-                                        showSubView[7] = true //In early development I just created new variables for stuff like this. i then switched to a unified newViewFilePath + newViewFileName set, but this is a bit before that and I legitimately do not know how I set up renaming files. i don't want to touch it, since it works.
-                                    }) {
-                                        Text(NSLocalizedString("RENAME", comment: "Its wings are too small to get its fat little body off the ground."))
-                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                            }
-                                    }
-                                    
-                                    Button(action: {
-                                        newViewFilePath = directory
-                                        newViewArrayNames = [masterFiles[index].name]
-                                        newViewFileIndex = index
-                                        showSubView[2] = true
-                                    }) {
-                                        Text(NSLocalizedString("OPENIN", comment: "The bee, of course, flies anyway"))
-                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                            }
-                                    }
-                                    
-                                    if(directory == "/private/var/mobile/Media/.Trash/"){
-                                        Button(action: {
-                                            if TrashManager.shared.deletePathDirectly(masterFiles[index].fullPath) {
-                                                updateFiles()
-                                            }
-                                        }) {
-                                            Text(NSLocalizedString("DELETE", comment: "because bees don't care what humans think is impossible."))
-                                                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                }
-                                        }
-                                    } else if (directory == "/private/var/mobile/Media/" && masterFiles[index].name == ".Trash/") {
-                                        Button(action: {
-                                            _ = TrashManager.shared.emptyAll()
-                                            updateFiles()
-                                        }) {
-                                            Text(NSLocalizedString("TRASHYEET", comment: "Yellow, black. Yellow, black."))
-                                                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                }
-                                        }
-                                    } else {
-                                        Button(action: {
-                                            if TrashManager.shared.moveToTrash(path: masterFiles[index].fullPath) {
-                                                updateFiles()
-                                            }
-                                        }) {
-                                            Text(NSLocalizedString("GOTOTRASH", comment: "Yellow, black. Yellow, black."))
-                                                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                }
-                                        }
-                                    }
-                                    if(deleteOverride) { //this never activates, but I leave it in just in case I ever change how this works
-                                        Button(action: {
-                                            RootHelperActs.rm(masterFiles[index].fullPath)
-                                            masterFiles.remove(at: index)
-                                        }) {
-                                            Text(NSLocalizedString("DELETE", comment: "Ooh, black and yellow!"))
-                                                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                }
-                                        }
-                                    }
-                                    
-                                    Button(action: {
-                                        showSubView[17] = true
-                                        newViewFilePath = masterFiles[index].fullPath
-                                        if masterFiles[index].name.hasSuffix("/") {
-                                            newViewFileName = masterFiles[index].name
-                                        } else {
-                                            newViewFileName = masterFiles[index].name
-                                        }
-                                        UserDefaults.favorites.synchronize()
-                                    }) {
-                                        Text(NSLocalizedString("FAVORITESADD", comment: "Let's shake it up a little."))
-                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                            }
-                                    }
-                                    
-                                    Button(action: {
-                                        newViewFilePath = directory
-                                        newViewArrayNames = [masterFiles[index].name]
-                                        showSubView[8] = true
-                                    }) {
-                                        Text(NSLocalizedString("MOVETO", comment: "Barry! Breakfast is ready!"))
-                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                            }
-                                    }
-                                    
-                                    Button(action: {
-                                        newViewFilePath = directory
-                                        newViewArrayNames = [masterFiles[index].name]
-                                        showSubView[9] = true
-                                    }) {
-                                        Text(NSLocalizedString("COPYTO", comment: "Coming!"))
-                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                            }
-                                    }
-                                    
-                                    Button(NSLocalizedString("DISMISS", comment: "Hang on a second.")) { }
-                                }
-                            } else { //this is the tvOS 13 code. Tapping on an object opens up a select menu since there's no context menus on tvOS 13. You can do the default action, which is the Open button. Then the rest of the context menu is shown in a Sheet
-                            
-                            //future me wants you to know that i *still* don't really test this. i bought a TV HD to put on 13.4.8 but it came on 14.7 and signed into hulu and prime video so im not downgrading it since i also need a 14 test device (my 14.3 tv 4k 1st gen doesn't work since it won't enter dfu and thus won't jb)
-                            
-                            //most of the code is actually just copy and pasted, so older comments are duplicated as well. i just changed how it's handled slightly
-                                Button(action: {
-                                    newViewFilePath = directory
-                                    newViewFileName = masterFiles[index].name
-                                    newViewFileIndex = index
-                                    showSubView[1] = true
-                                }) {
-                                    HStack {
-                                        if (multiSelect) {
-                                            Image(systemName: masterFiles[index].isSelected ? "checkmark.circle" : "circle")
-                                        }
-                                        if (directory == "/Applications/") {
-                                            let app = appsManager.application(forBundleURL: URL(fileURLWithPath: masterFiles[index].fullPath))
-                                            Text(app!.localizedName())
-                                        } else if (directory == "/private/var/containers/Bundle/Application/" || directory == "/private/var/mobile/Containers/Data/Application/" || directory == "/private/var/mobile/Containers/Shared/AppGroup/") {
-                                            let plistDict = NSDictionary(contentsOfFile: masterFiles[index].fullPath + ".com.apple.mobile_container_manager.metadata.plist")
-                                            let bundleID = defineBundleID(plistDict ?? NSDictionary(dictionaryLiteral: ("MCMMetadataIdentifier", "com.whitetailani.Spartan"))) //these default values are literally never used but otherwise it crashes when you try and open from favorites for some stupid reason
-                                            let groupBundleID = plistDict?["MCMMetadataIdentifier"] as? String ?? "com.whitetailani.Spartan"
-                                            //in every container folder (whether it's the bundle container, data container, or group container) is a file that contains the app's bundle ID. santander macros do support determining an LSApplicationProxy? from bundle/container/data container folder on **iOS** but not tvOS since sandboxing system is different. Reading from bundle ID ensures that the app definitely exists and someone didn't just create a folder in here, so no issues with nil LSApplicationProxy? elements
-                                            //then the rest of this just reads properties from the LSApplicationProxy.
-                                            
-                                            let app = LSApplicationProxy(forIdentifier: bundleID)
-                                            HStack {
-                                                let image: UIImage? = appsManager.icon(forApplication: app)
-                                                if(image != nil) {
-                                                    Image(uiImage: image!)
-                                                        .resizable()
-                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                        .frame(width: 280 * scaleFactor, height: 168 * scaleFactor)
-                                                } else {
-                                                    Image("DefaultIcon")
-                                                        .resizable()
-                                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                        .frame(width: 280 * scaleFactor, height: 168 * scaleFactor)
-                                                }
-                                                VStack(alignment: .leading) {
-                                                    Text(app.localizedName())
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                        }
-                                                        .foregroundColor(.blue)
-                                                    if (directory == "/private/var/mobile/Containers/Shared/AppGroup/") {
-                                                        Text(groupBundleID)
-                                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                            }
-                                                    } else {
-                                                        Text(bundleID)
-                                                            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                                view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                            }
-                                                    }
-                                                    Text(removeLastChar(masterFiles[index].name)) //Spartan appends a "/" to every directory element to make other actions easier, but it doesn't look too great when displayed. So removeLastChar just removes the last character in a string (in this case, a slash).
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40).foregroundColor(.gray)
-                                                        }
-                                                        .foregroundColor(.gray)
-                                                }
-                                            }
-                                        } else {
-                                            switch masterFiles[index].fileType {
-                                            case 0:
-                                                if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 1) {
-                                                    Image(systemName: "folder")
-                                                } else if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 0) {
-                                                    Image(systemName: "folder.fill")
-                                                } else {
-                                                    Image(systemName: "folder.badge.minus")
-                                                }
-                                                Text(removeLastChar(masterFiles[index].name))
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 1:
-                                                Image(systemName: "waveform.circle")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 2:
-                                                Image(systemName: "video")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 3:
-                                                Image(systemName: "photo")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 4:
-                                                Image(systemName: "doc.text")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 5.1:
-                                                Image(systemName: "list.bullet")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 5.9:
-                                                Image(systemName: "list.number")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 6:
-                                                Image(systemName: "rectangle.compress.vertical")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 7:
-                                                Image(systemName: "terminal")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 8:
-                                                Image(systemName: "link")
-                                                if(FileInfo.isDirectory(filePath: masterFiles[index].fullPath)) {
-                                                    Text(removeLastChar(masterFiles[index].name))
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                        }
-                                                } else {
-                                                    Text(masterFiles[index].name)
-                                                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                        }
-                                                }
-                                            case 9:
-                                                Image(systemName: "archivebox")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 10:
-                                                Image(systemName: "tray.full")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            case 11:
-                                                Image(systemName: "textformat")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 12:
-												Image(systemName: "photo.fill")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 13:
-												Image(systemName: "externaldrive")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 14:
-												Image(systemName: "safari")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 15:
-												Image(systemName: "doc.richtext")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-											case 16:
-												Image(systemName: "doc.text.magnifyingglass")
-												Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            default:
-                                                Image(systemName: "doc")
-                                                Text(masterFiles[index].name)
-                                                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                                                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                                                    }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .alert(isPresented: $showAlert) {
-                            Alert(
-                                title: Text(alertTitle),
-                                message: Text(alertMsg),
-                                dismissButton: .default(Text(NSLocalizedString("DISMISS", comment: "You're sky freaks! I love it! I love it!")))
-                            )
-                        }
+                    } else {
+                        FilePaneView(model: leftPane,
+                                     isActive: true,
+                                     onOpen: { index in openInPane(.left, index: index) },
+                                     onGoUp: { activeSide = .left; leftPane.goUp() },
+                                     onFocus: { activeSide = .left },
+                                     onContextMenu: { index in openContextMenu(.left, index: index) })
                     }
+                }
+                .alert(isPresented: $showAlert) {
+                    Alert(
+                        title: Text(alertTitle),
+                        message: Text(alertMsg),
+                        dismissButton: .default(Text(NSLocalizedString("DISMISS", comment: "You're sky freaks! I love it! I love it!")))
+                    )
                 }
                 .sheet(isPresented: $showSubView[35]) {
                     NotJailbrokenView()
@@ -1434,11 +965,11 @@ struct ContentView: View {
                     }
                 }
                 .sheet(isPresented: $E2) {
-                    EThree(directory: $directory, files: Binding<[String]>(get: { self.masterFiles.map { $0.name } }, set: { newNames in
+                    EThree(directory: directoryBinding, files: Binding<[String]>(get: { self.masterFiles.map { $0.name } }, set: { newNames in
                         for (index, newName) in newNames.enumerated() {
                             self.masterFiles[index].name = newName
                         }
-                    }), multiSelectFiles: $multiSelectFiles, fileWasSelected: Binding<[Bool]>(get: { self.masterFiles.map { $0.isSelected } }, set: { selected in
+                    }), multiSelectFiles: multiSelectFilesBinding, fileWasSelected: Binding<[Bool]>(get: { self.masterFiles.map { $0.isSelected } }, set: { selected in
                         for (index, selected) in selected.enumerated() {
                             self.masterFiles[index].isSelected = selected
                         }
@@ -1575,7 +1106,40 @@ struct ContentView: View {
                     showAlert = true
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: ArgoCommand.notification)) { note in
+                if let raw = note.object as? String {
+                    handleKeyCommand(raw)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ArgoTypeAhead.notification)) { note in
+                if let prefix = note.object as? String {
+                    handleTypeAhead(prefix)
+                }
+            }
+            .sheet(isPresented: $showSubView[39], content: {
+                KeyboardHelpView(isPresented: $showSubView[39])
+            })
             
+            // 진행률. 큰 파일을 복사하는 동안 멈춘 것처럼 보이면 안 된다.
+            if transfer.isRunning {
+                VStack(spacing: 16) {
+                    Text(transfer.currentName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    ProgressView(value: transfer.progress)
+                        .frame(width: 600)
+                    Text("\(transfer.completed) / \(transfer.total)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button(action: { transfer.cancel() }) {
+                        Text("취소")
+                    }
+                }
+                .padding(40)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(16)
+            }
+
             // 배너
             if showSafetyBanner {
                 VStack {
@@ -1686,6 +1250,7 @@ struct ContentView: View {
 				}) {
 					Image(systemName: "ant")
 						.frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
 				}
 			}
 		}
@@ -1804,133 +1369,217 @@ struct ContentView: View {
         }
     }
 
-    func updateFiles() { //credit to ethanrdoesmc for the updates to this. now we have a ds_store clone!
-        guard fileManager.fileExists(atPath: directory + metadataName!) else {
-            masterFiles = oldUpdate()
-            print("file didnt exist")
-            return
-        }
-        guard let encoded = fileManager.contents(atPath: directory + metadataName!) else {
-            masterFiles = oldUpdate()
-            print("file was broke")
-            return
-        } //two guards. one to make sure the file exists, and one to make sure it has data. if it doesn't exist (directory hasn't been cached yet) or is empty (no files in the folder, would be a waste of time to check it), fallback to the old method (which when a directory is empty, is extremely fast).
-        let decoder = JSONDecoder()
-        var decoded: [SpartanFile] = []
-        do {
-            masterFiles = []
-            print(metadataName!)
-            decoded = try decoder.decode([SpartanFile].self, from: encoded)
-            let contents = try FileManager.default.contentsOfDirectory(atPath: directory)
-            var files: [String]
-            files = contents.map { file in
-                let filePath = "/" + directory + "/" + file
-                var isDirectory: ObjCBool = false
-                FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory)
-                return isDirectory.boolValue ? "\(file)/" : file
-            }
-            if let metadataIndex = files.firstIndex(of: metadataName!) {
-                files.remove(at: metadataIndex)
-            } //hide the metadata file from view
-            for i in 0..<files.count {
-                if let j = decoded.map({ $0.name }).firstIndex(of: files[i]) {
-                    masterFiles.append(decoded[j])
-                } else {
-                    masterFiles.append(SpartanFile(name: files[i], fullPath: directory + files[i], isSelected: false, fileType: FileInfo.yandereDevFileType(file: directory + files[i]), isLoadingFile: false))
-                }
-            }
-        } catch {
-            masterFiles = oldUpdate()
-            print(error)
-        }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { //removes files that no longer exist from the cache (so the filesize doesn't grow until you run out of disk space)
-            var decoded2 = decoded
-            for i in 0..<decoded.count {
-                if !(masterFiles.contains(decoded[i])) {
-                    decoded2.remove(at: i)
-                }
-            }
-            let encoder = JSONEncoder()
-            do {
-                let encoded = try encoder.encode(decoded2)
-                try encoded.write(to: URL(fileURLWithPath: tempPath))
-            } catch {
-                print("failed to update and/or save cached metadata: \(error)")
-            }
-            RootHelperActs.mvtemp(directory + metadataName!)
-            multiSelect = false
-            resetMultiSelectArrays()
-        }
-        if UserDefaults.settings.bool(forKey: "autoComplete") && !directory.hasSuffix("/") && FileInfo.isDirectory(filePath: directory) {
-            directory = directory + "/"
-        }
-        if directory == "//" {
-			directory = "/"
-		}
-        
-        // 폴더 위험도 판정 및 1.2초 배너
-        currentDirRisk = PathSafety.risk(of: directory)
-        if currentDirRisk != .safe {
-            safetyBannerRisk = currentDirRisk
-            let isCaution = currentDirRisk == .caution
-            safetyBannerMsg = isCaution ? "주의 — 시스템에 영향을 줄 수 있습니다" : "시스템 폴더 — 쓰기가 차단됩니다"
-            withAnimation { showSafetyBanner = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                withAnimation { showSafetyBanner = false }
-            }
-        }
-        
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-            cacheFolder(directory)
-        }
-    }
     
-    func oldUpdate() -> [SpartanFile] {
-        var new: [SpartanFile] = []
-        do {
-            let contents = try FileManager.default.contentsOfDirectory(atPath: directory)
-            var files: [String]
-            files = contents.map { file in
-                let filePath = "/" + directory + "/" + file
-                var isDirectory: ObjCBool = false
-                FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory)
-                return isDirectory.boolValue ? "\(file)/" : file
-            }
-            if let metadataIndex = files.firstIndex(of: metadataName!) {
-                files.remove(at: metadataIndex)
-            } //hide the metadata file from view
-            for i in 0..<contents.count {
-                new.append(SpartanFile(name: files[i], fullPath: directory + files[i], isSelected: false, fileType: FileInfo.yandereDevFileType(file: directory + files[i]), isLoadingFile: false))
-            }
-            let encoder = JSONEncoder()
-            let encoded = try encoder.encode(new)
-            try encoded.write(to: URL(fileURLWithPath: tempPath))
-            RootHelperActs.mvtemp(directory + metadataName!)
-        } catch {
-            print(error.localizedDescription)
-        }
-        return new
-    }
     
+    
+    // 아래 다섯 개는 칸 모델로 옮겼다. 호출부가 많아 이름만 남겨 넘긴다.
+    func updateFiles() {
+        pane.updateFiles()
+    }
+
+    /// 한 칸 올라가기. 리스트 맨 위의 ".." 과 메뉴 버튼이 쓴다.
     func goBack() {
-        guard directory != "/" else {
+        pane.goUp()
+    }
+
+    func resetMultiSelectArrays() {
+        pane.resetMultiSelectArrays()
+    }
+
+    func iterateOverFileWasSelected(boolToIterate: Bool) {
+        pane.setAllSelected(boolToIterate)
+    }
+
+    // MARK: - 키보드 명령
+
+    /// 리스폰더 체인에서 올라온 단축키를 처리한다.
+    /// 전부 리모컨으로도 되는 일이어야 한다 — 단축키 전용 기능은 만들지 않는다.
+    func handleKeyCommand(_ raw: String) {
+        guard let command = ArgoCommand(rawValue: raw) else { return }
+        switch command {
+        case .refresh:           pane.updateFiles()
+        case .goUp:              pane.goUp()
+        case .goBack:            pane.goBack()
+        case .goForward:         pane.goForward()
+        case .goHome:            pane.navigate(to: "/var/mobile/Media/")
+        case .goRoot:            pane.navigate(to: "/")
+
+        case .toggleDualPane:
+            withAnimation { dualPaneEnabled.toggle() }
+            if dualPaneEnabled && rightPane.masterFiles.isEmpty {
+                rightPane.updateFiles()
+            }
+        case .switchPane:
+            guard dualPaneEnabled else { return }
+            activeSide = activeSide == .left ? .right : .left
+        case .copyToOtherPane:   copySelectionToOtherPane(move: false)
+        case .moveToOtherPane:   copySelectionToOtherPane(move: true)
+        case .syncPanes:         syncOtherPaneToActive()
+
+        case .toggleMultiSelect:
+            withAnimation { pane.multiSelect.toggle() }
+            if !pane.multiSelect { pane.resetMultiSelectArrays() }
+        case .selectAll:
+            pane.multiSelect = true
+            pane.setAllSelected(!pane.allWereSelected)
+
+        // 삭제는 전용 시트가 없다. 선택이 있으면 미리보기를 거쳐 휴지통으로 보낸다.
+        case .deleteSelection:   requestDeleteSelection()
+        case .rename:            showSubView[7] = true   // renameFileShow
+        case .fileInfo:          showSubView[3] = true   // fileInfoShow
+        case .newFolder:         showSubView[6] = true   // createDirectoryShow
+        case .newFile:           showSubView[5] = true   // createFileShow
+        case .compress:          showSubView[14] = true  // compFileShow
+        case .extractArchive:    showSubView[34] = true  // uncompFileShow
+        case .search:            showSubView[19] = true  // searchShow
+        case .showHelp:          showSubView[39] = true  // keyboardHelpShow
+
+        case .toggleHidden:
+            pane.showHidden.toggle()
+            UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+            pane.applySortAndFilter()
+        case .sortByName:        setSort(.name)
+        case .sortBySize:        setSort(.size)
+        case .sortByDate:        setSort(.date)
+        case .sortByKind:        setSort(.kind)
+        case .reverseSort:
+            pane.ascending.toggle()
+            pane.applySortAndFilter()
+        case .undo:
+            undoLastAction()
+
+        case .focusPathField:
+            // 경로 칸은 TextField라 포커스를 코드로 줄 수 없다.
+            // 대신 경로를 알려주는 찾기 시트를 연다.
+            showSubView[19] = true
+        }
+    }
+
+    /// ⌫ 로 삭제. 기존 일괄 삭제 미리보기를 거친다 — 되돌릴 수 없는 일이라 확인을 뺄 수 없다.
+    func requestDeleteSelection() {
+        let targets = pane.selectedPaths.isEmpty
+            ? (newViewFilePath.isEmpty ? [] : [newViewFilePath])
+            : pane.selectedPaths
+        guard !targets.isEmpty else {
+            alertTitle = "삭제할 항목이 없습니다"
+            alertMsg = "먼저 항목을 고르십시오."
+            showAlert = true
             return
         }
-        var components = directory.split(separator: "/")
-        
-        if components.count > 1 {
-            components.removeLast()
-            directory = "/" + components.joined(separator: "/") + "/"
-            if (directory == "//"){
-                directory = "/"
-            } //there's definitely a better way to do this, but I don't know it and this solution works
-        } else {
-            directory = "/"
-        }
-        multiSelect = false
-        updateFiles()
+        cautionCountForBatch = targets.filter { PathSafety.risk(of: $0) != .safe }.count
+        showBatchDeletePreview = true
     }
-    
+
+    /// 같은 기준을 다시 누르면 오르내림이 뒤집힌다. 파인더와 같다.
+    func setSort(_ key: SortKey) {
+        if pane.sort == key {
+            pane.ascending.toggle()
+        } else {
+            pane.sort = key
+            pane.ascending = true
+        }
+        pane.applySortAndFilter()
+    }
+
+    /// 글자를 치면 그 글자로 시작하는 첫 항목을 고른다.
+    func handleTypeAhead(_ prefix: String) {
+        guard let index = pane.indexOfFirstMatch(prefix: prefix) else { return }
+        newViewFilePath = pane.masterFiles[index].fullPath
+        newViewFileName = pane.masterFiles[index].name
+    }
+
+    // MARK: - 두 칸 라우팅
+
+    /// 칸에서 항목을 눌렀을 때. 활성 칸을 먼저 바꿔야 defaultAction이 올바른 칸을 본다.
+    /// directory·masterFiles가 활성 칸을 가리키는 계산 속성이기 때문이다.
+    func openInPane(_ side: PaneSide, index: Int) {
+        activeSide = side
+        let model = side == .left ? leftPane : rightPane
+        guard model.masterFiles.indices.contains(index) else { return }
+
+        // 여러 개 고르는 중이면 열지 않고 선택만 토글한다.
+        if model.multiSelect {
+            model.toggleSelection(at: index)
+            return
+        }
+        defaultAction(index: index, isDirectPath: false)
+    }
+
+    /// 길게 눌러 뜨는 메뉴. 기존 동작 시트(showSubView[1])를 그대로 쓴다.
+    func openContextMenu(_ side: PaneSide, index: Int) {
+        activeSide = side
+        let model = side == .left ? leftPane : rightPane
+        guard model.masterFiles.indices.contains(index) else { return }
+        newViewFilePath = model.masterFiles[index].fullPath
+        newViewFileName = model.masterFiles[index].name
+        showSubView[1] = true
+    }
+
+    /// 활성 칸의 선택을 반대 칸으로 복사한다. 두 칸의 존재 이유다.
+    /// 쓰기는 반드시 FileGuard를 지난다 — 관문을 우회하면 안전장치가 무의미해진다.
+    func copySelectionToOtherPane(move: Bool) {
+        let sources = pane.selectedPaths.isEmpty
+            ? (newViewFilePath.isEmpty ? [] : [newViewFilePath])
+            : pane.selectedPaths
+        guard !sources.isEmpty else {
+            alertTitle = "복사할 항목이 없습니다"
+            alertMsg = "먼저 항목을 고르십시오."
+            showAlert = true
+            return
+        }
+
+        // 큰 파일을 복사하는 동안 화면이 멈추면 안 된다. 뒷줄에서 돌리고 진행률만 올린다.
+        let destination = otherPane.directory
+        let destinationPane = otherPane
+        let sourcePane = pane
+        transfer.run(sources: sources,
+                     destination: destination,
+                     move: move,
+                     onBlocked: { reason in
+                        alertTitle = move ? "이동이 차단되었습니다" : "복사가 차단되었습니다"
+                        alertMsg = reason
+                        showAlert = true
+                     },
+                     onFinish: { done, failed in
+                        destinationPane.updateFiles()
+                        if move { sourcePane.updateFiles() }
+                        sourcePane.multiSelect = false
+                        if !failed.isEmpty {
+                            alertTitle = "일부를 옮기지 못했습니다"
+                            alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
+                            showAlert = true
+                        }
+                     })
+    }
+
+    /// 마지막 이동·이름 변경을 되돌린다.
+    func undoLastAction() {
+        guard transfer.canUndo else {
+            alertTitle = "되돌릴 작업이 없습니다"
+            alertMsg = "이동과 이름 바꾸기만 되돌릴 수 있습니다."
+            showAlert = true
+            return
+        }
+        transfer.undoLast(onBlocked: { reason in
+            alertTitle = "되돌리기가 차단되었습니다"
+            alertMsg = reason
+            showAlert = true
+        }, onFinish: { ok in
+            leftPane.updateFiles()
+            rightPane.updateFiles()
+            if !ok {
+                alertTitle = "되돌리지 못했습니다"
+                alertMsg = "원래 자리에 같은 이름이 있거나 경로가 사라졌습니다."
+                showAlert = true
+            }
+        })
+    }
+
+    /// 활성 칸을 반대 칸과 같은 폴더로 보낸다. 양쪽을 맞춰 볼 때 쓴다.
+    func syncOtherPaneToActive() {
+        otherPane.navigate(to: pane.directory)
+    }
+
     func freeSpace(path: String) -> (double: Double, string: String) {
         do {
             let systemAttributes = try fileManager.attributesOfFileSystem(forPath: path)
@@ -1959,15 +1608,6 @@ struct ContentView: View {
         return (remainingBytes, units[i])
     }
 
-    func resetMultiSelectArrays() {
-        iterateOverFileWasSelected(boolToIterate: false)
-        multiSelectFiles = []
-    }
-    func iterateOverFileWasSelected(boolToIterate: Bool) {
-        for i in 0..<masterFiles.count {
-            masterFiles[i].isSelected = boolToIterate
-        }
-    }
     
     func directPathTypeCheckNewViewFileVariableSetter() { //this function name is very very silly and im leaving it. I think it's used once and it doesn't even work properly. but it uses a feature that literally no one should be using
         if(FileInfo.yandereDevFileType(file: directory) != 0){
