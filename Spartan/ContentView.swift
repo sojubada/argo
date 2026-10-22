@@ -1568,6 +1568,13 @@ struct ContentView: View {
                     goBack()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .fileGuardBlocked)) { note in
+                if let reason = note.object as? String {
+                    alertTitle = "작업 차단됨"
+                    alertMsg = reason
+                    showAlert = true
+                }
+            }
             
             // 배너
             if showSafetyBanner {

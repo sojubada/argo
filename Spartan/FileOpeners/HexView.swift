@@ -109,6 +109,10 @@ struct HexView: View {
 					let newData = Data(fromHexEncodedString: stringArrayToString(inputArray: hexArray)) // convert hex string to data object
 					do {
 						let fullPath = filePath + fileName
+						// Both branches write; the guard has to come before the fork.
+						if case .failure = FileGuard.authorize(action: "write_hex", paths: [fullPath]) {
+							return
+						}
 						if filePathIsNotMobileWritable(fullPath) {
 							try newData?.write(to: URL(fileURLWithPath: tempPath)) // write data to file
 							RootHelperActs.rm(fullPath)

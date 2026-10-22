@@ -100,6 +100,8 @@ enum TarCompressionType {
 }
 
 enum CompressionError: Error {
+    /// FileGuard refused the destination, or the archive tried to escape it.
+    case blockedBySafety(String)
     case incorrectCompressionType
     case archiveCreationFailed
     
@@ -138,6 +140,9 @@ enum CompressionError: Error {
             return LocalizedString("COMPERROR_ARCHIVEFINISHENTRYFAILED")
         case .archiveUnsupportedCompressionType:
             return LocalizedString("COMPERROR_ARCHIVEUNSUPPORTEDCOMPRESSIONTYPE")
+        case .blockedBySafety(let reason):
+            // Already phrased for the person; the guard wrote it.
+            return reason
         }
     }
 }
@@ -169,6 +174,10 @@ struct CompressionFileData {
 
 class Compression {
     class func compressFile(filePath: String, directory: String, destination: String, compType: CompressionType, tarCompType: TarCompressionType) throws {
+        if case .failure(let err) = FileGuard.authorize(action: "compress", paths: [destination]) {
+            throw CompressionError.blockedBySafety(err.localizedDescription)
+        }
+
         switch compType {
         case .tar:
             do {
@@ -192,6 +201,10 @@ class Compression {
     }
     
     class func compressFiles(listOfFiles: [String], directory: String, destination: String, compType: CompressionType, tarCompType: TarCompressionType = .none) throws {
+        if case .failure(let err) = FileGuard.authorize(action: "compress", paths: [destination]) {
+            throw CompressionError.blockedBySafety(err.localizedDescription)
+        }
+
         var stringList = ""
         for file in listOfFiles {
             stringList += "\(file) "
@@ -244,6 +257,13 @@ class Compression {
     }
     
     class func uncompressFile(filePath: String, destination: String, compType: CompressionType) throws {
+        // Entry names are read before a byte is written: an archive that
+        // reaches outside the destination is refused whole.
+        if case .failure(let err) = FileGuard.validateArchiveBeforeExtract(archivePath: filePath,
+                                                                          destinationDir: destination) {
+            throw CompressionError.blockedBySafety(err.localizedDescription)
+        }
+
         switch compType {
         case .zip:
             do {

@@ -337,8 +337,7 @@ class RootHelperActs {
         case .success:
             return true
         case .failure(let err):
-            let msg = (err.localizedDescription.contains("Safe Mode")) ? "Safe Mode Active" : "Forbidden Path"
-            print("[FileGuard Blocked] \(action) on \(paths) - \(msg)")
+            print("[FileGuard Blocked] \(action) on \(paths) - \(err.localizedDescription)")
             return false
         }
     }
@@ -346,37 +345,49 @@ class RootHelperActs {
 	class func rm(_ filePath: String) {
         guard checkAuth(action: "rm", paths: [filePath]) else { return }
 		spawn(command: helperPath, args: ["rm", filePath], env: [], root: true)
-        OperationLog.record(action: "DELETE (root)", path: filePath)
+        if !fileManager.fileExists(atPath: filePath) {
+            OperationLog.record(action: "DELETE (root)", path: filePath)
+        }
 	}
 	
 	class func mv(_ filePath: String, _ fileDest: String) {
         guard checkAuth(action: "mv", paths: [filePath, fileDest]) else { return }
 		spawn(command: helperPath, args: ["mv", filePath, fileDest], env: [], root: true)
-        OperationLog.record(action: "MOVE (root)", path: filePath, destination: fileDest)
+        if fileManager.fileExists(atPath: fileDest) {
+            OperationLog.record(action: "MOVE (root)", path: filePath, destination: fileDest)
+        }
 	}
 	
 	class func cp(_ filePath: String, _ fileDest: String) {
         guard checkAuth(action: "cp", paths: [filePath, fileDest]) else { return }
 		spawn(command: helperPath, args: ["cp", filePath, fileDest], env: [], root: true)
-        OperationLog.record(action: "COPY (root)", path: filePath, destination: fileDest)
+        if fileManager.fileExists(atPath: fileDest) {
+            OperationLog.record(action: "COPY (root)", path: filePath, destination: fileDest)
+        }
 	}
 	
 	class func touch(_ filePath: String) {
         guard checkAuth(action: "touch", paths: [filePath]) else { return }
 		spawn(command: helperPath, args: ["tf", filePath], env: [], root: true)
-        OperationLog.record(action: "TOUCH (root)", path: filePath)
+        if fileManager.fileExists(atPath: filePath) {
+            OperationLog.record(action: "TOUCH (root)", path: filePath)
+        }
 	}
 	
 	class func mkdir(_ filePath: String) {
         guard checkAuth(action: "mkdir", paths: [filePath]) else { return }
 		spawn(command: helperPath, args: ["td", filePath], env: [], root: true)
-        OperationLog.record(action: "MKDIR (root)", path: filePath)
+        if fileManager.fileExists(atPath: filePath) {
+            OperationLog.record(action: "MKDIR (root)", path: filePath)
+        }
 	}
 	
 	class func ln(_ filePath: String, _ fileDest: String) {
         guard checkAuth(action: "ln", paths: [filePath, fileDest]) else { return }
 		spawn(command: helperPath, args: ["ts", filePath, fileDest], env: [], root: true)
-        OperationLog.record(action: "SYMLINK (root)", path: filePath, destination: fileDest)
+        if fileManager.fileExists(atPath: fileDest) {
+            OperationLog.record(action: "SYMLINK (root)", path: filePath, destination: fileDest)
+        }
 	}
 	
 	class func chmod(_ filePath: String, _ perms: Int) {

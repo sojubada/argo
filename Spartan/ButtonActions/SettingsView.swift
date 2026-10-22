@@ -93,7 +93,7 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $showView[5]) {
-                TextView(filePath: "/private/var/mobile/Media/", fileName: "argo-operations.log", isPresented: $showView[5])
+                TextView(filePath: OperationLog.activeLogDirectory, fileName: OperationLog.fileName, isPresented: $showView[5])
             }
             Text(" ")
 			

@@ -62,12 +62,51 @@ final class TrashManager: ObservableObject {
         reload()
     }
 
-    // MARK: - Dual File Operations (FileManager First + RootHelperActs Fallback)
+    // MARK: - Symlink Inspection Helper (S6)
+
+    private func isSymbolicLink(atPath path: String) -> Bool {
+        guard let attrs = try? fileManager.attributesOfItem(atPath: path),
+              let type = attrs[.type] as? FileAttributeType else {
+            return false
+        }
+        return type == .typeSymbolicLink
+    }
+
+    /// 디렉터리 삭제 전 내부의 심볼릭 링크만 먼저 끊어내어 재귀 삭제가 링크 대상을 따라가는 것을 원천 차단
+    private func unlinkNestedSymlinksIfDirectory(_ dirPath: String) {
+        guard !isSymbolicLink(atPath: dirPath) else { return }
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: dirPath, isDirectory: &isDir), isDir.boolValue else { return }
+
+        let dirURL = URL(fileURLWithPath: dirPath)
+        guard let enumerator = fileManager.enumerator(
+            at: dirURL,
+            includingPropertiesForKeys: [.isSymbolicLinkKey],
+            options: [.skipsPackageDescendants]
+        ) else { return }
+
+        var symlinkPaths: [String] = []
+        for case let itemURL as URL in enumerator {
+            if let values = try? itemURL.resourceValues(forKeys: [.isSymbolicLinkKey]),
+               values.isSymbolicLink == true {
+                symlinkPaths.append(itemURL.path)
+                enumerator.skipDescendants()
+            }
+        }
+
+        for sym in symlinkPaths {
+            try? fileManager.removeItem(atPath: sym)
+        }
+    }
+
+    // MARK: - Dual File Operations (FileGuard + FileManager First + RootHelperActs Fallback)
 
     private func robustMkdir(_ path: String) {
         let norm = normalizePath(path)
         guard !norm.isEmpty else { return }
         if fileManager.fileExists(atPath: norm) { return }
+        guard case .success = FileGuard.authorize(action: "mkdir", paths: [norm]) else { return }
+
         do {
             try fileManager.createDirectory(atPath: norm, withIntermediateDirectories: true, attributes: nil)
         } catch {
@@ -77,7 +116,13 @@ final class TrashManager: ObservableObject {
 
     private func robustRemove(_ path: String) {
         let norm = normalizePath(path)
-        guard !norm.isEmpty, fileManager.fileExists(atPath: norm) else { return }
+        guard !norm.isEmpty else { return }
+        guard fileManager.fileExists(atPath: norm) || isSymbolicLink(atPath: norm) else { return }
+        guard case .success = FileGuard.authorize(action: "rm", paths: [norm]) else { return }
+
+        // S6: 폴더 내부 심볼릭 링크 선제거 (단, 대상 자체가 심볼릭 링크면 내부를 건드리지 않고 링크만 제거)
+        unlinkNestedSymlinksIfDirectory(norm)
+
         do {
             try fileManager.removeItem(atPath: norm)
         } catch {
@@ -92,38 +137,43 @@ final class TrashManager: ObservableObject {
         let normSrc = normalizePath(src)
         let normDst = normalizePath(dst)
         guard !normSrc.isEmpty, !normDst.isEmpty else { return false }
-        guard fileManager.fileExists(atPath: normSrc) else { return false }
+        guard fileManager.fileExists(atPath: normSrc) || isSymbolicLink(atPath: normSrc) else { return false }
+        guard case .success = FileGuard.authorize(action: "mv", paths: [normSrc, normDst]) else {
+            return false
+        }
 
-        if fileManager.fileExists(atPath: normDst) {
+        if fileManager.fileExists(atPath: normDst) || isSymbolicLink(atPath: normDst) {
             robustRemove(normDst)
         }
 
         // 1차 시도: FileManager 직접 이동
         do {
             try fileManager.moveItem(atPath: normSrc, toPath: normDst)
-            if fileManager.fileExists(atPath: normDst) {
+            if fileManager.fileExists(atPath: normDst) || isSymbolicLink(atPath: normDst) {
                 return true
             }
         } catch {
             // 2차 시도: RootHelperActs.mv
             RootHelperActs.mv(normSrc, normDst)
-            if fileManager.fileExists(atPath: normDst) {
+            if fileManager.fileExists(atPath: normDst) || isSymbolicLink(atPath: normDst) {
                 return true
             }
         }
 
-        // 3차 시도: 복사 후 원본 삭제 (다른 볼륨/마운트 간 이동 대응)
-        do {
-            try fileManager.copyItem(atPath: normSrc, toPath: normDst)
-            if fileManager.fileExists(atPath: normDst) {
-                robustRemove(normSrc)
-                return !fileManager.fileExists(atPath: normSrc)
-            }
-        } catch {
-            RootHelperActs.cp(normSrc, normDst)
-            if fileManager.fileExists(atPath: normDst) {
-                robustRemove(normSrc)
-                return !fileManager.fileExists(atPath: normSrc)
+        // 3차 시도: 복사 후 원본 삭제 (단, 심볼릭 링크가 아닐 때만)
+        if !isSymbolicLink(atPath: normSrc) {
+            do {
+                try fileManager.copyItem(atPath: normSrc, toPath: normDst)
+                if fileManager.fileExists(atPath: normDst) {
+                    robustRemove(normSrc)
+                    return !fileManager.fileExists(atPath: normSrc)
+                }
+            } catch {
+                RootHelperActs.cp(normSrc, normDst)
+                if fileManager.fileExists(atPath: normDst) {
+                    robustRemove(normSrc)
+                    return !fileManager.fileExists(atPath: normSrc)
+                }
             }
         }
 
@@ -153,7 +203,7 @@ final class TrashManager: ObservableObject {
         guard let indexFile = try? decoder.decode(TrashIndexFile.self, from: data) else {
             return []
         }
-        return indexFile.entries.filter { fileManager.fileExists(atPath: $0.storedPath) }
+        return indexFile.entries.filter { fileManager.fileExists(atPath: $0.storedPath) || isSymbolicLink(atPath: $0.storedPath) }
     }
 
     private func saveIndexedEntries(_ list: [TrashEntry]) {
@@ -164,17 +214,15 @@ final class TrashManager: ObservableObject {
         encoder.dateEncodingStrategy = .secondsSince1970
         guard let data = try? encoder.encode(indexFile) else { return }
 
-        // 1차 시도: 직접 쓰기
         do {
             try data.write(to: URL(fileURLWithPath: Self.indexFilePath))
             return
         } catch {
-            // 2차 시도: 앱 샌드박스 임시 경로 및 전역 tempPath 경유
             let sandboxTemp = (NSTemporaryDirectory() as NSString).appendingPathComponent("argo-trash-index.tmp")
+            defer { try? fileManager.removeItem(atPath: sandboxTemp) }
             if let _ = try? data.write(to: URL(fileURLWithPath: sandboxTemp)) {
                 robustRemove(Self.indexFilePath)
                 _ = robustMove(from: sandboxTemp, to: Self.indexFilePath)
-                robustRemove(sandboxTemp)
                 if fileManager.fileExists(atPath: Self.indexFilePath) {
                     return
                 }
@@ -198,15 +246,17 @@ final class TrashManager: ObservableObject {
             let fullPath = "\(Self.trashRootPath)/\(name)"
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir) else { continue }
+            let isSym = isSymbolicLink(atPath: fullPath)
+            let effectiveIsDir = isSym ? false : isDir.boolValue
             let attrs = try? fileManager.attributesOfItem(atPath: fullPath)
             let modDate = (attrs?[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
-            let itemSize = computeSize(atPath: fullPath, isDirectory: isDir.boolValue)
+            let itemSize = computeSize(atPath: fullPath, isDirectory: effectiveIsDir)
             let entry = TrashEntry(
                 id: "legacy-\(name)",
                 originalPath: "",
                 originalName: name,
                 deletedAt: modDate,
-                isDirectory: isDir.boolValue,
+                isDirectory: effectiveIsDir,
                 size: itemSize
             )
             result.append(entry)
@@ -223,10 +273,17 @@ final class TrashManager: ObservableObject {
             return false
         }
 
-        var isDir: ObjCBool = false
-        guard fileManager.fileExists(atPath: normalized, isDirectory: &isDir) else {
+        // S5: 휴지통 이동 전 FileGuard 승인 검사 (금지 구역 및 안전 모드 차단 + UI 알림)
+        guard case .success = FileGuard.authorize(action: "trash", paths: [normalized]) else {
             return false
         }
+
+        let isSym = isSymbolicLink(atPath: normalized)
+        var isDir: ObjCBool = false
+        guard isSym || fileManager.fileExists(atPath: normalized, isDirectory: &isDir) else {
+            return false
+        }
+        let effectiveIsDir = isSym ? false : isDir.boolValue
 
         ensureDirectories()
 
@@ -234,7 +291,7 @@ final class TrashManager: ObservableObject {
         let originalName = (normalized as NSString).lastPathComponent
         guard !originalName.isEmpty, originalName != "/" else { return false }
 
-        let itemSize = computeSize(atPath: normalized, isDirectory: isDir.boolValue)
+        let itemSize = computeSize(atPath: normalized, isDirectory: effectiveIsDir)
         let uuidDir = "\(Self.itemsRootPath)/\(uuid)"
         let destPath = "\(uuidDir)/\(originalName)"
 
@@ -251,11 +308,12 @@ final class TrashManager: ObservableObject {
             originalPath: normalized,
             originalName: originalName,
             deletedAt: Date(),
-            isDirectory: isDir.boolValue,
+            isDirectory: effectiveIsDir,
             size: itemSize
         )
         currentIndexed.append(newEntry)
         saveIndexedEntries(currentIndexed)
+        OperationLog.record(action: "TRASH", path: normalized, destination: destPath)
         reload()
         return true
     }
@@ -275,32 +333,40 @@ final class TrashManager: ObservableObject {
 
     func restore(_ entry: TrashEntry) -> TrashRestoreResult {
         if entry.isLegacy || entry.originalPath.isEmpty {
-            return .failed("Unknown original location.")
+            return .failed("원래 위치를 알 수 없습니다.")
         }
 
         let sourcePath = entry.storedPath
-        guard fileManager.fileExists(atPath: sourcePath) else {
+        guard fileManager.fileExists(atPath: sourcePath) || isSymbolicLink(atPath: sourcePath) else {
             var currentIndexed = loadIndexedEntries()
             currentIndexed.removeAll { $0.id == entry.id }
             saveIndexedEntries(currentIndexed)
             reload()
-            return .failed("Item no longer exists in Trash.")
+            return .failed("휴지통에 해당 항목이 없습니다.")
         }
 
         let targetOriginal = normalizePath(entry.originalPath)
+
+        switch FileGuard.authorize(action: "restore", paths: [targetOriginal]) {
+        case .failure(let err):
+            return .failed(err.localizedDescription)
+        case .success:
+            break
+        }
+
         let parentDir = (targetOriginal as NSString).deletingLastPathComponent
         ensureDirectoryRecursive(parentDir)
 
         var finalPath = targetOriginal
         var didRename = false
 
-        if fileManager.fileExists(atPath: finalPath) {
+        if fileManager.fileExists(atPath: finalPath) || isSymbolicLink(atPath: finalPath) {
             finalPath = makeNonConflictingPath(for: targetOriginal, isDirectory: entry.isDirectory)
             didRename = true
         }
 
         guard robustMove(from: sourcePath, to: finalPath) else {
-            return .failed("Failed to move item to \(finalPath)")
+            return .failed("복원 이동 실패: \(finalPath)")
         }
 
         let uuidDir = "\(Self.itemsRootPath)/\(entry.id)"
@@ -309,6 +375,7 @@ final class TrashManager: ObservableObject {
         var currentIndexed = loadIndexedEntries()
         currentIndexed.removeAll { $0.id == entry.id }
         saveIndexedEntries(currentIndexed)
+        OperationLog.record(action: "RESTORE", path: sourcePath, destination: finalPath)
         reload()
 
         if didRename {
@@ -322,7 +389,10 @@ final class TrashManager: ObservableObject {
         if entry.isLegacy {
             let target = entry.storedPath
             robustRemove(target)
-            let ok = !fileManager.fileExists(atPath: target)
+            let ok = !fileManager.fileExists(atPath: target) && !isSymbolicLink(atPath: target)
+            if ok {
+                OperationLog.record(action: "DELETE_FOREVER", path: target)
+            }
             reload()
             return ok
         } else {
@@ -332,18 +402,27 @@ final class TrashManager: ObservableObject {
             var currentIndexed = loadIndexedEntries()
             currentIndexed.removeAll { $0.id == entry.id }
             saveIndexedEntries(currentIndexed)
+            if ok {
+                OperationLog.record(action: "DELETE_FOREVER", path: entry.originalPath)
+            }
             reload()
             return ok
         }
     }
 
-    /// 일반 파일 브라우저에서 휴지통을 거치지 않고 즉시 영구 삭제할 때 사용하는 헬퍼
     @discardableResult
     func deletePathDirectly(_ path: String) -> Bool {
         let norm = normalizePath(path)
         guard !norm.isEmpty else { return false }
+        guard case .success = FileGuard.authorize(action: "delete", paths: [norm]) else {
+            return false
+        }
         robustRemove(norm)
-        return !fileManager.fileExists(atPath: norm)
+        let ok = !fileManager.fileExists(atPath: norm) && !isSymbolicLink(atPath: norm)
+        if ok {
+            OperationLog.record(action: "DELETE", path: norm)
+        }
+        return ok
     }
 
     func emptyAll() -> Bool {
@@ -351,6 +430,7 @@ final class TrashManager: ObservableObject {
         robustMkdir(Self.trashRootPath)
         robustMkdir(Self.itemsRootPath)
         saveIndexedEntries([])
+        OperationLog.record(action: "EMPTY_TRASH", path: Self.trashRootPath)
         reload()
         return entries.isEmpty
     }
@@ -406,7 +486,7 @@ final class TrashManager: ObservableObject {
                 candidateName = "\(baseName) (\(counter)).\(ext)"
             }
             let candidatePath = (parent as NSString).appendingPathComponent(candidateName)
-            if !fileManager.fileExists(atPath: candidatePath) {
+            if !fileManager.fileExists(atPath: candidatePath) && !isSymbolicLink(atPath: candidatePath) {
                 return candidatePath
             }
             counter += 1
@@ -414,6 +494,9 @@ final class TrashManager: ObservableObject {
     }
 
     private func computeSize(atPath path: String, isDirectory: Bool) -> Int64 {
+        if isSymbolicLink(atPath: path) {
+            return 0
+        }
         if !isDirectory {
             let attrs = try? fileManager.attributesOfItem(atPath: path)
             if let num = attrs?[.size] as? NSNumber {
@@ -426,15 +509,21 @@ final class TrashManager: ObservableObject {
         }
 
         var total: Int64 = 0
-        if let enumerator = fileManager.enumerator(atPath: path) {
-            for case let subPath as String in enumerator {
-                let fullSubPath = (path as NSString).appendingPathComponent(subPath)
-                let attrs = try? fileManager.attributesOfItem(atPath: fullSubPath)
-                if let type = attrs?[.type] as? FileAttributeType, type == .typeRegular {
-                    if let num = attrs?[.size] as? NSNumber {
-                        total += num.int64Value
-                    } else if let s = attrs?[.size] as? Int64 {
-                        total += s
+        let rootURL = URL(fileURLWithPath: path)
+        // S6: 용량 계산 시에도 심볼릭 링크를 따라가지 않도록 처리
+        if let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+            options: [.skipsPackageDescendants]
+        ) {
+            for case let fileURL as URL in enumerator {
+                if let vals = try? fileURL.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .fileSizeKey]) {
+                    if vals.isSymbolicLink == true {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+                    if vals.isRegularFile == true, let s = vals.fileSize {
+                        total += Int64(s)
                     }
                 }
             }
