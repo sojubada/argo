@@ -1,10 +1,14 @@
 # 1단계 검수 결과
 
+> **2차 개정.** 2차 패키지로 빠졌던 조각 3쌍(`executeBatchDelete`, 위험 배지, 폴더 아이콘 색)이 채워졌습니다.
+> **컴파일 오류는 사라졌습니다.** 아래 C4는 해결 처리했고, 새로 나온 지적 하나(S8)를 더했습니다.
+> 나머지 지적은 그대로입니다.
+
 제미나이 작성분을 `review/p1-safety` 브랜치에 **한 글자도 안 고치고** 적용해 CI를 돌렸습니다.
 
-**교체 블록 7개 전부 저장소와 정확히 한 번씩 일치했습니다.** 형식 규칙은 완벽하게 지키셨습니다. 괄호도 전부 맞습니다.
+**교체 블록 11개 전부 저장소와 정확히 한 번씩 일치했고, 빌드가 통과했습니다.** 형식 규칙은 완벽하게 지키셨습니다.
 
-그런데 **릴리즈하면 안 됩니다.** 삭제와 복사가 죽습니다.
+그런데 **릴리즈하면 안 됩니다.** 빌드가 통과해도 삭제와 복사가 죽습니다.
 
 ---
 
@@ -50,17 +54,11 @@ spawn(command: helperPath, args: ["rm", "-rf", tempPath], ...)  // 임시파일�
 
 ---
 
-## 컴파일 오류
+## 컴파일 오류 — 해결됨
 
-### C4. `executeBatchDelete` 가 없습니다
+### C4. ~~`executeBatchDelete` 가 없습니다~~ — **해결됨 (2차)**
 
-```
-ContentView.swift:1574:25: error: cannot find 'executeBatchDelete' in scope
-```
-
-`BatchDeletePreview` 의 `onConfirm` 에서 부르는데 정의가 패키지에 없습니다. **CI 오류는 이것 하나뿐입니다** — 나머지는 전부 컴파일됩니다.
-
-휴지통 경로와 영구삭제 경로를 둘 다 처리해야 합니다 (원래 버튼이 `directory == "/private/var/mobile/Media/.Trash/"` 로 갈랐습니다).
+1차 패키지에 빠져 있던 조각이었습니다. 2차에서 `trimGroupBundleID` 뒤에 정의가 들어왔고, 휴지통 경로와 영구삭제 경로를 둘 다 가릅니다. **지금은 빌드가 통과합니다.**
 
 ---
 
@@ -182,6 +180,33 @@ if parentRisk == .safe || parentRisk == .forbidden { return parentRisk }
 
 **제안:** 목록에서 심볼릭 링크(`FileInfo` 타입 8)는 `fastRisk` 를 건너뛰고 실제 판정을 하십시오. 폴더 하나에 링크는 보통 몇 개뿐이라 비용이 안 큽니다.
 
+### S8. 루트에서 모든 항목이 빨간 자물쇠로 나옵니다 (2차 추가분)
+
+`fastRisk` 가 `.forbidden` 도 아래로 물려줍니다.
+
+```swift
+if parentRisk == .safe || parentRisk == .forbidden { return parentRisk }
+```
+
+`/` 는 특례로 `.forbidden` 이고 `/private/var` 도 그렇습니다. 그래서 **루트를 열면 `/var` 를 포함한 모든 항목에 빨간 자물쇠가 붙습니다.** `/var/mobile/Media` 는 실제로 safe 인데도, 거기까지 가는 길이 전부 "쓰기 금지"로 보입니다.
+
+`/var/mobile` 에서는 반대로 **모든 항목에 주황 경고 삼각형**이 붙습니다. 그 안의 `Media` 도 포함해서요. 파일 300개짜리 폴더면 삼각형 300개입니다.
+
+배지의 목적은 **눈에 띄는 것**인데, 전부 붙으면 아무것도 안 띄는 것과 같습니다.
+
+**제안:** `.safe` 만 물려주고 나머지는 실제 판정을 하십시오.
+
+```swift
+static func fastRisk(parentRisk: PathRisk, fullPath: String) -> PathRisk {
+    if parentRisk == .safe { return .safe }      // 안전 구역 안은 전부 안전 — 여기가 대부분
+    return risk(of: fullPath)                     // 그 밖은 제대로 판정
+}
+```
+
+안전 구역 밖 폴더는 항목 수가 대개 적어서 비용이 크지 않습니다. 성능을 걱정하신 판단 자체는 맞았습니다 — 300개 폴더는 거의 언제나 `Media` 안이고, 그쪽은 위 코드에서 디스크를 안 칩니다.
+
+덧붙여 **심볼릭 링크는 예외로 두십시오.** 안전 폴더 안의 링크가 `/System` 을 가리켜도 safe 로 보입니다 (S7과 같은 뿌리).
+
 ---
 
 ## 사소한 것
@@ -205,21 +230,23 @@ if parentRisk == .safe || parentRisk == .forbidden { return parentRisk }
 - 배너에 `allowsHitTesting(false)` — 포커스를 안 뺏는 게 맞습니다
 - `fastRisk` 로 스크롤 성능을 걱정한 것 — 문제 인식이 정확했습니다
 - 안전 모드를 **끌 때만** 경고하는 설계 — 맞습니다
+- 위험 배지를 `Image` 로만 넣어 **포커스 규칙을 안 깬 것** — 한 행에 포커스 버튼은 하나여야 합니다
+- 2차에서 빠진 조각을 정확히 채워 주신 것 — `executeBatchDelete` 가 휴지통·영구삭제 두 경로를 제대로 가릅니다
 
 ---
 
 ## 고칠 순서
 
 ```
-1. C1·C2·C3   헬퍼 인자 원복          ← 이게 가장 급합니다
-2. C4         executeBatchDelete 작성  ← 컴파일
-3. S1         안전 모드 기본값         ← 기능의 의미 자체
-4. S2         GuardError: LocalizedError
-5. S3         임시 폴더 경로
-6. S4·S5·S6   나머지 쓰기 경로와 링크 보호
-7. S7·M1~M6
+1. C1·C2·C3      헬퍼 인자 원복            ← 가장 급합니다. 삭제·복사가 죽습니다
+2. S1            안전 모드 기본값           ← 기능의 의미 자체
+3. S2            GuardError: LocalizedError
+4. S3            임시 폴더 경로
+5. S7·S8         배지 판정 (fastRisk)
+6. S4·S5·S6      나머지 쓰기 경로와 링크 보호
+7. M1~M6
 ```
 
-1~4번만 고쳐도 릴리즈해서 시험할 수 있습니다. 5~7번은 그다음에 해도 됩니다.
+**1~4번만 고치면 릴리즈해서 시험할 수 있습니다.** 다섯 줄 남짓입니다. 5~7번은 그다음 묶음으로 하셔도 됩니다.
 
-**확인한 환경:** 브랜치 `review/p1-safety`, CI 실행 39734504765. 릴리즈는 만들지 않았습니다.
+**확인한 환경:** 브랜치 `review/p1-safety`, CI 실행 39735544743 — **빌드 통과, 오류·경고 없음.** 릴리즈는 만들지 않았습니다.
