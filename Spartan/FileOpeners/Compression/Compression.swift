@@ -140,6 +140,9 @@ enum CompressionError: Error {
             return LocalizedString("COMPERROR_ARCHIVEFINISHENTRYFAILED")
         case .archiveUnsupportedCompressionType:
             return LocalizedString("COMPERROR_ARCHIVEUNSUPPORTEDCOMPRESSIONTYPE")
+        case .blockedBySafety(let reason):
+            // Already phrased for the person; the guard wrote it.
+            return reason
         }
     }
 }
