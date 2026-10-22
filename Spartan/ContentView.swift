@@ -114,7 +114,7 @@ struct ContentView: View {
     
     @State var didChangeDir = false
     
-    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 40)
+    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 41)
     //createFileSelectShow = 0
     //contextMenuShow = 1
     //openInMenu = 2
@@ -155,6 +155,7 @@ struct ContentView: View {
     //trashViewShow = 37
     //officeDocViewShow = 38
     //keyboardHelpShow = 39
+    //textReaderShow = 40
     
     @Binding var globalAVPlayer: AVPlayer 
     @State var isGlobalAVPlayerPlaying = false
@@ -686,7 +687,23 @@ struct ContentView: View {
                             HTMLView(filePath: newViewFilePath, fileName: newViewFileName)
                         })
                         .sheet(isPresented: $showSubView[36], content: {
-                            WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[36])
+                            // 네이티브 CGPDFDocument 뷰어. 쪽이 있고 맞춤이 된다.
+                            ArgoPDFReaderView(filePath: newViewFilePath,
+                                              fileName: newViewFileName,
+                                              isPresented: $showSubView[36])
+                                .edgesIgnoringSafeArea(.all)
+                        })
+                        .sheet(isPresented: $showSubView[40], content: {
+                            // 읽기 전용. 편집은 여기서 기존 TextView 로 넘어간다.
+                            ArgoTextReaderView(filePath: newViewFilePath,
+                                               fileName: newViewFileName,
+                                               isPresented: $showSubView[40],
+                                               onEdit: {
+                                                   DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                                       showSubView[4] = true
+                                                   }
+                                               })
+                                .edgesIgnoringSafeArea(.all)
                         })
                         .sheet(isPresented: $showSubView[38], content: {
                             WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
@@ -1390,7 +1407,9 @@ struct ContentView: View {
             case 3:
                 showSubView[12] = true
             case 4:
-                showSubView[4] = true
+                // 편집기가 아니라 읽기 뷰어로 연다. 줄이 접히고 글자 크기를
+                // 바꿀 수 있다 — 로그는 읽는 것이 목적이지 고치는 것이 아니다.
+                showSubView[40] = true
             case 5:
                 showSubView[13] = true
             case 6:

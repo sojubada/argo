@@ -37,6 +37,8 @@
 		61A2A587A0844DD181E5059E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E053B4856F941D3867A064B /* Theme.swift */; };
 		D0EEC548B3514C6A8E4FAA23 /* CompressionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 751647905BE146D390C03713 /* CompressionRunner.swift */; };
 		DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */; };
+		A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */; };
+		17F6A368634645CBB74213DE /* ArgoTextReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */; };
 		552E0935447148F38D7677CE /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5ED9BB984043D88372ED41 /* PathSafety.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
@@ -145,6 +147,8 @@
 		1E053B4856F941D3867A064B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		751647905BE146D390C03713 /* CompressionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressionRunner.swift; sourceTree = "<group>"; };
 		9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoClipboard.swift; sourceTree = "<group>"; };
+		7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoPDFReader.swift; sourceTree = "<group>"; };
+		A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoTextReader.swift; sourceTree = "<group>"; };
 		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
@@ -315,6 +319,15 @@
 			path = Theme;
 			sourceTree = "<group>";
 		};
+		DCBD3C434F6D49EA815B76D9 /* Readers */ = {
+			isa = PBXGroup;
+			children = (
+				7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */,
+				A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */,
+			);
+			path = Readers;
+			sourceTree = "<group>";
+		};
 		E9DA58C85DF94CDB9259C829 /* Safety */ = {
 			isa = PBXGroup;
 			children = (
@@ -413,6 +426,7 @@
 				DA18E847725284F498AD423E /* Trash */,
 				6D80F7E1E21F461FB7B3DEB7 /* Panes */,
 				A099E58FB53C428AB09EA3A8 /* Theme */,
+				DCBD3C434F6D49EA815B76D9 /* Readers */,
 				E9DA58C85DF94CDB9259C829 /* Safety */,
 				204E5A23D3DF4DC2A2BB14E3 /* Diagnostics */,
 				DA171D28474254F303DA124A /* WebDAV */,
@@ -669,6 +683,8 @@
 				61A2A587A0844DD181E5059E /* Theme.swift in Sources */,
 				D0EEC548B3514C6A8E4FAA23 /* CompressionRunner.swift in Sources */,
 				DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */,
+				A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */,
+				17F6A368634645CBB74213DE /* ArgoTextReader.swift in Sources */,
 				552E0935447148F38D7677CE /* PathSafety.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
