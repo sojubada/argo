@@ -26,6 +26,8 @@
 		99F1F287C3EF4AAB8306EF13 /* SafetyBannerAndPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADCEDCFD6F204A7D9855769D /* SafetyBannerAndPreview.swift */; };
 		E96C8414F63C41EFA104F58D /* FileGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F8D541CF4243BCA2A1FBE9 /* FileGuard.swift */; };
 		CB7B3F2DFD55462C97BF83A5 /* OperationLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DBD67D2B634FEFA7C692DB /* OperationLog.swift */; };
+		9B386D02ABE24AE3823B1BAE /* FilePaneModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF97A2086478424897C7C710 /* FilePaneModel.swift */; };
+		7E23C5C26BEC4B3C99A5E849 /* FilePaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EFDA75F20A1401596F97654 /* FilePaneView.swift */; };
 		552E0935447148F38D7677CE /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5ED9BB984043D88372ED41 /* PathSafety.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
@@ -121,6 +123,8 @@
 		ADCEDCFD6F204A7D9855769D /* SafetyBannerAndPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyBannerAndPreview.swift; sourceTree = "<group>"; };
 		80F8D541CF4243BCA2A1FBE9 /* FileGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileGuard.swift; sourceTree = "<group>"; };
 		B5DBD67D2B634FEFA7C692DB /* OperationLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationLog.swift; sourceTree = "<group>"; };
+		DF97A2086478424897C7C710 /* FilePaneModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePaneModel.swift; sourceTree = "<group>"; };
+		4EFDA75F20A1401596F97654 /* FilePaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePaneView.swift; sourceTree = "<group>"; };
 		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
@@ -265,6 +269,15 @@
 			path = Diagnostics;
 			sourceTree = "<group>";
 		};
+		6D80F7E1E21F461FB7B3DEB7 /* Panes */ = {
+			isa = PBXGroup;
+			children = (
+				4EFDA75F20A1401596F97654 /* FilePaneView.swift */,
+				DF97A2086478424897C7C710 /* FilePaneModel.swift */,
+			);
+			path = Panes;
+			sourceTree = "<group>";
+		};
 		E9DA58C85DF94CDB9259C829 /* Safety */ = {
 			isa = PBXGroup;
 			children = (
@@ -360,6 +373,7 @@
 				F8EA28D129F8ACAB0063206D /* FileOpeners */,
 				DA1995C5F5ED9405B6E826B1 /* Favorites */,
 				DA18E847725284F498AD423E /* Trash */,
+				6D80F7E1E21F461FB7B3DEB7 /* Panes */,
 				E9DA58C85DF94CDB9259C829 /* Safety */,
 				204E5A23D3DF4DC2A2BB14E3 /* Diagnostics */,
 				DA171D28474254F303DA124A /* WebDAV */,
@@ -605,6 +619,8 @@
 				99F1F287C3EF4AAB8306EF13 /* SafetyBannerAndPreview.swift in Sources */,
 				E96C8414F63C41EFA104F58D /* FileGuard.swift in Sources */,
 				CB7B3F2DFD55462C97BF83A5 /* OperationLog.swift in Sources */,
+				9B386D02ABE24AE3823B1BAE /* FilePaneModel.swift in Sources */,
+				7E23C5C26BEC4B3C99A5E849 /* FilePaneView.swift in Sources */,
 				552E0935447148F38D7677CE /* PathSafety.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
