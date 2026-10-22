@@ -4,6 +4,7 @@
 //
 
 #import "WebDocumentView.h"
+#import "ArgoTheme.h"
 #import "WebDocumentShell.h"
 #import <dlfcn.h>
 #import <objc/message.h>
@@ -27,6 +28,11 @@
 @property (nonatomic, strong) id webView;
 @property (nonatomic, strong) UIView *webHost;
 @property (nonatomic, strong) UIStackView *toolbar;
+@property (nonatomic, strong) ArgoSurfaceView *toolbarSurface;
+@property (nonatomic, strong) UIView *loadingView;
+@property (nonatomic, strong) UIView *errorView;
+@property (nonatomic, strong) UIView *panelView;
+@property (nonatomic, strong) UILabel *loadingTitle;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
@@ -54,10 +60,10 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1.0];
+    self.view.backgroundColor = [ArgoTheme background];
 
     self.webHost = [[UIView alloc] init];
-    self.webHost.backgroundColor = [UIColor colorWithWhite:0.29 alpha:1.0];
+    self.webHost.backgroundColor = [ArgoTheme canvasBackground];
     self.webHost.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.webHost];
 
@@ -76,16 +82,27 @@
 
     [self buildToolbar];
 
-    self.spinner = [[UIActivityIndicatorView alloc] init];
-    self.spinner.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.spinner startAnimating];
-    [self.view addSubview:self.spinner];
+    [self buildLoadingView];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.toolbar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:40],
-        [self.toolbar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-40],
-        [self.toolbar.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
+        // 도구 모음은 아래에 둡니다. 위에 두면 문서의 첫 줄을 가립니다.
+        [self.toolbarSurface.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
+        [self.toolbarSurface.bottomAnchor constraintEqualToAnchor:g.bottomAnchor
+                                                         constant:-[ArgoTheme gutter]],
+        [self.toolbarSurface.leadingAnchor constraintGreaterThanOrEqualToAnchor:g.leadingAnchor
+                                                                      constant:[ArgoTheme screenMargin]],
+        [self.toolbarSurface.trailingAnchor constraintLessThanOrEqualToAnchor:g.trailingAnchor
+                                                                     constant:-[ArgoTheme screenMargin]],
+
+        [self.toolbar.leadingAnchor constraintEqualToAnchor:self.toolbarSurface.leadingAnchor
+                                                  constant:[ArgoTheme gutter]],
+        [self.toolbar.trailingAnchor constraintEqualToAnchor:self.toolbarSurface.trailingAnchor
+                                                   constant:-[ArgoTheme gutter]],
+        [self.toolbar.topAnchor constraintEqualToAnchor:self.toolbarSurface.topAnchor
+                                              constant:[ArgoTheme gutter] * 0.5],
+        [self.toolbar.bottomAnchor constraintEqualToAnchor:self.toolbarSurface.bottomAnchor
+                                                 constant:-[ArgoTheme gutter] * 0.5],
 
         [self.webHost.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.webHost.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
@@ -97,11 +114,13 @@
         [self.canvas.topAnchor constraintEqualToAnchor:self.webHost.topAnchor],
         [self.canvas.bottomAnchor constraintEqualToAnchor:self.webHost.bottomAnchor],
 
-        [self.spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [self.spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [self.loadingView.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.loadingView.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [self.loadingView.widthAnchor constraintEqualToConstant:760],
     ]];
 
-    [self.view bringSubviewToFront:self.toolbar];
+    [self.view bringSubviewToFront:self.toolbarSurface];
+    [self.view bringSubviewToFront:self.loadingView];
 
     for (NSNumber *dir in @[ @(UISwipeGestureRecognizerDirectionUp),
                             @(UISwipeGestureRecognizerDirectionDown) ]) {
@@ -121,55 +140,102 @@
 }
 
 - (UIButton *)barButton:(NSString *)title action:(SEL)sel {
-    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-    [b setTitle:title forState:UIControlStateNormal];
-    b.titleLabel.font = [UIFont systemFontOfSize:26];
+    ArgoBarButton *b = [ArgoBarButton buttonWithTitle:title];
     [b addTarget:self action:sel forControlEvents:UIControlEventPrimaryActionTriggered];
     return b;
 }
 
-- (void)buildToolbar {
-    self.titleLabel = [[UILabel alloc] init];
-    self.titleLabel.text = self.documentPath.lastPathComponent ?: @"";
-    self.titleLabel.font = [UIFont systemFontOfSize:26];
-    self.titleLabel.textColor = [UIColor whiteColor];
-    [self.titleLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow
-                                                     forAxis:UILayoutConstraintAxisHorizontal];
+#pragma mark - 로딩 화면
 
+/// 진행률을 측정할 수 없으므로 가짜 퍼센트를 보이지 않습니다.
+/// 무엇을 여는 중인지만 말합니다.
+- (void)buildLoadingView {
+    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+
+    self.spinner = [[UIActivityIndicatorView alloc] init];
+    self.spinner.color = [ArgoTheme accent];
+    self.spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.spinner startAnimating];
+
+    UILabel *what = [[UILabel alloc] init];
+    what.text = @"문서를 여는 중";
+    what.font = [ArgoTheme fontTitle];
+    what.textColor = [ArgoTheme textPrimary];
+    what.textAlignment = NSTextAlignmentCenter;
+    what.translatesAutoresizingMaskIntoConstraints = NO;
+
+    self.loadingTitle = [[UILabel alloc] init];
+    self.loadingTitle.text = self.documentPath.lastPathComponent ?: @"";
+    self.loadingTitle.font = [ArgoTheme fontCaption];
+    self.loadingTitle.textColor = [ArgoTheme textSecondary];
+    self.loadingTitle.textAlignment = NSTextAlignmentCenter;
+    self.loadingTitle.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    self.loadingTitle.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [box addSubview:self.spinner];
+    [box addSubview:what];
+    [box addSubview:self.loadingTitle];
+
+    CGFloat pad = [ArgoTheme screenMargin] * 0.7;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.spinner.centerXAnchor constraintEqualToAnchor:box.centerXAnchor],
+        [self.spinner.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
+
+        [what.topAnchor constraintEqualToAnchor:self.spinner.bottomAnchor constant:28],
+        [what.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [what.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+
+        [self.loadingTitle.topAnchor constraintEqualToAnchor:what.bottomAnchor constant:12],
+        [self.loadingTitle.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [self.loadingTitle.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+        [self.loadingTitle.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-pad],
+    ]];
+
+    self.loadingView = box;
+    [self.view addSubview:box];
+}
+
+- (void)hideLoadingView {
+    [self.spinner stopAnimating];
+    [UIView animateWithDuration:0.2 animations:^{
+        self.loadingView.alpha = 0;
+    } completion:^(BOOL done) {
+        [self.loadingView removeFromSuperview];
+        self.loadingView = nil;
+    }];
+}
+
+- (void)buildToolbar {
+    // 파일명은 도구 모음에서 뺐습니다. 긴 이름 하나가 버튼을 화면 밖으로
+    // 밀어냈고, 이름은 열 때 로딩 화면이 이미 보여줍니다.
+    // 자세한 것은 '문서 정보' 패널에 있습니다.
     self.statusLabel = [[UILabel alloc] init];
-    self.statusLabel.font = [UIFont monospacedDigitSystemFontOfSize:26
-                                                             weight:UIFontWeightRegular];
-    self.statusLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+    self.statusLabel.font = [ArgoTheme fontMonoBody];
+    self.statusLabel.textColor = [ArgoTheme textSecondary];
     self.statusLabel.text = @"여는 중…";
 
     NSString *prevTitle = self.isSheet ? @"◀ 이전 시트" : @"◀ 이전";
     NSString *nextTitle = self.isSheet ? @"다음 시트 ▶" : @"다음 ▶";
     self.prevButton  = [self barButton:prevTitle action:@selector(goPrev)];
     self.nextButton  = [self barButton:nextTitle action:@selector(goNext)];
-    self.nightButton = [self barButton:@"야간" action:@selector(toggleNight)];
 
-    // Controls first. With the filename leading, a long one pushed the
-    // navigation buttons off the right of the screen entirely.
     NSMutableArray *items = [NSMutableArray arrayWithObjects:
-                             self.prevButton, self.nextButton,
-                             self.statusLabel, self.nightButton, nil];
-    if (self.isDeck) {
-        // pptx-preview does not draw the slide master, so a deck whose
-        // theme writes light text loses it against the unpainted page.
-        self.paintButton = [self barButton:@"배경" action:@selector(togglePaint)];
-        [items addObject:self.paintButton];
-    }
-    [items addObject:[self barButton:@"× 닫기" action:@selector(closeNow)]];
-    self.titleLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-    [items addObject:self.titleLabel];
+                             self.prevButton, self.nextButton, self.statusLabel, nil];
+
+    // 나머지는 전부 설정 하나로 모았습니다. 명세의 '버튼을 흩뿌리지 말 것'입니다.
+    [items addObject:[self barButton:@"설정" action:@selector(showPanel)]];
+    [items addObject:[self barButton:@"닫기" action:@selector(closeNow)]];
 
     self.toolbar = [[UIStackView alloc] initWithArrangedSubviews:items];
     self.toolbar.axis = UILayoutConstraintAxisHorizontal;
-    self.toolbar.spacing = 26;
+    self.toolbar.spacing = [ArgoTheme gutter];
     self.toolbar.distribution = UIStackViewDistributionFill;
     self.toolbar.alignment = UIStackViewAlignmentCenter;
     self.toolbar.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.toolbar];
+
+    self.toolbarSurface = [ArgoSurfaceView surface];
+    [self.view addSubview:self.toolbarSurface];
+    [self.toolbarSurface addSubview:self.toolbar];
 }
 
 - (void)setToolbarVisible:(BOOL)visible animated:(BOOL)animated {
@@ -183,7 +249,10 @@
         }
     }
     if (!visible) { [self setNeedsFocusUpdate]; [self updateFocusIfNeeded]; }
-    void (^apply)(void) = ^{ self.toolbar.alpha = visible ? 1.0 : 0.0; };
+    void (^apply)(void) = ^{
+        self.toolbar.alpha = visible ? 1.0 : 0.0;
+        self.toolbarSurface.alpha = visible ? 1.0 : 0.0;
+    };
     if (animated) { [UIView animateWithDuration:0.2 animations:apply]; } else { apply(); }
     if (visible) {
         self.hideTimer = [NSTimer scheduledTimerWithTimeInterval:8.0 repeats:NO
@@ -196,7 +265,185 @@
 - (void)toggleToolbar { [self setToolbarVisible:!self.toolbarVisible animated:YES]; }
 
 - (NSArray<id<UIFocusEnvironment>> *)preferredFocusEnvironments {
+    // 패널이 열리면 포커스가 그 안에 머물러야 합니다. 뒤에 있는
+    // 캔버스로 빠지면 방향키가 문서를 움직여 패널을 쓸 수 없습니다.
+    if (self.errorView) { return @[ self.errorView ]; }
+    if (self.panelView) { return @[ self.panelView ]; }
     return @[ self.canvas ];
+}
+
+#pragma mark - 설정 패널
+
+/// 부가 기능을 하나로 모읍니다. 도구 모음에 버튼을 늘리지 않습니다.
+- (void)showPanel {
+    if (self.panelView) { return; }
+    [self.hideTimer invalidate];
+
+    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+
+    UILabel *head = [[UILabel alloc] init];
+    head.text = @"문서 설정";
+    head.font = [ArgoTheme fontTitle];
+    head.textColor = [ArgoTheme textPrimary];
+    head.translatesAutoresizingMaskIntoConstraints = NO;
+
+    NSMutableArray *rows = [NSMutableArray array];
+
+    ArgoBarButton *night = [ArgoBarButton buttonWithTitle:
+                            self.isNight ? @"주간 보기로" : @"야간 보기로"];
+    [night addTarget:self action:@selector(panelToggleNight)
+    forControlEvents:UIControlEventPrimaryActionTriggered];
+    [rows addObject:night];
+
+    if (self.isDeck) {
+        // pptx-preview는 슬라이드 마스터를 그리지 않아, 밝은 글자를 쓰는
+        // 테마는 칠하지 않은 바탕에서 글자가 사라집니다.
+        ArgoBarButton *paint = [ArgoBarButton buttonWithTitle:@"슬라이드 배경 칠하기"];
+        [paint addTarget:self action:@selector(panelTogglePaint)
+        forControlEvents:UIControlEventPrimaryActionTriggered];
+        [rows addObject:paint];
+    }
+
+    ArgoBarButton *info = [ArgoBarButton buttonWithTitle:@"문서 정보"];
+    [info addTarget:self action:@selector(panelShowInfo)
+   forControlEvents:UIControlEventPrimaryActionTriggered];
+    [rows addObject:info];
+
+    ArgoBarButton *close = [ArgoBarButton buttonWithTitle:@"닫기"];
+    close.isPrimary = YES;
+    [close addTarget:self action:@selector(hidePanel)
+    forControlEvents:UIControlEventPrimaryActionTriggered];
+    [rows addObject:close];
+
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:rows];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 16;
+    stack.alignment = UIStackViewAlignmentFill;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [box addSubview:head];
+    [box addSubview:stack];
+
+    CGFloat pad = [ArgoTheme screenMargin] * 0.6;
+    [NSLayoutConstraint activateConstraints:@[
+        [head.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
+        [head.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [head.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+
+        [stack.topAnchor constraintEqualToAnchor:head.bottomAnchor constant:28],
+        [stack.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [stack.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+        [stack.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-pad],
+
+        // 문서가 완전히 사라지지 않도록 화면 일부만 가립니다.
+        [box.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor
+                                           constant:-[ArgoTheme screenMargin]],
+        [box.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [box.widthAnchor constraintEqualToConstant:620],
+    ]];
+
+    box.alpha = 0;
+    self.panelView = box;
+    [self.view addSubview:box];
+    [self.view bringSubviewToFront:box];
+    [UIView animateWithDuration:0.2 animations:^{ box.alpha = 1; }];
+
+    [self setNeedsFocusUpdate];
+    [self updateFocusIfNeeded];
+}
+
+- (void)hidePanel {
+    UIView *box = self.panelView;
+    self.panelView = nil;
+    [UIView animateWithDuration:0.2 animations:^{
+        box.alpha = 0;
+    } completion:^(BOOL done) {
+        [box removeFromSuperview];
+    }];
+    // 패널을 닫으면 도구 모음으로 돌아갑니다.
+    [self setToolbarVisible:YES animated:NO];
+    [self setNeedsFocusUpdate];
+    [self updateFocusIfNeeded];
+}
+
+- (void)panelToggleNight { [self toggleNight]; [self hidePanel]; }
+- (void)panelTogglePaint { [self togglePaint]; [self hidePanel]; }
+
+/// 파일명·형식·크기·수정 시각. 열람 화면을 가리지 않는 별도 패널입니다.
+- (void)panelShowInfo {
+    NSString *path = self.documentPath ?: @"";
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+
+    NSByteCountFormatter *bytes = [[NSByteCountFormatter alloc] init];
+    bytes.countStyle = NSByteCountFormatterCountStyleFile;
+    NSString *size = attrs[NSFileSize]
+        ? [bytes stringFromByteCount:[attrs[NSFileSize] longLongValue]] : @"알 수 없음";
+
+    NSString *when = @"알 수 없음";
+    if (attrs[NSFileModificationDate]) {
+        NSDateFormatter *df = [[NSDateFormatter alloc] init];
+        df.dateFormat = @"yyyy-MM-dd HH:mm";
+        when = [df stringFromDate:attrs[NSFileModificationDate]];
+    }
+
+    NSString *body = [NSString stringWithFormat:
+                      @"파일명\n%@\n\n형식\n%@\n\n크기\n%@\n\n수정\n%@\n\n상태\n%@",
+                      path.lastPathComponent ?: @"",
+                      [self ext].length > 0 ? [[self ext] uppercaseString] : @"없음",
+                      size, when,
+                      self.statusLabel.text ?: @""];
+
+    [self hidePanel];
+
+    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+
+    UILabel *head = [[UILabel alloc] init];
+    head.text = @"문서 정보";
+    head.font = [ArgoTheme fontTitle];
+    head.textColor = [ArgoTheme textPrimary];
+    head.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UILabel *detail = [[UILabel alloc] init];
+    detail.text = body;
+    detail.numberOfLines = 0;
+    detail.font = [ArgoTheme fontCaption];
+    detail.textColor = [ArgoTheme textSecondary];
+    detail.translatesAutoresizingMaskIntoConstraints = NO;
+
+    ArgoBarButton *close = [ArgoBarButton buttonWithTitle:@"닫기"];
+    close.isPrimary = YES;
+    [close addTarget:self action:@selector(hidePanel)
+    forControlEvents:UIControlEventPrimaryActionTriggered];
+
+    [box addSubview:head];
+    [box addSubview:detail];
+    [box addSubview:close];
+
+    CGFloat pad = [ArgoTheme screenMargin] * 0.6;
+    [NSLayoutConstraint activateConstraints:@[
+        [head.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
+        [head.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+
+        [detail.topAnchor constraintEqualToAnchor:head.bottomAnchor constant:24],
+        [detail.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [detail.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+
+        [close.topAnchor constraintEqualToAnchor:detail.bottomAnchor constant:32],
+        [close.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [close.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+        [close.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-pad],
+
+        [box.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor
+                                           constant:-[ArgoTheme screenMargin]],
+        [box.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [box.widthAnchor constraintEqualToConstant:680],
+    ]];
+
+    self.panelView = box;
+    [self.view addSubview:box];
+    [self.view bringSubviewToFront:box];
+    [self setNeedsFocusUpdate];
+    [self updateFocusIfNeeded];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -234,11 +481,9 @@
 
 - (void)toggleNight {
     self.isNight = !self.isNight;
-    [self.nightButton setTitle:self.isNight ? @"주간" : @"야간"
-                      forState:UIControlStateNormal];
     self.webHost.backgroundColor = self.isNight
-        ? [UIColor colorWithWhite:0.07 alpha:1.0]
-        : [UIColor colorWithWhite:0.29 alpha:1.0];
+        ? [ArgoTheme background]
+        : [ArgoTheme canvasBackground];
     [self js:[NSString stringWithFormat:@"argoNav.night(%@)",
               self.isNight ? @"true" : @"false"] then:nil];
 }
@@ -255,6 +500,8 @@
 }
 
 - (void)closeOrHideToolbar {
+    // 메뉴 버튼은 한 겹씩 벗깁니다. 패널 -> 도구 모음 -> 닫기.
+    if (self.panelView) { [self hidePanel]; return; }
     if (self.toolbarVisible) { [self setToolbarVisible:NO animated:YES]; }
     else { [self closeNow]; }
 }
@@ -387,7 +634,7 @@
                           componentsSeparatedByString:@"@@"];
         NSString *state = parts.firstObject ?: @"";
         if ([state isEqualToString:@"done"]) {
-            [self.spinner stopAnimating];
+            [self hideLoadingView];
             [self showStatus:parts.count > 1 ? parts[1] : @""];
             [self setToolbarVisible:YES animated:YES];
         } else if ([state isEqualToString:@"error"]) {
@@ -411,23 +658,99 @@
 }
 
 - (void)showError:(NSString *)message {
-    [self.spinner stopAnimating];
+    [self hideLoadingView];
     self.statusLabel.text = @"열지 못했습니다";
     [self setToolbarVisible:YES animated:YES];
+    if (self.errorView) { return; }
 
-    UILabel *l = [[UILabel alloc] init];
-    l.text = message;
-    l.numberOfLines = 0;
-    l.textAlignment = NSTextAlignmentCenter;
-    l.font = [UIFont systemFontOfSize:28];
-    l.textColor = [UIColor colorWithRed:1 green:0.6 blue:0.6 alpha:1];
-    l.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:l];
+    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+
+    UILabel *head = [[UILabel alloc] init];
+    head.text = @"문서를 열 수 없습니다";
+    head.font = [ArgoTheme fontTitle];
+    head.textColor = [ArgoTheme textPrimary];
+    head.textAlignment = NSTextAlignmentCenter;
+    head.translatesAutoresizingMaskIntoConstraints = NO;
+
+    // 원인을 그대로 보여줍니다. 렌더러가 내놓은 말이 거칠어도
+    // '알 수 없는 오류'보다 쓸모 있습니다.
+    UILabel *why = [[UILabel alloc] init];
+    why.text = message.length > 0 ? message : @"원인을 알 수 없습니다.";
+    why.numberOfLines = 0;
+    why.font = [ArgoTheme fontCaption];
+    why.textColor = [ArgoTheme textSecondary];
+    why.textAlignment = NSTextAlignmentCenter;
+    why.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UILabel *name = [[UILabel alloc] init];
+    name.text = self.documentPath.lastPathComponent ?: @"";
+    name.font = [ArgoTheme fontCaption];
+    name.textColor = [ArgoTheme textDisabled];
+    name.textAlignment = NSTextAlignmentCenter;
+    name.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    name.translatesAutoresizingMaskIntoConstraints = NO;
+
+    // 복구 경로를 줍니다. 막다른 화면으로 두지 않습니다.
+    ArgoBarButton *retry = [ArgoBarButton buttonWithTitle:@"다시 시도"];
+    retry.isPrimary = YES;
+    [retry addTarget:self action:@selector(retryRender)
+    forControlEvents:UIControlEventPrimaryActionTriggered];
+
+    ArgoBarButton *back = [ArgoBarButton buttonWithTitle:@"파일 목록으로"];
+    [back addTarget:self action:@selector(closeNow)
+   forControlEvents:UIControlEventPrimaryActionTriggered];
+
+    UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[ retry, back ]];
+    buttons.axis = UILayoutConstraintAxisHorizontal;
+    buttons.spacing = [ArgoTheme gutter];
+    buttons.alignment = UIStackViewAlignmentCenter;
+    buttons.translatesAutoresizingMaskIntoConstraints = NO;
+
+    for (UIView *v in @[ head, why, name, buttons ]) { [box addSubview:v]; }
+
+    CGFloat pad = [ArgoTheme screenMargin] * 0.7;
     [NSLayoutConstraint activateConstraints:@[
-        [l.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [l.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
-        [l.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.7],
+        [head.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
+        [head.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [head.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+
+        [why.topAnchor constraintEqualToAnchor:head.bottomAnchor constant:20],
+        [why.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [why.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+
+        [name.topAnchor constraintEqualToAnchor:why.bottomAnchor constant:12],
+        [name.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
+        [name.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-pad],
+
+        [buttons.topAnchor constraintEqualToAnchor:name.bottomAnchor constant:36],
+        [buttons.centerXAnchor constraintEqualToAnchor:box.centerXAnchor],
+        [buttons.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-pad],
+
+        [box.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [box.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [box.widthAnchor constraintEqualToConstant:900],
     ]];
+
+    self.errorView = box;
+    [self.view addSubview:box];
+    [self.view bringSubviewToFront:box];
+    // 패널이 열리면 포커스가 패널 안으로 들어가야 합니다.
+    [self setNeedsFocusUpdate];
+    [self updateFocusIfNeeded];
+}
+
+- (void)retryRender {
+    [self.errorView removeFromSuperview];
+    self.errorView = nil;
+    [self buildLoadingView];
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.loadingView.centerXAnchor constraintEqualToAnchor:g.centerXAnchor],
+        [self.loadingView.centerYAnchor constraintEqualToAnchor:g.centerYAnchor],
+        [self.loadingView.widthAnchor constraintEqualToConstant:760],
+    ]];
+    self.statusLabel.text = @"여는 중…";
+    [self prepareWebViewAndRender];
 }
 
 - (void)dealloc {

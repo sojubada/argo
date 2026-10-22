@@ -165,6 +165,11 @@ struct ContentView: View {
     
     var body: some View {
         ZStack {
+            // 화면 바탕. 순검정이 아닌 짙은 차콜 — 순검정은 OLED에서
+            // 패널과 바탕의 경계가 사라집니다.
+            Theme.background
+                .edgesIgnoringSafeArea(.all)
+
             VStack {
                 VStack {
                     HStack { //input directory + refresh
@@ -215,6 +220,7 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "power")
                             .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                     }
 
                     Button(action: { //두 칸 켜고 끄기
@@ -227,6 +233,7 @@ struct ContentView: View {
                               ? "rectangle.split.2x1.fill"
                               : "rectangle.split.2x1")
                             .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                     }
 
                     Button(action: { //정렬 기준 돌리기. 같은 기준을 다시 누르면 오르내림이 뒤집힌다
@@ -254,6 +261,7 @@ struct ContentView: View {
                     }) {
                         Image(systemName: pane.showHidden ? "eye" : "eye.slash")
                             .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                     }
 
                     Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
@@ -261,6 +269,7 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "keyboard")
                             .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                     }
 
                     if dualPaneEnabled {
@@ -271,6 +280,7 @@ struct ContentView: View {
                                   ? "arrow.right.doc.on.clipboard"
                                   : "arrow.left.circle")
                                 .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                         }
 
                         Button(action: { //반대 칸으로 이동
@@ -278,6 +288,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "arrow.left.arrow.right")
                                 .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                         }
 
                         Button(action: { //반대 칸을 이 폴더로 맞추기
@@ -285,6 +296,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "equal.square")
                                 .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                         }
                     }
 
@@ -312,13 +324,16 @@ struct ContentView: View {
                                 if (allWereSelected) {
                                     Image(systemName: "checkmark.circle")
                                         .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                                 } else {
                                     Image(systemName: "circle")
                                         .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                                 }
                             } else {
                                 Image(systemName: "checkmark.circle")
                                     .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                             }
                         }
                         
@@ -457,6 +472,7 @@ struct ContentView: View {
                                 ZStack {
                                     Image(systemName: "doc.on.doc")
                                         .frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
                                     Image(systemName: "arrow.right")
                                         .resizable()
                                         .frame(width: 15, height: 13)
@@ -1234,6 +1250,7 @@ struct ContentView: View {
 				}) {
 					Image(systemName: "ant")
 						.frame(width: 50, height: 50)
+                            .foregroundColor(Theme.textPrimary)
 				}
 			}
 		}

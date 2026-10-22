@@ -33,6 +33,8 @@
 		75EDB716ECC14EA794E3CF38 /* PaneTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */; };
 		76A281EAD2594E03B012BE85 /* PrintProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 891E5DD5390D449FBBA34DE0 /* PrintProbe.m */; };
 		2A0DACC2F4A24A1985520419 /* PrintProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */; };
+		F0F318CE8B0942F3A5B8CD46 /* ArgoTheme.m in Sources */ = {isa = PBXBuildFile; fileRef = E9E752021CA74F4691440910 /* ArgoTheme.m */; };
+		61A2A587A0844DD181E5059E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E053B4856F941D3867A064B /* Theme.swift */; };
 		552E0935447148F38D7677CE /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5ED9BB984043D88372ED41 /* PathSafety.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
@@ -136,6 +138,9 @@
 		1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTransfer.swift; sourceTree = "<group>"; };
 		891E5DD5390D449FBBA34DE0 /* PrintProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PrintProbe.m; sourceTree = "<group>"; };
 		3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintProbeView.swift; sourceTree = "<group>"; };
+		E9E752021CA74F4691440910 /* ArgoTheme.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ArgoTheme.m; sourceTree = "<group>"; };
+		21EA41A9C9C84B95B16BE7B0 /* ArgoTheme.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ArgoTheme.h; sourceTree = "<group>"; };
+		1E053B4856F941D3867A064B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
@@ -295,6 +300,16 @@
 			path = Panes;
 			sourceTree = "<group>";
 		};
+		A099E58FB53C428AB09EA3A8 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				1E053B4856F941D3867A064B /* Theme.swift */,
+				E9E752021CA74F4691440910 /* ArgoTheme.m */,
+				21EA41A9C9C84B95B16BE7B0 /* ArgoTheme.h */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
 		E9DA58C85DF94CDB9259C829 /* Safety */ = {
 			isa = PBXGroup;
 			children = (
@@ -391,6 +406,7 @@
 				DA1995C5F5ED9405B6E826B1 /* Favorites */,
 				DA18E847725284F498AD423E /* Trash */,
 				6D80F7E1E21F461FB7B3DEB7 /* Panes */,
+				A099E58FB53C428AB09EA3A8 /* Theme */,
 				E9DA58C85DF94CDB9259C829 /* Safety */,
 				204E5A23D3DF4DC2A2BB14E3 /* Diagnostics */,
 				DA171D28474254F303DA124A /* WebDAV */,
@@ -643,6 +659,8 @@
 				75EDB716ECC14EA794E3CF38 /* PaneTransfer.swift in Sources */,
 						76A281EAD2594E03B012BE85 /* PrintProbe.m in Sources */,
 				2A0DACC2F4A24A1985520419 /* PrintProbeView.swift in Sources */,
+				F0F318CE8B0942F3A5B8CD46 /* ArgoTheme.m in Sources */,
+				61A2A587A0844DD181E5059E /* Theme.swift in Sources */,
 				552E0935447148F38D7677CE /* PathSafety.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,

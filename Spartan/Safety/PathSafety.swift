@@ -20,10 +20,12 @@ enum PathRisk {
     }
 
     var badgeColor: Color {
+        // 테마 하나에서 옵니다. 기본 .orange / .red 는 TV 바탕에서
+        // 너무 쨍해 눈이 피곤합니다.
         switch self {
-        case .safe: return .primary
-        case .caution: return .orange
-        case .forbidden: return .red
+        case .safe: return Theme.textSecondary
+        case .caution: return Theme.riskCaution
+        case .forbidden: return Theme.riskForbidden
         }
     }
 }

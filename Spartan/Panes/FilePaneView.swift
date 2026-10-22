@@ -73,10 +73,11 @@ struct FilePaneView: View {
             header
             list
         }
+        .argoSurface()
         .overlay(
             // 활성 칸 표시. 두 칸이면 어느 쪽이 명령을 받는지 보여야 한다.
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 4)
+            RoundedRectangle(cornerRadius: Theme.corner)
+                .stroke(isActive ? Theme.accent : Color.clear, lineWidth: 4)
         )
     }
 
@@ -92,6 +93,7 @@ struct FilePaneView: View {
                         .font(.caption)
                     Spacer()
                 }
+                .foregroundColor(Theme.accent)
                 .padding(.horizontal, 12)
             }
         }
@@ -103,14 +105,16 @@ struct FilePaneView: View {
                 Image(systemName: symbol)
                     .foregroundColor(model.currentDirRisk.badgeColor)
             }
+            // 긴 경로는 앞을 줄입니다 — 끝쪽(지금 폴더)이 중요합니다.
             Text(model.directory)
                 .font(.caption)
+                .foregroundColor(Theme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.head)
             Spacer()
             Text("\(model.masterFiles.count)")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(Theme.textSecondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -190,6 +194,7 @@ struct FilePaneView: View {
 
                 // 심볼릭 링크는 이름 끝의 표시 문자를 떼고 보여준다.
                 Text(file.fileType == 8 ? removeLastChar(file.name) : file.name)
+                    .foregroundColor(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
