@@ -201,8 +201,10 @@ struct FilePaneView: View {
                 Image(systemName: FileGlyph.symbol(for: file.fileType, name: file.name))
 
                 // 심볼릭 링크는 이름 끝의 표시 문자를 떼고 보여준다.
+                // 색을 못 박지 않는다. tvOS 는 포커스된 줄의 바탕을 흰색으로
+                // 바꾸면서 글자색을 같이 뒤집는데, 여기서 흰색을 지정하면
+                // 포커스된 줄의 파일명이 흰 바탕에 흰 글자가 되어 사라진다.
                 Text(file.fileType == 8 ? removeLastChar(file.name) : file.name)
-                    .foregroundColor(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }

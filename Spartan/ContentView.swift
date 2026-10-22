@@ -22,10 +22,19 @@ struct ContentView: View {
     // 칸 둘. 왼쪽/오른쪽이 각자 폴더와 선택을 들고 있다.
     @StateObject var leftPane: FilePaneModel
     @StateObject var rightPane: FilePaneModel
-    @State var activeSide: PaneSide = .left
+    @StateObject private var selection = PaneSelection()
+
+    /// 이름은 그대로 두고 저장소만 클래스로 옮겼다. 쓰고 바로 읽어도 새 값이 보인다.
+    var activeSide: PaneSide {
+        get { selection.active }
+        nonmutating set { selection.active = newValue }
+    }
     @StateObject var transfer = PaneTransfer()
     /// 두 칸을 함께 보일지. 끄면 한 칸만 나와 기존 동작과 같다.
     @AppStorage("dualPaneEnabled") var dualPaneEnabled = false
+    /// 툴바에 나머지 아이콘을 펼칠지. 기본은 접어 둔다 —
+    /// 25개가 한 줄에 늘어서면 무엇이 무엇인지 알 수 없다.
+    @State private var toolbarExpanded = false
 
     /// 활성 칸. 툴바의 모든 동작은 이쪽을 대상으로 한다.
     var pane: FilePaneModel { activeSide == .left ? leftPane : rightPane }
@@ -235,7 +244,6 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "power")
                             .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                     }
 
                     Button(action: { //두 칸 켜고 끄기
@@ -248,9 +256,24 @@ struct ContentView: View {
                               ? "rectangle.split.2x1.fill"
                               : "rectangle.split.2x1")
                             .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                     }
 
+                    Button(action: { //홈 — 미디어 폴더로
+                        pane.navigate(to: "/var/mobile/Media/")
+                    }) {
+                        Image(systemName: "house")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Button(action: { //더보기 — 나머지 아이콘 펼치기
+                        withAnimation { toolbarExpanded.toggle() }
+                    }) {
+                        Image(systemName: toolbarExpanded
+                              ? "chevron.left.circle" : "ellipsis.circle")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Group {
                     Button(action: { //정렬 기준 돌리기. 같은 기준을 다시 누르면 오르내림이 뒤집힌다
                         let keys = SortKey.allCases
                         if let i = keys.firstIndex(of: pane.sort) {
@@ -276,7 +299,6 @@ struct ContentView: View {
                     }) {
                         Image(systemName: pane.showHidden ? "eye" : "eye.slash")
                             .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                     }
 
                     Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
@@ -284,7 +306,6 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "keyboard")
                             .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                     }
 
                     if dualPaneEnabled {
@@ -295,7 +316,6 @@ struct ContentView: View {
                                   ? "arrow.right.doc.on.clipboard"
                                   : "arrow.left.circle")
                                 .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                         }
 
                         Button(action: { //반대 칸으로 이동
@@ -303,7 +323,6 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "arrow.left.arrow.right")
                                 .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                         }
 
                         Button(action: { //반대 칸을 이 폴더로 맞추기
@@ -311,7 +330,6 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "equal.square")
                                 .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                         }
                     }
 
@@ -339,16 +357,13 @@ struct ContentView: View {
                                 if (allWereSelected) {
                                     Image(systemName: "checkmark.circle")
                                         .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                                 } else {
                                     Image(systemName: "circle")
                                         .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                                 }
                             } else {
                                 Image(systemName: "checkmark.circle")
                                     .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                             }
                         }
                         
@@ -489,7 +504,6 @@ struct ContentView: View {
                                 ZStack {
                                     Image(systemName: "doc.on.doc")
                                         .frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
                                     Image(systemName: "arrow.right")
                                         .resizable()
                                         .frame(width: 15, height: 13)
@@ -650,6 +664,13 @@ struct ContentView: View {
                         .sheet(isPresented: $showSubView[38], content: {
                             WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
                         })
+                    }
+                    // 접혀 있으면 폭 0 · 투명 · 포커스 불가. 계층에서 빼지 않는 이유는
+                    // 이 버튼들에 시트가 붙어 있어서다 — if 로 들어내면 단축키로 띄우는
+                    // 시트까지 같이 사라진다.
+                    .frame(maxWidth: toolbarExpanded ? nil : 0)
+                    .opacity(toolbarExpanded ? 1 : 0)
+                    .disabled(!toolbarExpanded)
                 }
                 .padding(.horizontal, 8)
                 }
@@ -1279,7 +1300,6 @@ struct ContentView: View {
 				}) {
 					Image(systemName: "ant")
 						.frame(width: 50, height: 50)
-                            .foregroundColor(Theme.textPrimary)
 				}
 			}
 		}

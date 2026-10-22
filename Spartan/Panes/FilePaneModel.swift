@@ -14,6 +14,20 @@ enum PaneSide {
     case right
 }
 
+/// 어느 칸이 활성인가. 클래스에 둔다 — @State 였을 때 문제가 있었다.
+///
+/// 항목을 누르면 활성 칸을 먼저 바꾸고 곧바로 defaultAction 을 부르는데,
+/// defaultAction 은 directory·masterFiles 계산 속성을 통해 '지금 활성 칸'을
+/// 다시 읽는다. @State 는 액션 클로저 안에서 쓴 값을 같은 클로저의 다음
+/// 읽기에서 돌려준다는 보장이 없어, 오른쪽 칸을 눌렀는데 왼쪽 칸이 열리고
+/// 보고 있는 칸은 그대로였다 — 폴더에 못 들어가는 것처럼 보인 원인이다.
+///
+/// 클래스 참조라면 쓰고 읽는 것이 같은 저장소를 가리켜 즉시 보인다.
+@available(tvOS 13.0, *)
+final class PaneSelection: ObservableObject {
+    @Published var active: PaneSide = .left
+}
+
 enum SortKey: String, CaseIterable {
     case name
     case size
