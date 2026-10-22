@@ -172,6 +172,12 @@ struct ContentView: View {
     var safetyBannerMsg: String { pane.bannerMsg }
     @State private var showBatchDeletePreview = false
     @State private var cautionCountForBatch = 0
+    /// 지금 지우려는 것들의 전체 경로.
+    ///
+    /// 전에는 미리보기가 multiSelectFiles(고른 항목 이름)를 보고, 실제 삭제도
+    /// 같은 배열을 돌았다. 길게 눌러 한 개를 지우면 그 배열이 비어 있어
+    /// 미리보기에는 파일이 보이는데 눌러도 아무 일이 없었다.
+    @State private var pendingDeletePaths: [String] = []
     
     var body: some View {
         ZStack {
@@ -566,18 +572,10 @@ struct ContentView: View {
                             }
                         
                             Button(action: {
-                                if multiSelectFiles.isEmpty { return }
-                                // 보안 검사 먼저 수행 (다중 선택)
-                                let fullPaths = multiSelectFiles.map { directory + $0 }
-                                switch FileGuard.authorize(action: "batch_delete", paths: fullPaths) {
-                                case .success:
-                                    cautionCountForBatch = fullPaths.filter { PathSafety.risk(of: $0) == .caution }.count
-                                    showBatchDeletePreview = true // 승인 후 팝업 띄움
-                                case .failure(let err):
-                                    alertTitle = "작업 차단됨"
-                                    alertMsg = err.localizedDescription
-                                    showAlert = true
-                                }
+                                // 삭제는 한 길로만 간다. 전에는 여기서 바로
+                                // 미리보기를 띄우면서 지울 목록을 채우지 않아,
+                                // '지울 것 0개' 가 뜨고 눌러도 아무 일이 없었다.
+                                requestDeleteSelection()
                             }) {
                                 ZStack {
                                     if(directory == "/private/var/mobile/Media/.Trash/"){
@@ -1232,7 +1230,7 @@ struct ContentView: View {
             // 일괄 삭제 미리보기
             if showBatchDeletePreview {
                 BatchDeletePreview(
-                    files: multiSelectFiles,
+                    files: pendingDeletePaths.map { ($0 as NSString).lastPathComponent },
                     cautionCount: cautionCountForBatch,
                     onConfirm: {
                         showBatchDeletePreview = false
@@ -1557,6 +1555,15 @@ struct ContentView: View {
             showAlert = true
             return
         }
+        // 관문을 먼저 지난다. 막히면 왜 막혔는지 말해 준다 —
+        // 조용히 아무 일도 안 일어나는 것이 가장 나쁘다.
+        if case .failure(let err) = FileGuard.authorize(action: "batch_delete", paths: targets) {
+            alertTitle = "삭제가 차단되었습니다"
+            alertMsg = err.localizedDescription
+            showAlert = true
+            return
+        }
+        pendingDeletePaths = targets
         cautionCountForBatch = targets.filter { PathSafety.risk(of: $0) != .safe }.count
         showBatchDeletePreview = true
     }
@@ -1843,19 +1850,25 @@ struct ContentView: View {
     
     // 일괄 삭제 미리보기에서 확인 시 호출되는 함수
     func executeBatchDelete() {
-        if(directory == "/private/var/mobile/Media/.Trash/"){
-            for file in multiSelectFiles {
-                TrashManager.shared.deletePathDirectly(directory + file)
+        // 미리보기가 보여준 그 목록을 그대로 지운다.
+        let targets = pendingDeletePaths
+        guard !targets.isEmpty else { return }
+
+        let inTrash = PathSafety.risk(of: directory) != .forbidden
+            && directory.contains("/.Trash")
+
+        for path in targets {
+            if inTrash {
+                TrashManager.shared.deletePathDirectly(path)
+            } else {
+                TrashManager.shared.moveToTrash(path: path)
             }
-            updateFiles()
-        } else {
-            for file in multiSelectFiles {
-                TrashManager.shared.moveToTrash(path: directory + file)
-            }
-            updateFiles()
         }
+
+        pendingDeletePaths = []
         multiSelect = false
         resetMultiSelectArrays()
+        updateFiles()
     }
 }
 

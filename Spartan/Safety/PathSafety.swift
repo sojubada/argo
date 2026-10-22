@@ -39,33 +39,53 @@ enum PathSafety {
         "/lib",
         "/Library",
         "/Applications",
-        "/private/var/db",
-        "/private/var/containers",
-        "/private/var/installd",
-        "/private/var/MobileSoftwareUpdate",
+        "/var/db",
+        "/var/containers",
+        "/var/installd",
+        "/var/MobileSoftwareUpdate",
         "/dev",
         "/cores",
-        "/private/var/preferences",
-        "/private/var/keybags"
-    ].map { $0.lowercased() }
+        "/var/preferences",
+        "/var/keybags"
+    ].map { canonical($0) }
 
+    /// 사용자의 집. 원본 Spartan 이 쓰기 가능으로 본 범위와 같다 —
+    /// filePathIsNotMobileWritable 이 /private/var/mobile 아래를 전부 허용했다.
+    ///
+    /// 전에는 Media·Documents·Downloads 셋만 넣었는데, 그러면 Library 나
+    /// 사용자가 만든 폴더가 전부 '주의'가 되고 안전 모드가 기본 켜짐이라
+    /// 자기 파일도 못 지운다. 벽돌을 막는 것은 위의 금지 목록이지
+    /// 집 안을 좁히는 것이 아니다.
     private static let safePrefixes = [
-        "/private/var/mobile/Media",
-        "/private/var/mobile/Documents",
-        "/private/var/mobile/Downloads",
+        "/var/mobile",
         (NSTemporaryDirectory() as NSString).standardizingPath
-    ].map { $0.lowercased() }
+    ].map { canonical($0) }
+
+    /// 경로를 비교할 수 있는 한 가지 모양으로 만든다.
+    ///
+    /// resolvingSymlinksInPath() 는 **/private 접두사를 떼어낸다** (문서화된 동작).
+    /// 그래서 목록을 /private/var/... 로 적어 두면 어느 것과도 안 맞는다 —
+    /// 안전 구역이 전부 '주의'로 떨어지고, 안전 모드가 모든 쓰기를 막았다.
+    /// 삭제가 안 되던 이유다.
+    private static func canonical(_ path: String) -> String {
+        var p = path
+        if p.hasPrefix("/private/") { p = String(p.dropFirst("/private".count)) }
+        while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
+        return p.lowercased()
+    }
 
     static func risk(of path: String) -> PathRisk {
         let lowerPath = path.lowercased()
-        if lowerPath == "/" || lowerPath == "/private" || lowerPath == "/private/var" {
+        // 최상위와 /var 자체는 쓰기 금지. 안을 둘러보는 것은 된다.
+        let bare = canonical(lowerPath)
+        if bare == "/" || bare == "" || bare == "/var" || bare == "/private" {
             return .forbidden
         }
 
         let normalized = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-        let testPath = (normalized.hasSuffix("/") ? normalized : normalized + "/").lowercased()
+        let testPath = canonical(normalized) + "/"
 
-        let bundlePath = Bundle.main.bundlePath.lowercased()
+        let bundlePath = canonical(Bundle.main.bundlePath)
         if testPath.hasPrefix(bundlePath + "/") || testPath == bundlePath {
             return .forbidden
         }
