@@ -215,7 +215,13 @@ final class ArgoPDFReaderController: UIViewController {
               let page = doc.page(at: currentPage),
               view.bounds.width > 0 else { return }
 
-        let box = page.getBoxRect(.cropBox)
+        // cropBox 가 비어 있는 PDF 가 있다. 그때는 mediaBox 로 물러선다.
+        var usedBox = CGPDFBox.cropBox
+        var box = page.getBoxRect(.cropBox)
+        if box.width <= 0 || box.height <= 0 {
+            usedBox = .mediaBox
+            box = page.getBoxRect(.mediaBox)
+        }
         guard box.width > 0, box.height > 0 else {
             showPageProblem("이 쪽의 크기를 읽을 수 없습니다.")
             return
@@ -250,7 +256,7 @@ final class ArgoPDFReaderController: UIViewController {
 
             ctx.translateBy(x: 0, y: size.height)
             ctx.scaleBy(x: 1, y: -1)
-            ctx.concatenate(page.getDrawingTransform(.cropBox,
+            ctx.concatenate(page.getDrawingTransform(usedBox,
                                                      rect: CGRect(origin: .zero, size: size),
                                                      rotate: 0,
                                                      preserveAspectRatio: true))
@@ -265,8 +271,15 @@ final class ArgoPDFReaderController: UIViewController {
         // 흰 화면을 그냥 보여 주지 않는다. 그리지 못한 것과 원래 빈 쪽은
         // 눈으로 구별할 수 없고, 아무 말이 없으면 고장으로 보인다.
         if Self.isBlank(image) {
+            // 왜 비었는지 숫자를 같이 남긴다. '비어 보인다' 만으로는
+            // 안 그려진 것인지 원래 빈 쪽인지 구별할 수 없다.
+            let detail = String(format: "쪽 %.0f×%.0f · 회전 %d · %@ · 그린 크기 %.0f×%.0f",
+                                box.width, box.height, rotation,
+                                usedBox == .cropBox ? "cropBox" : "mediaBox",
+                                size.width, size.height)
             showPageProblem("이 쪽에서 그려진 것이 없습니다.\n"
-                            + "원래 빈 쪽이거나, 이 기기가 그리지 못하는 내용입니다.")
+                            + "원래 빈 쪽이거나, 이 기기가 그리지 못하는 내용입니다.\n\n"
+                            + detail)
         } else {
             hidePageProblem()
         }
