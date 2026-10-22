@@ -79,6 +79,14 @@ struct FilePaneView: View {
             RoundedRectangle(cornerRadius: Theme.corner)
                 .stroke(isActive ? Theme.accent : Color.clear, lineWidth: 4)
         )
+        // 칸을 하나의 포커스 구역으로 묶는다. 구역 안에서 더 갈 곳이 없으면
+        // 포커스가 구역 밖으로 나가며, 좌우 끝에서는 툴바(위쪽 구역)로 빠진다.
+        // tvOS 15부터 있는 수정자이고 배포 대상이 16이라 쓸 수 있다.
+        //
+        // 1픽셀 투명 뷰로 포커스를 '받아서' 돌려보내는 방식은 쓰지 않는다.
+        // SwiftUI에는 포커스를 보낼 수단이 없어, 받은 뒤 갇힐 수 있다 —
+        // 파일 탐색기에서 포커스가 갇히면 앱을 끄는 수밖에 없다.
+        .focusSection()
     }
 
     // MARK: - 머리

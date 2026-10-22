@@ -73,31 +73,6 @@ final class TrashManager: ObservableObject {
     }
 
     /// 디렉터리 삭제 전 내부의 심볼릭 링크만 먼저 끊어내어 재귀 삭제가 링크 대상을 따라가는 것을 원천 차단
-    private func unlinkNestedSymlinksIfDirectory(_ dirPath: String) {
-        guard !isSymbolicLink(atPath: dirPath) else { return }
-        var isDir: ObjCBool = false
-        guard fileManager.fileExists(atPath: dirPath, isDirectory: &isDir), isDir.boolValue else { return }
-
-        let dirURL = URL(fileURLWithPath: dirPath)
-        guard let enumerator = fileManager.enumerator(
-            at: dirURL,
-            includingPropertiesForKeys: [.isSymbolicLinkKey],
-            options: [.skipsPackageDescendants]
-        ) else { return }
-
-        var symlinkPaths: [String] = []
-        for case let itemURL as URL in enumerator {
-            if let values = try? itemURL.resourceValues(forKeys: [.isSymbolicLinkKey]),
-               values.isSymbolicLink == true {
-                symlinkPaths.append(itemURL.path)
-                enumerator.skipDescendants()
-            }
-        }
-
-        for sym in symlinkPaths {
-            try? fileManager.removeItem(atPath: sym)
-        }
-    }
 
     // MARK: - Dual File Operations (FileGuard + FileManager First + RootHelperActs Fallback)
 
@@ -120,9 +95,11 @@ final class TrashManager: ObservableObject {
         guard fileManager.fileExists(atPath: norm) || isSymbolicLink(atPath: norm) else { return }
         guard case .success = FileGuard.authorize(action: "rm", paths: [norm]) else { return }
 
-        // S6: 폴더 내부 심볼릭 링크 선제거 (단, 대상 자체가 심볼릭 링크면 내부를 건드리지 않고 링크만 제거)
-        unlinkNestedSymlinksIfDirectory(norm)
-
+        // 폴더 내부 심볼릭 링크를 미리 끊는 방어가 여기 있었다. 지웠다.
+        // removeItem 은 아래로 훑으며 링크를 '끊고' 따라가지 않는다. 막을 위험이
+        // 없었고, 대신 아래 removeItem 이 실패하면 폴더는 남은 채 안의 링크만
+        // 영구히 사라졌다 — robustMove 가 목적지를 비우려 이 함수를 부르므로,
+        // 옮기기가 실패하면 건드릴 생각도 없던 폴더의 링크만 날아갔다.
         do {
             try fileManager.removeItem(atPath: norm)
         } catch {

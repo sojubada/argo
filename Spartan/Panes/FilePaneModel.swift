@@ -115,9 +115,10 @@ final class FilePaneModel: ObservableObject {
             case .name:
                 result = a.name.localizedStandardCompare(b.name) == .orderedAscending
             case .size:
-                result = fileSize(a) < fileSize(b)
+                // 디스크를 치지 않는다. 폴더를 읽을 때 채워 둔 값이다.
+                result = (a.size ?? 0) < (b.size ?? 0)
             case .date:
-                result = modifiedDate(a) < modifiedDate(b)
+                result = (a.modified ?? .distantPast) < (b.modified ?? .distantPast)
             case .kind:
                 let ae = (a.name as NSString).pathExtension.lowercased()
                 let be = (b.name as NSString).pathExtension.lowercased()
@@ -133,18 +134,6 @@ final class FilePaneModel: ObservableObject {
         masterFiles = out
         // 목록이 바뀌면 선택 배열의 길이가 안 맞는다. 원본 코드와 같은 이유로 비운다.
         resetMultiSelectArrays()
-    }
-
-    private func fileSize(_ f: SpartanFile) -> Int64 {
-        guard let attrs = try? fileManager.attributesOfItem(atPath: f.fullPath),
-              let size = attrs[.size] as? Int64 else { return 0 }
-        return size
-    }
-
-    private func modifiedDate(_ f: SpartanFile) -> Date {
-        guard let attrs = try? fileManager.attributesOfItem(atPath: f.fullPath),
-              let date = attrs[.modificationDate] as? Date else { return .distantPast }
-        return date
     }
 
     /// 원래 updateFiles + oldUpdate 가 하던 일. 캐시가 있으면 쓰고 없으면 훑는다.
@@ -165,7 +154,7 @@ final class FilePaneModel: ObservableObject {
             let decodedNames = decoded.map { $0.name }
             for name in names {
                 if let j = decodedNames.firstIndex(of: name) {
-                    out.append(decoded[j])
+                    out.append(fillMissingAttributes(decoded[j]))
                 } else {
                     out.append(makeFile(name))
                 }
@@ -211,11 +200,27 @@ final class FilePaneModel: ObservableObject {
     }
 
     private func makeFile(_ name: String) -> SpartanFile {
-        SpartanFile(name: name,
-                    fullPath: directory + name,
-                    isSelected: false,
-                    fileType: FileInfo.yandereDevFileType(file: directory + name),
-                    isLoadingFile: false)
+        let full = directory + name
+        let attrs = try? fileManager.attributesOfItem(atPath: full)
+        return SpartanFile(name: name,
+                           fullPath: full,
+                           isSelected: false,
+                           fileType: FileInfo.yandereDevFileType(file: full),
+                           isLoadingFile: false,
+                           size: attrs?[.size] as? Int64,
+                           modified: attrs?[.modificationDate] as? Date)
+    }
+
+    /// 캐시에서 온 항목은 크기·날짜가 없을 수 있다 (예전 캐시).
+    /// 그때만 한 번 읽어 채운다. 다음 캐시 갱신에 함께 저장된다.
+    private func fillMissingAttributes(_ f: SpartanFile) -> SpartanFile {
+        guard f.size == nil || f.modified == nil else { return f }
+        var out = f
+        if let attrs = try? fileManager.attributesOfItem(atPath: f.fullPath) {
+            out.size = attrs[.size] as? Int64
+            out.modified = attrs[.modificationDate] as? Date
+        }
+        return out
     }
 
     /// 사라진 파일을 캐시에서 덜어낸다. 안 하면 캐시가 끝없이 자란다.

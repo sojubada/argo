@@ -172,15 +172,10 @@ final class ArgoHostingController<Content: View>: UIHostingController<Content> {
     private var typeAheadBuffer = ""
     private var typeAheadTimer: Timer?
 
-    /// 경로·찾기 칸에 글자를 넣는 중이면 단축키를 막는다.
-    /// 안 막으면 파일명에 'r'을 못 넣는다.
-    static var textEntryActive: Bool {
-        get { UserDefaults.standard.bool(forKey: "argoTextEntryActive") }
-        set { UserDefaults.standard.set(newValue, forKey: "argoTextEntryActive") }
-    }
+
 
     override var keyCommands: [UIKeyCommand]? {
-        guard !Self.textEntryActive else { return nil }
+        guard !ArgoTextEntry.isActive else { return nil }
 
         var out: [UIKeyCommand] = []
         for command in allCommands {
@@ -214,7 +209,7 @@ final class ArgoHostingController<Content: View>: UIHostingController<Content> {
     // MARK: - 글자 입력 점프
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        guard !Self.textEntryActive else {
+        guard !ArgoTextEntry.isActive else {
             super.pressesBegan(presses, with: event)
             return
         }
@@ -252,4 +247,22 @@ final class ArgoHostingController<Content: View>: UIHostingController<Content> {
 
 enum ArgoTypeAhead {
     static let notification = Notification.Name("ArgoTypeAheadNotification")
+}
+
+/// 지금 글자를 받는 칸이 떠 있는가. 제네릭이 아닌 타입에 둔다 —
+/// 호스팅 컨트롤러에 두면 호출마다 ArgoHostingController<ContentView> 를
+/// 적어야 한다.
+///
+/// UserDefaults 에 두었던 것을 메모리로 옮겼다. 이것은 지금 이 순간의
+/// 상태이지 설정이 아니다. 저장소에 두면 입력 중에 앱이 죽었을 때
+/// 다음 실행에도 단축키가 죽은 채로 남는다.
+enum ArgoTextEntry {
+    private static var depth = 0
+
+    static var isActive: Bool { depth > 0 }
+
+    /// 글자를 받는 칸이 떠오를 때. 겹쳐도 되도록 깊이로 센다 —
+    /// 경로 칸에 포커스가 있는 채로 찾기 시트가 뜰 수 있다.
+    static func begin() { depth += 1 }
+    static func end()   { depth = max(0, depth - 1) }
 }

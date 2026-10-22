@@ -173,7 +173,12 @@ struct ContentView: View {
             VStack {
                 VStack {
                     HStack { //input directory + refresh
-                    TextField(NSLocalizedString("INPUT_DIRECTORY", comment: "According to all known laws of aviation"), text: directoryBinding, onCommit: {
+                    TextField(NSLocalizedString("INPUT_DIRECTORY", comment: "According to all known laws of aviation"), text: directoryBinding, onEditingChanged: { editing in
+                        // 글자를 받는 동안 단축키를 막는다. 안 막으면 파일명에
+                        // 'r' 을 넣는 순간 새로 읽기가 돈다.
+                        if editing { ArgoTextEntry.begin() }
+                        else { ArgoTextEntry.end() }
+                    }, onCommit: {
                         if directory == "" {
                             directory = "/"
                         }
@@ -206,12 +211,18 @@ struct ContentView: View {
                     }
                     .sheet(isPresented: $showSubView[6], content: {
                         CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
                     })
                     .sheet(isPresented: $showSubView[5], content: {
                         CreateFileView(filePath: directoryBinding, isPresented: $showSubView[5])
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
                     })
                     .sheet(isPresented: $showSubView[20], content: {
                         CreateSymlinkView(symlinkPath: directoryBinding, isPresented: $showSubView[20])
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
                     })
                 }
                 HStack {
@@ -358,6 +369,8 @@ struct ContentView: View {
                                 }
                             }, content: {
                                 SearchView(directory: directoryBinding, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
+                                    .onAppear { ArgoTextEntry.begin() }
+                                    .onDisappear { ArgoTextEntry.end() }
                             }) //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
                             //someday I'll figure it out. It's surprisingly good
                     
@@ -554,6 +567,8 @@ struct ContentView: View {
                         })
                         .sheet(isPresented: $showSubView[7], content: {
                             RenameFileView(fileName: $renameFileCurrentName, newFileName: $renameFileNewName, filePath: $newViewFilePath, isPresented: $showSubView[7])
+                                .onAppear { ArgoTextEntry.begin() }
+                                .onDisappear { ArgoTextEntry.end() }
                         })
                         .sheet(isPresented: $showSubView[8], content: {
                             MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[8])
@@ -632,6 +647,9 @@ struct ContentView: View {
                             WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
                         })
                 }
+                // 툴바를 하나의 포커스 구역으로 묶는다. 칸에서 좌우 끝으로 가면
+                // 더 갈 곳이 없어 포커스가 이 구역으로 올라온다.
+                .focusSection()
                 HStack {
                     // 칸 둘. 활성 칸만 테두리가 켜지고, 툴바의 모든 명령은 그쪽으로 간다.
                     // 칸 사이 좌우 이동은 tvOS 포커스 엔진이 알아서 한다 — 손대면 싸운다.
@@ -1662,4 +1680,13 @@ struct SpartanFile: Hashable, Encodable, Decodable {
     var isSelected: Bool
     var fileType: Double
     var isLoadingFile: Bool
+
+    // 정렬용. 폴더를 읽을 때 한 번만 채운다 — 비교할 때마다 디스크를 치면
+    // 파일 300개 폴더에서 attributesOfItem 이 O(n log n)번 돈다.
+    //
+    // 선택형인 이유는 이미 디스크에 깔린 캐시 때문이다. 필수 항목으로 두면
+    // 예전 캐시의 JSON 에 키가 없어 디코딩이 통째로 실패하고, 모든 폴더가
+    // 한 번씩 다시 훑긴다. 선택형이면 조용히 nil 로 들어온 뒤 채워진다.
+    var size: Int64? = nil
+    var modified: Date? = nil
 } // i am so glad I switched to this instead of having like five different arrays
