@@ -83,6 +83,21 @@ struct FilePaneView: View {
     // MARK: - 머리
 
     private var header: some View {
+        VStack(spacing: 4) {
+            pathRow
+            if !model.filter.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                    Text(model.filter)
+                        .font(.caption)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+            }
+        }
+    }
+
+    private var pathRow: some View {
         HStack(spacing: 12) {
             if let symbol = model.currentDirRisk.badgeSymbol {
                 Image(systemName: symbol)
