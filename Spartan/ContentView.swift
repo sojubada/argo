@@ -228,6 +228,43 @@ struct ContentView: View {
                             .frame(width: 50, height: 50)
                     }
 
+                    if #available(tvOS 14.0, *) {
+                        Menu {
+                            ForEach(SortKey.allCases, id: \.rawValue) { key in
+                                Button(action: { setSort(key) }) {
+                                    HStack {
+                                        Image(systemName: key.symbol)
+                                        Text(key.label)
+                                        if pane.sort == key {
+                                            Image(systemName: pane.ascending
+                                                  ? "chevron.up" : "chevron.down")
+                                        }
+                                    }
+                                }
+                            }
+                            Button(action: {
+                                pane.showHidden.toggle()
+                                UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                                pane.applySortAndFilter()
+                            }) {
+                                HStack {
+                                    Image(systemName: pane.showHidden ? "eye" : "eye.slash")
+                                    Text(pane.showHidden ? "숨긴 항목 숨기기" : "숨긴 항목 보기")
+                                }
+                            }
+                            Button(action: { showSubView[39] = true }) {
+                                HStack {
+                                    Image(systemName: "keyboard")
+                                    Text("단축키 도움말")
+                                }
+                            }
+                            Button("Dismiss", action: { })
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down")
+                                .frame(width: 50, height: 50)
+                        }
+                    }
+
                     if dualPaneEnabled {
                         Button(action: { //반대 칸으로 복사
                             copySelectionToOtherPane(move: false)
@@ -607,13 +644,13 @@ struct ContentView: View {
                                      onFocus: { activeSide = .left },
                                      onContextMenu: { index in openContextMenu(.left, index: index) })
                     }
-                        .alert(isPresented: $showAlert) {
-                            Alert(
-                                title: Text(alertTitle),
-                                message: Text(alertMsg),
-                                dismissButton: .default(Text(NSLocalizedString("DISMISS", comment: "You're sky freaks! I love it! I love it!")))
-                            )
-                        }
+                }
+                .alert(isPresented: $showAlert) {
+                    Alert(
+                        title: Text(alertTitle),
+                        message: Text(alertMsg),
+                        dismissButton: .default(Text(NSLocalizedString("DISMISS", comment: "You're sky freaks! I love it! I love it!")))
+                    )
                 }
                 .sheet(isPresented: $showSubView[35]) {
                     NotJailbrokenView()
