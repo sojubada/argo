@@ -228,41 +228,38 @@ struct ContentView: View {
                             .frame(width: 50, height: 50)
                     }
 
-                    if #available(tvOS 14.0, *) {
-                        Menu {
-                            ForEach(SortKey.allCases, id: \.rawValue) { key in
-                                Button(action: { setSort(key) }) {
-                                    HStack {
-                                        Image(systemName: key.symbol)
-                                        Text(key.label)
-                                        if pane.sort == key {
-                                            Image(systemName: pane.ascending
-                                                  ? "chevron.up" : "chevron.down")
-                                        }
-                                    }
-                                }
-                            }
-                            Button(action: {
-                                pane.showHidden.toggle()
-                                UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                    Button(action: { //정렬 기준 돌리기. 같은 기준을 다시 누르면 오르내림이 뒤집힌다
+                        let keys = SortKey.allCases
+                        if let i = keys.firstIndex(of: pane.sort) {
+                            if pane.ascending {
+                                pane.ascending = false
                                 pane.applySortAndFilter()
-                            }) {
-                                HStack {
-                                    Image(systemName: pane.showHidden ? "eye" : "eye.slash")
-                                    Text(pane.showHidden ? "숨긴 항목 숨기기" : "숨긴 항목 보기")
-                                }
+                            } else {
+                                setSort(keys[(i + 1) % keys.count])
                             }
-                            Button(action: { showSubView[39] = true }) {
-                                HStack {
-                                    Image(systemName: "keyboard")
-                                    Text("단축키 도움말")
-                                }
-                            }
-                            Button("Dismiss", action: { })
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down")
-                                .frame(width: 50, height: 50)
                         }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: pane.sort.symbol)
+                            Image(systemName: pane.ascending ? "chevron.up" : "chevron.down")
+                        }
+                        .frame(width: 70, height: 50)
+                    }
+
+                    Button(action: { //숨긴 항목
+                        pane.showHidden.toggle()
+                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                        pane.applySortAndFilter()
+                    }) {
+                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
+                        showSubView[39] = true
+                    }) {
+                        Image(systemName: "keyboard")
+                            .frame(width: 50, height: 50)
                     }
 
                     if dualPaneEnabled {
