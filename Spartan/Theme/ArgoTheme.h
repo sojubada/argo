@@ -67,11 +67,15 @@
 @interface ArgoBarButton : UIButton
 /// 포인트 색으로 칠해 주 동작임을 보입니다. 화면에 하나만 두십시오.
 @property (nonatomic, assign) BOOL isPrimary;
-+ (instancetype)buttonWithTitle:(NSString *)title;
+/// nonnull 로 둡니다 — 아니면 Swift 에서 선택형으로 들어와 전부 풀어야 합니다.
+/// NS_SWIFT_NAME 으로 Swift 쪽 이름을 못 박습니다. 자동 변환에 맡기면
+/// 클래스 이름과 겹치는 부분을 깎아내 예측하기 어려운 이름이 됩니다.
++ (nonnull instancetype)barButtonWithTitle:(nonnull NSString *)title
+    NS_SWIFT_NAME(make(title:));
 @end
 
 
 /// 모서리가 둥근 반투명 표면. 도구 모음과 패널의 바탕입니다.
 @interface ArgoSurfaceView : UIView
-+ (instancetype)surface;
++ (nonnull instancetype)makeSurface;
 @end

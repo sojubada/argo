@@ -49,7 +49,7 @@
 
 @implementation ArgoBarButton
 
-+ (instancetype)buttonWithTitle:(NSString *)title {
++ (instancetype)barButtonWithTitle:(NSString *)title {
     ArgoBarButton *b = [ArgoBarButton buttonWithType:UIButtonTypeCustom];
     [b setTitle:title forState:UIControlStateNormal];
     b.titleLabel.font = [ArgoTheme fontBody];
@@ -102,7 +102,7 @@
 
 @implementation ArgoSurfaceView
 
-+ (instancetype)surface {
++ (instancetype)makeSurface {
     ArgoSurfaceView *v = [[ArgoSurfaceView alloc] init];
     v.backgroundColor = [ArgoTheme surface];
     v.layer.cornerRadius = [ArgoTheme cornerRadius];

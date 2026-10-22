@@ -325,7 +325,7 @@
 				7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */,
 				A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */,
 			);
-			path = Readers;
+			path = FileOpeners/Readers;
 			sourceTree = "<group>";
 		};
 		E9DA58C85DF94CDB9259C829 /* Safety */ = {

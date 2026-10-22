@@ -29,7 +29,7 @@ final class ArgoTextReaderController: UIViewController {
     private let textView = UITextView()
     private var canvas = PDFCanvasButton(type: .custom)
 
-    private var toolbarSurface = ArgoSurfaceView.surface()
+    private var toolbarSurface = ArgoSurfaceView.makeSurface()
     private var toolbar = UIStackView()
     private var statusLabel = UILabel()
     private var toolbarVisible = true
@@ -56,7 +56,8 @@ final class ArgoTextReaderController: UIViewController {
         fontSize = CGFloat(UserDefaults.settings.object(forKey: "readerFontSize") as? Double ?? 28)
 
         textView.translatesAutoresizingMaskIntoConstraints = false
-        textView.isEditable = false
+        // isEditable 은 tvOS 에 없다 — 이 플랫폼의 UITextView 는 애초에
+        // 편집을 하지 않는다. 선택도 끈다.
         textView.isSelectable = false
         textView.isScrollEnabled = true
         // 리모컨 입력은 캔버스가 받는다. 텍스트 뷰가 가져가면 방향키가 엉킨다.
@@ -242,15 +243,15 @@ final class ArgoTextReaderController: UIViewController {
         statusLabel.font = ArgoTheme.fontMonoBody()
         statusLabel.textColor = ArgoTheme.textSecondary()
 
-        let top = ArgoBarButton.button(withTitle: "처음")
+        let top = ArgoBarButton.make(title: "처음")
         top.addTarget(self, action: #selector(goTop), for: .primaryActionTriggered)
-        let bottom = ArgoBarButton.button(withTitle: "끝")
+        let bottom = ArgoBarButton.make(title: "끝")
         bottom.addTarget(self, action: #selector(goBottom), for: .primaryActionTriggered)
-        let size = ArgoBarButton.button(withTitle: "글자 크기")
+        let size = ArgoBarButton.make(title: "글자 크기")
         size.addTarget(self, action: #selector(cycleFontSize), for: .primaryActionTriggered)
-        let edit = ArgoBarButton.button(withTitle: "편집")
+        let edit = ArgoBarButton.make(title: "편집")
         edit.addTarget(self, action: #selector(editNow), for: .primaryActionTriggered)
-        let close = ArgoBarButton.button(withTitle: "닫기")
+        let close = ArgoBarButton.make(title: "닫기")
         close.addTarget(self, action: #selector(closeNow), for: .primaryActionTriggered)
 
         toolbar = UIStackView(arrangedSubviews: [top, bottom, statusLabel, size, edit, close])

@@ -140,7 +140,7 @@
 }
 
 - (UIButton *)barButton:(NSString *)title action:(SEL)sel {
-    ArgoBarButton *b = [ArgoBarButton buttonWithTitle:title];
+    ArgoBarButton *b = [ArgoBarButton barButtonWithTitle:title];
     [b addTarget:self action:sel forControlEvents:UIControlEventPrimaryActionTriggered];
     return b;
 }
@@ -150,7 +150,7 @@
 /// 진행률을 측정할 수 없으므로 가짜 퍼센트를 보이지 않습니다.
 /// 무엇을 여는 중인지만 말합니다.
 - (void)buildLoadingView {
-    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+    ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     self.spinner = [[UIActivityIndicatorView alloc] init];
     self.spinner.color = [ArgoTheme accent];
@@ -233,7 +233,7 @@
     self.toolbar.alignment = UIStackViewAlignmentCenter;
     self.toolbar.translatesAutoresizingMaskIntoConstraints = NO;
 
-    self.toolbarSurface = [ArgoSurfaceView surface];
+    self.toolbarSurface = [ArgoSurfaceView makeSurface];
     [self.view addSubview:self.toolbarSurface];
     [self.toolbarSurface addSubview:self.toolbar];
 }
@@ -279,7 +279,7 @@
     if (self.panelView) { return; }
     [self.hideTimer invalidate];
 
-    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+    ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     UILabel *head = [[UILabel alloc] init];
     head.text = @"문서 설정";
@@ -289,7 +289,7 @@
 
     NSMutableArray *rows = [NSMutableArray array];
 
-    ArgoBarButton *night = [ArgoBarButton buttonWithTitle:
+    ArgoBarButton *night = [ArgoBarButton barButtonWithTitle:
                             self.isNight ? @"주간 보기로" : @"야간 보기로"];
     [night addTarget:self action:@selector(panelToggleNight)
     forControlEvents:UIControlEventPrimaryActionTriggered];
@@ -298,18 +298,18 @@
     if (self.isDeck) {
         // pptx-preview는 슬라이드 마스터를 그리지 않아, 밝은 글자를 쓰는
         // 테마는 칠하지 않은 바탕에서 글자가 사라집니다.
-        ArgoBarButton *paint = [ArgoBarButton buttonWithTitle:@"슬라이드 배경 칠하기"];
+        ArgoBarButton *paint = [ArgoBarButton barButtonWithTitle:@"슬라이드 배경 칠하기"];
         [paint addTarget:self action:@selector(panelTogglePaint)
         forControlEvents:UIControlEventPrimaryActionTriggered];
         [rows addObject:paint];
     }
 
-    ArgoBarButton *info = [ArgoBarButton buttonWithTitle:@"문서 정보"];
+    ArgoBarButton *info = [ArgoBarButton barButtonWithTitle:@"문서 정보"];
     [info addTarget:self action:@selector(panelShowInfo)
    forControlEvents:UIControlEventPrimaryActionTriggered];
     [rows addObject:info];
 
-    ArgoBarButton *close = [ArgoBarButton buttonWithTitle:@"닫기"];
+    ArgoBarButton *close = [ArgoBarButton barButtonWithTitle:@"닫기"];
     close.isPrimary = YES;
     [close addTarget:self action:@selector(hidePanel)
     forControlEvents:UIControlEventPrimaryActionTriggered];
@@ -395,7 +395,7 @@
 
     [self hidePanel];
 
-    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+    ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     UILabel *head = [[UILabel alloc] init];
     head.text = @"문서 정보";
@@ -410,7 +410,7 @@
     detail.textColor = [ArgoTheme textSecondary];
     detail.translatesAutoresizingMaskIntoConstraints = NO;
 
-    ArgoBarButton *close = [ArgoBarButton buttonWithTitle:@"닫기"];
+    ArgoBarButton *close = [ArgoBarButton barButtonWithTitle:@"닫기"];
     close.isPrimary = YES;
     [close addTarget:self action:@selector(hidePanel)
     forControlEvents:UIControlEventPrimaryActionTriggered];
@@ -663,7 +663,7 @@
     [self setToolbarVisible:YES animated:YES];
     if (self.errorView) { return; }
 
-    ArgoSurfaceView *box = [ArgoSurfaceView surface];
+    ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     UILabel *head = [[UILabel alloc] init];
     head.text = @"문서를 열 수 없습니다";
@@ -691,12 +691,12 @@
     name.translatesAutoresizingMaskIntoConstraints = NO;
 
     // 복구 경로를 줍니다. 막다른 화면으로 두지 않습니다.
-    ArgoBarButton *retry = [ArgoBarButton buttonWithTitle:@"다시 시도"];
+    ArgoBarButton *retry = [ArgoBarButton barButtonWithTitle:@"다시 시도"];
     retry.isPrimary = YES;
     [retry addTarget:self action:@selector(retryRender)
     forControlEvents:UIControlEventPrimaryActionTriggered];
 
-    ArgoBarButton *back = [ArgoBarButton buttonWithTitle:@"파일 목록으로"];
+    ArgoBarButton *back = [ArgoBarButton barButtonWithTitle:@"파일 목록으로"];
     [back addTarget:self action:@selector(closeNow)
    forControlEvents:UIControlEventPrimaryActionTriggered];
 
