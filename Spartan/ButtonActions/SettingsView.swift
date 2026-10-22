@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SettingsView: View {
     // showView 배열 크기 5 -> 6 확장 (로그 뷰어 추가)
-    @State private var showView: [Bool] = [Bool](repeating: false, count: 6)
+    @State private var showView: [Bool] = [Bool](repeating: false, count: 7)
     @State private var descriptiveTitlesPre = UserDefaults.settings.bool(forKey: "descriptiveTitles")
     @State private var descriptiveTimestampsPre = UserDefaults.settings.bool(forKey: "verboseTimestamps")
     @State private var autoCompletePre = UserDefaults.settings.bool(forKey: "autoComplete")
@@ -175,7 +175,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "doc.viewfinder")
 						.frame(width: 50, height: 50)
-					Text("Lab ② 문서 렌더링 탐침 ← 지금 이것")
+					Text("Lab ② 문서 렌더링 탐침 — 확인 완료")
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
@@ -183,6 +183,23 @@ struct SettingsView: View {
 			}
 			.fullScreenCover(isPresented: $showView[4]) {
 				WebDocProbeView(isPresented: $showView[4])
+					.edgesIgnoringSafeArea(.all)
+			}
+
+			Button(action: { //print pipeline probe
+				showView[6] = true
+			}) {
+				HStack {
+					Image(systemName: "printer")
+						.frame(width: 50, height: 50)
+					Text("Lab ③ 인쇄 파이프라인 탐침 ← 지금 이것")
+						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+						}
+				}
+			}
+			.fullScreenCover(isPresented: $showView[6]) {
+				PrintPipelineProbeView(isPresented: $showView[6])
 					.edgesIgnoringSafeArea(.all)
 			}
 

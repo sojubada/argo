@@ -31,6 +31,7 @@
 		72436CFA1BCC40A8916B0111 /* ArgoKeyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */; };
 		7DC2B9A2DF864CC38941F00C /* KeyboardHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B38B012B684A9C928BE9AF /* KeyboardHelpView.swift */; };
 		75EDB716ECC14EA794E3CF38 /* PaneTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */; };
+		CCC4356230BF4254B733D2FD /* PrintPipelineProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE0A97C56224318BE7A9197 /* PrintPipelineProbe.swift */; };
 		552E0935447148F38D7677CE /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5ED9BB984043D88372ED41 /* PathSafety.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
@@ -131,6 +132,7 @@
 		B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoKeyboard.swift; sourceTree = "<group>"; };
 		A4B38B012B684A9C928BE9AF /* KeyboardHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHelpView.swift; sourceTree = "<group>"; };
 		1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTransfer.swift; sourceTree = "<group>"; };
+		3AE0A97C56224318BE7A9197 /* PrintPipelineProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintPipelineProbe.swift; sourceTree = "<group>"; };
 		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
@@ -262,6 +264,7 @@
 		204E5A23D3DF4DC2A2BB14E3 /* Diagnostics */ = {
 			isa = PBXGroup;
 			children = (
+				3AE0A97C56224318BE7A9197 /* PrintPipelineProbe.swift */,
 				2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */,
 				13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */,
 				6EB20E17101440D182E71F24 /* WebKitProbe.h */,
@@ -633,6 +636,7 @@
 				72436CFA1BCC40A8916B0111 /* ArgoKeyboard.swift in Sources */,
 				7DC2B9A2DF864CC38941F00C /* KeyboardHelpView.swift in Sources */,
 				75EDB716ECC14EA794E3CF38 /* PaneTransfer.swift in Sources */,
+				CCC4356230BF4254B733D2FD /* PrintPipelineProbe.swift in Sources */,
 				552E0935447148F38D7677CE /* PathSafety.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
