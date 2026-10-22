@@ -17,8 +17,8 @@ struct SettingsView: View {
     @State private var sheikahFontApplyPre = UserDefaults.settings.bool(forKey: "sheikahFontApply")
     @State private var dateFormatPre: String = UserDefaults.settings.string(forKey: "dateFormat") ?? ""
     
-    // 안전모드 설정 (기본값 True)
-    @State private var safeModeEnabledPre = UserDefaults.settings.object(forKey: "safeModeEnabled") == nil ? true : UserDefaults.settings.bool(forKey: "safeModeEnabled")
+    // 안전모드 설정
+    @State private var safeModeEnabledPre = UserDefaults.settings.bool(forKey: "safeModeEnabled")
     @State private var showSafeModeWarning = false
     
     @State var test = 0.0
@@ -66,7 +66,7 @@ struct SettingsView: View {
                 HStack {
                     Image(systemName: safeModeEnabledPre ? "checkmark.shield.fill" : "shield.slash")
                         .foregroundColor(safeModeEnabledPre ? .green : .red)
-                    Text("Safe Mode (Blocks System Writes)")
+                    Text("안전 모드 (시스템 쓰기 차단)")
                         .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                             view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                         }
@@ -74,13 +74,13 @@ struct SettingsView: View {
             }
             .alert(isPresented: $showSafeModeWarning) {
                 Alert(
-                    title: Text("Disable Safe Mode?"),
-                    message: Text("System files can now be modified or deleted. A mistake could render your Apple TV unbootable. Proceed?"),
-                    primaryButton: .destructive(Text("Disable"), action: {
+                    title: Text("안전 모드를 끄시겠습니까?"),
+                    message: Text("시스템 파일을 바꿀 수 있게 됩니다. 애플TV가 부팅하지 못할 수 있습니다."),
+                    primaryButton: .destructive(Text("끄기"), action: {
                         safeModeEnabledPre = false
                         UserDefaults.settings.set(false, forKey: "safeModeEnabled")
                     }),
-                    secondaryButton: .cancel(Text("Keep Safe"))
+                    secondaryButton: .cancel(Text("유지"))
                 )
             }
             
@@ -89,7 +89,7 @@ struct SettingsView: View {
             }) {
                 HStack {
                     Image(systemName: "doc.text.magnifyingglass")
-                    Text("View Operation Log")
+                    Text("작업 기록 보기")
                 }
             }
             .sheet(isPresented: $showView[5]) {

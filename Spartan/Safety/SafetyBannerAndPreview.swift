@@ -31,7 +31,7 @@ struct PathSafetyBanner: View {
 
 struct BatchDeletePreview: View {
     let files: [String]
-    let directory: String
+    let cautionCount: Int
     let onConfirm: () -> Void
     let onCancel: () -> Void
     
@@ -40,7 +40,7 @@ struct BatchDeletePreview: View {
             Color.black.opacity(0.85).edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 20) {
-                Text("Delete \(files.count) Items?")
+                Text("지울 것 \(files.count)개")
                     .font(.largeTitle)
                     .foregroundColor(.red)
                 
@@ -51,23 +51,22 @@ struct BatchDeletePreview: View {
                                 .foregroundColor(.white)
                         }
                         if files.count > 10 {
-                            Text("... and \(files.count - 10) more.")
+                            Text("...외 \(files.count - 10)개")
                                 .foregroundColor(.gray)
                         }
                     }
                 }
                 .frame(maxHeight: 300)
                 
-                let cautionCount = files.filter { PathSafety.risk(of: directory + $0) == .caution }.count
                 if cautionCount > 0 {
-                    Text("⚠️ \(cautionCount) item(s) are in a Caution zone.")
+                    Text("⚠️ \(cautionCount)개가 주의 구역에 있습니다")
                         .foregroundColor(.orange)
                 }
                 
                 HStack(spacing: 40) {
-                    Button("Cancel", action: onCancel)
+                    Button("취소", action: onCancel)
                     Button(action: onConfirm) {
-                        Text("Delete / Move to Trash")
+                        Text("휴지통으로 / 삭제")
                             .foregroundColor(.red)
                     }
                 }

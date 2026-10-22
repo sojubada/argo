@@ -110,6 +110,7 @@ struct ContentView: View {
     @State private var safetyBannerMsg: String = ""
     @State private var currentDirRisk: PathRisk = .safe
     @State private var showBatchDeletePreview = false
+    @State private var cautionCountForBatch = 0
     
     var body: some View {
         ZStack {
@@ -372,9 +373,10 @@ struct ContentView: View {
                                 let fullPaths = multiSelectFiles.map { directory + $0 }
                                 switch FileGuard.authorize(action: "batch_delete", paths: fullPaths) {
                                 case .success:
+                                    cautionCountForBatch = fullPaths.filter { PathSafety.risk(of: $0) == .caution }.count
                                     showBatchDeletePreview = true // 승인 후 팝업 띄움
                                 case .failure(let err):
-                                    alertTitle = "Action Blocked"
+                                    alertTitle = "작업 차단됨"
                                     alertMsg = err.localizedDescription
                                     showAlert = true
                                 }
@@ -543,7 +545,8 @@ struct ContentView: View {
                                                     .transition(.opacity)
                                             }
                                             // 위험도 계산 (부모 상속 최적화)
-                                            let itemRisk = PathSafety.fastRisk(parentRisk: currentDirRisk, fileName: masterFiles[index].name)
+                                            let isSym = masterFiles[index].fileType == 8
+                                            let itemRisk = PathSafety.fastRisk(parentRisk: currentDirRisk, fullPath: masterFiles[index].fullPath, isSymlink: isSym)
                                             
                                             // 위험 배지 UI
                                             if let symbol = itemRisk.badgeSymbol {
@@ -1580,7 +1583,7 @@ struct ContentView: View {
             if showBatchDeletePreview {
                 BatchDeletePreview(
                     files: multiSelectFiles,
-                    directory: directory,
+                    cautionCount: cautionCountForBatch,
                     onConfirm: {
                         showBatchDeletePreview = false
                         executeBatchDelete()
@@ -1863,7 +1866,7 @@ struct ContentView: View {
         if currentDirRisk != .safe {
             safetyBannerRisk = currentDirRisk
             let isCaution = currentDirRisk == .caution
-            safetyBannerMsg = isCaution ? "Caution - May affect system stability" : "System Folder - Write access blocked"
+            safetyBannerMsg = isCaution ? "주의 — 시스템에 영향을 줄 수 있습니다" : "시스템 폴더 — 쓰기가 차단됩니다"
             withAnimation { showSafetyBanner = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 withAnimation { showSafetyBanner = false }

@@ -45,27 +45,26 @@ enum PathSafety {
         "/cores",
         "/private/var/preferences",
         "/private/var/keybags"
-    ]
+    ].map { $0.lowercased() }
 
     private static let safePrefixes = [
         "/private/var/mobile/Media",
         "/private/var/mobile/Documents",
         "/private/var/mobile/Downloads",
-        NSTemporaryDirectory().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    ]
+        (NSTemporaryDirectory() as NSString).standardizingPath
+    ].map { $0.lowercased() }
 
     static func risk(of path: String) -> PathRisk {
-        // 루트 자체는 절대 금지
-        if path == "/" || path == "/private" || path == "/private/var" {
+        let lowerPath = path.lowercased()
+        if lowerPath == "/" || lowerPath == "/private" || lowerPath == "/private/var" {
             return .forbidden
         }
 
         let normalized = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-        let testPath = normalized.hasSuffix("/") ? normalized : normalized + "/"
+        let testPath = (normalized.hasSuffix("/") ? normalized : normalized + "/").lowercased()
 
-        // 앱 자신의 번들 보호
-        let bundlePath = Bundle.main.bundlePath
-        if testPath.hasPrefix(bundlePath + "/") || bundlePath.hasPrefix(testPath) {
+        let bundlePath = Bundle.main.bundlePath.lowercased()
+        if testPath.hasPrefix(bundlePath + "/") || testPath == bundlePath {
             return .forbidden
         }
 
@@ -101,10 +100,13 @@ enum PathSafety {
     }
     
     // UI 스크롤 성능을 위한 빠른 상속 판정
-    static func fastRisk(parentRisk: PathRisk, fileName: String) -> PathRisk {
-        if parentRisk == .safe || parentRisk == .forbidden {
-            return parentRisk // 자식은 부모의 속성을 물려받음
+    static func fastRisk(parentRisk: PathRisk, fullPath: String, isSymlink: Bool) -> PathRisk {
+        if isSymlink {
+            return risk(of: fullPath)
         }
-        return .caution
+        if parentRisk == .safe {
+            return .safe
+        }
+        return risk(of: fullPath)
     }
 }

@@ -345,7 +345,7 @@ class RootHelperActs {
 
 	class func rm(_ filePath: String) {
         guard checkAuth(action: "rm", paths: [filePath]) else { return }
-		spawn(command: helperPath, args: ["rm", "-rf", filePath], env: [], root: true)
+		spawn(command: helperPath, args: ["rm", filePath], env: [], root: true)
         OperationLog.record(action: "DELETE (root)", path: filePath)
 	}
 	
@@ -357,7 +357,7 @@ class RootHelperActs {
 	
 	class func cp(_ filePath: String, _ fileDest: String) {
         guard checkAuth(action: "cp", paths: [filePath, fileDest]) else { return }
-		spawn(command: helperPath, args: ["cp", "-a", filePath, fileDest], env: [], root: true)
+		spawn(command: helperPath, args: ["cp", filePath, fileDest], env: [], root: true)
         OperationLog.record(action: "COPY (root)", path: filePath, destination: fileDest)
 	}
 	
@@ -388,7 +388,7 @@ class RootHelperActs {
     class func mvtemp(_ filePath: String) {
         guard checkAuth(action: "mvtemp", paths: [filePath]) else { return }
         self.mv(tempPath, filePath)
-        spawn(command: helperPath, args: ["rm", "-rf", tempPath], env: [], root: true) // 순수 rm 재귀 방지
+        self.rm(tempPath)
     }
 }
 
