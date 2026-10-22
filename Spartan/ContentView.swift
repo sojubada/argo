@@ -265,6 +265,66 @@ struct ContentView: View {
                             .frame(width: 50, height: 50)
                     }
 
+                    Button(action: { //favorites
+                        showSubView[16] = true
+                    }) {
+                        Image(systemName: "star")
+                            .frame(width:50, height:50)
+                    }
+                    .sheet(isPresented: $showSubView[16], onDismiss: {
+                        updateFiles() //FavoritesView *can* change directory, but without an updateFiles the changes won't be reflected. it took me awhile to figure this bug out.
+                    }, content: {
+                        FavoritesView(directory: directoryBinding, showView: $showSubView[16])
+                    })
+                    .sheet(isPresented: $showSubView[17], content: {
+                        AddToFavoritesView(filePath: newViewFilePath, displayName: newViewFileName, showView: $showSubView[17])
+                    })
+
+                    Button(action: { //webdav
+                        showSubView[25] = true
+                    }) {
+                        Image(systemName: "globe")
+                            .frame(width:50, height:50)
+                    }
+                    .sheet(isPresented: $showSubView[25], onDismiss: {
+                        updateFiles()
+                    }, content: {
+                        WebDAVRootView(directory: directoryBinding, isPresented: $showSubView[25])
+                    })
+
+                    Button(action: { //trash
+                        showSubView[37] = true
+                    }) {
+                        Image(systemName: "trash")
+                            .frame(width:50, height:50)
+                    }
+                    .sheet(isPresented: $showSubView[37], onDismiss: {
+                        updateFiles()
+                    }, content: {
+                        TrashView(isPresented: $showSubView[37], onChanged: {
+                            updateFiles()
+                        })
+                    })
+
+                    Button(action: { //숨긴 항목
+                        pane.showHidden.toggle()
+                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                        pane.applySortAndFilter()
+                    }) {
+                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Button(action: { //settings
+                        showSubView[18] = true
+                    }) {
+                        Image(systemName: "gear")
+                            .frame(width:50, height:50)
+                    }
+                    .sheet(isPresented: $showSubView[18], content: {
+                        SettingsView()
+                    })
+
                     Button(action: { //더보기 — 나머지 아이콘 펼치기
                         withAnimation { toolbarExpanded.toggle() }
                     }) {
@@ -292,14 +352,6 @@ struct ContentView: View {
                         .frame(width: 70, height: 50)
                     }
 
-                    Button(action: { //숨긴 항목
-                        pane.showHidden.toggle()
-                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
-                        pane.applySortAndFilter()
-                    }) {
-                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
-                            .frame(width: 50, height: 50)
-                    }
 
                     Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
                         showSubView[39] = true
@@ -421,17 +473,6 @@ struct ContentView: View {
                                 MountPointsView(directory: directoryBinding, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
                             })
 
-                            Button(action: { //webdav
-                                showSubView[25] = true
-                            }) {
-                                Image(systemName: "globe")
-                                    .frame(width:50, height:50)
-                            }
-                            .sheet(isPresented: $showSubView[25], onDismiss: {
-                                updateFiles()
-                            }, content: {
-                                WebDAVRootView(directory: directoryBinding, isPresented: $showSubView[25])
-                            })
                             
                             /*if #available(tvOS 14.0, *) {
                                 Button(action: {
@@ -456,44 +497,8 @@ struct ContentView: View {
                             }*/
                             //this is the webserver button
                             
-                            Button(action: { //favorites
-                                showSubView[16] = true
-                            }) {
-                                Image(systemName: "star")
-                                    .frame(width:50, height:50)
-                            }
-                            .sheet(isPresented: $showSubView[16], onDismiss: {
-                                updateFiles() //FavoritesView *can* change directory, but without an updateFiles the changes won't be reflected. it took me awhile to figure this bug out.
-                            }, content: {
-                                FavoritesView(directory: directoryBinding, showView: $showSubView[16])
-                            })
-                            .sheet(isPresented: $showSubView[17], content: {
-                                AddToFavoritesView(filePath: newViewFilePath, displayName: newViewFileName, showView: $showSubView[17])
-                            })
                         
-                            Button(action: { //trash
-                                showSubView[37] = true
-                            }) {
-                                Image(systemName: "trash")
-                                    .frame(width:50, height:50)
-                            }
-                            .sheet(isPresented: $showSubView[37], onDismiss: {
-                                updateFiles()
-                            }, content: {
-                                TrashView(isPresented: $showSubView[37], onChanged: {
-                                    updateFiles()
-                                })
-                            })
 
-                            Button(action: { //settings
-                                showSubView[18] = true
-                            }) {
-                                Image(systemName: "gear")
-                                    .frame(width:50, height:50)
-                            }
-                            .sheet(isPresented: $showSubView[18], content: {
-                                SettingsView()
-                            })
                         } else {
                             Button(action: {
                                 showSubView[8] = true
