@@ -30,7 +30,17 @@ enum GuardError: LocalizedError {
 enum FileGuard {
     private static let lock = NSLock()
     private static var pendingMessages: [String] = []
+    private static var pendingCount = 0
     private static var flushWorkItem: DispatchWorkItem?
+    private static var firstBlockTime: Date?
+
+    /// 쌓아둘 메시지 상한. 건수는 따로 세므로 요약은 정확하다.
+    private static let messageCap = 20
+    /// 디바운스 간격. 연달아 막힐 때 알림을 한 번으로 묶는다.
+    private static let debounceInterval: TimeInterval = 0.25
+    /// 첫 차단으로부터 이 시간이 지나면 더 기다리지 않고 보낸다.
+    /// 디바운스가 호출마다 리셋되므로, 이것이 없으면 긴 일괄 작업 내내 아무 알림도 뜨지 않는다.
+    private static let maxDeferral: TimeInterval = 2.0
 
     /// 모든 파괴적 쓰기 작업(FileManager 및 RootHelperActs)의 단일 승인 관문
     static func authorize(action: String, paths: [String], notifyOnBlock: Bool = true) -> Result<Void, GuardError> {
@@ -63,28 +73,43 @@ enum FileGuard {
     /// 백그라운드/다중 호출 시 메인 스레드에서 1회로 묶어 알림 발송
     static func reportBlocked(_ message: String) {
         lock.lock()
-        pendingMessages.append(message)
+        pendingCount += 1
+        if pendingMessages.count < messageCap {
+            pendingMessages.append(message)
+        }
+
+        let now = Date()
+        let start = firstBlockTime ?? now
+        if firstBlockTime == nil { firstBlockTime = now }
+
+        // 첫 차단으로부터 maxDeferral이 지났으면 더 미루지 않는다.
+        let elapsed = now.timeIntervalSince(start)
+        let delay = min(debounceInterval, max(0, maxDeferral - elapsed))
+
         flushWorkItem?.cancel()
 
         let work = DispatchWorkItem {
             lock.lock()
             let msgs = pendingMessages
+            let count = pendingCount
             pendingMessages.removeAll()
+            pendingCount = 0
+            firstBlockTime = nil
             lock.unlock()
 
             guard let first = msgs.first else { return }
             let finalMessage: String
-            if msgs.count == 1 {
+            if count == 1 {
                 finalMessage = first
             } else {
-                finalMessage = "\(msgs.count)개 작업이 차단되었습니다.\n(\(first))"
+                finalMessage = "\(count)개 작업이 차단되었습니다.\n(\(first))"
             }
             NotificationCenter.default.post(name: .fileGuardBlocked, object: finalMessage)
         }
         flushWorkItem = work
         lock.unlock()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// 심볼릭 링크 자체에 대한 작업일 경우 링크 대상을 따라가지 않고 부모 경로를 검사하도록 보정
@@ -118,11 +143,11 @@ enum FileGuard {
         let destPrefix = resolvedDest.hasSuffix("/") ? resolvedDest : (resolvedDest + "/")
 
         guard let cPath = archivePath.cString(using: .utf8) else {
-            return .success(())
+            return refuseUncheckable("경로를 읽을 수 없습니다")
         }
 
         guard let archive = archive_read_new() else {
-            return .success(())
+            return refuseUncheckable("검사기를 준비할 수 없습니다")
         }
         defer {
             archive_read_close(archive)
@@ -133,11 +158,12 @@ enum FileGuard {
         archive_read_support_filter_all(archive)
 
         guard archive_read_open_filename(archive, cPath, 10240) == ARCHIVE_OK else {
-            return .success(())
+            return refuseUncheckable("압축 파일을 열 수 없습니다")
         }
 
         var entry: OpaquePointer? = nil
-        while archive_read_next_header(archive, &entry) == ARCHIVE_OK {
+        var readStatus = archive_read_next_header(archive, &entry)
+        while readStatus == ARCHIVE_OK {
             guard let currentEntry = entry else {
                 archive_read_data_skip(archive)
                 continue
@@ -164,27 +190,51 @@ enum FileGuard {
                     return .failure(.forbidden(msg))
                 }
 
-                // 3. 심볼릭 링크 항목(AE_IFLNK = 0o120000 = 40960)이 목적지 밖을 가리키는지 검사
-                if let symPtr = archive_entry_symlink(currentEntry) {
-                    let symTarget = String(cString: symPtr)
-                    if symTarget.hasPrefix("/") {
-                        let msg = "압축 해제 차단 — 외부 절대 경로를 가리키는 심볼릭 링크가 있습니다: \(entryName) -> \(symTarget)"
+                // 3. 링크 항목이 목적지 밖을 가리키는지 검사.
+                //    심볼릭 링크(AE_IFLNK)와 하드링크는 libarchive에서 서로 다른 필드로 들어오므로
+                //    둘 다 봐야 한다. 하드링크만 빠뜨리면 같은 방법으로 빠져나갈 수 있다.
+                let links: [(String, UnsafePointer<CChar>?)] = [
+                    ("심볼릭 링크", archive_entry_symlink(currentEntry)),
+                    ("하드링크", archive_entry_hardlink(currentEntry))
+                ]
+                for (kind, ptr) in links {
+                    guard let ptr = ptr else { continue }
+                    let linkTarget = String(cString: ptr)
+                    if linkTarget.isEmpty { continue }
+                    if linkTarget.hasPrefix("/") {
+                        let msg = "압축 해제 차단 — 외부 절대 경로를 가리키는 \(kind)가 있습니다: \(entryName) -> \(linkTarget)"
                         reportBlocked(msg)
                         return .failure(.forbidden(msg))
                     }
                     let linkParent = (standardized as NSString).deletingLastPathComponent
-                    let resolvedTarget = ((linkParent as NSString).appendingPathComponent(symTarget) as NSString).standardizingPath
+                    let resolvedTarget = ((linkParent as NSString).appendingPathComponent(linkTarget) as NSString).standardizingPath
                     let resolvedTargetSlash = resolvedTarget.hasSuffix("/") ? resolvedTarget : (resolvedTarget + "/")
                     if resolvedTarget != resolvedDest && !resolvedTargetSlash.hasPrefix(destPrefix) {
-                        let msg = "압축 해제 차단 — 대상 폴더 밖을 가리키는 심볼릭 링크가 있습니다: \(entryName) -> \(symTarget)"
+                        let msg = "압축 해제 차단 — 대상 폴더 밖을 가리키는 \(kind)가 있습니다: \(entryName) -> \(linkTarget)"
                         reportBlocked(msg)
                         return .failure(.forbidden(msg))
                     }
                 }
             }
             archive_read_data_skip(archive)
+            readStatus = archive_read_next_header(archive, &entry)
+        }
+
+        // ARCHIVE_EOF(1)로 끝났을 때만 '전부 검사했다'고 말할 수 있다.
+        // ARCHIVE_WARN(-20)/ARCHIVE_FATAL(-30)로 끊기면 뒤쪽 항목은 보지 못한 것이므로 막는다.
+        guard readStatus == ARCHIVE_EOF else {
+            return refuseUncheckable("압축 파일이 손상되어 검사를 끝내지 못했습니다")
         }
 
         return .success(())
+    }
+
+    /// 검사 자체가 불가능할 때는 통과시키지 않고 막는다.
+    /// 검사는 libarchive, 해제는 minizip이라 둘의 해석이 갈리는 파일 하나로 검사를 통째로
+    /// 우회할 수 있다. 보안 검사는 실패하면 닫혀야 한다.
+    private static func refuseUncheckable(_ reason: String) -> Result<Void, GuardError> {
+        let msg = "압축 해제 차단 — \(reason). 검사할 수 없는 압축 파일은 풀지 않습니다."
+        reportBlocked(msg)
+        return .failure(.forbidden(msg))
     }
 }
