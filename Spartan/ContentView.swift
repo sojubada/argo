@@ -225,6 +225,10 @@ struct ContentView: View {
                             .onDisappear { ArgoTextEntry.end() }
                     })
                 }
+                // 툴바가 화면보다 넓어지면 부모 VStack 의 폭이 같이 커져
+                // 화면 전체가 옆으로 밀려 잘린다. 가로 스크롤로 폭을 가둔다 —
+                // 포커스가 화면 밖 버튼으로 가면 tvOS 가 알아서 스크롤한다.
+                ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     Button(action: { //quit
                         quitArgo()
@@ -647,6 +651,8 @@ struct ContentView: View {
                             WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
                         })
                 }
+                .padding(.horizontal, 8)
+                }
                 // 툴바를 하나의 포커스 구역으로 묶는다. 칸에서 좌우 끝으로 가면
                 // 더 갈 곳이 없어 포커스가 이 구역으로 올라온다.
                 .focusSection()
@@ -670,7 +676,9 @@ struct ContentView: View {
                         }
                     } else {
                         FilePaneView(model: leftPane,
-                                     isActive: true,
+                                     // 한 칸일 때는 강조 테두리가 의미 없다 —
+                                     // 어느 칸이 명령을 받는지 보여줄 상대가 없다.
+                                     isActive: false,
                                      onOpen: { index in openInPane(.left, index: index) },
                                      onGoUp: { activeSide = .left; leftPane.goUp() },
                                      onFocus: { activeSide = .left },

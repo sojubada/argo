@@ -77,7 +77,7 @@ struct FilePaneView: View {
         .overlay(
             // 활성 칸 표시. 두 칸이면 어느 쪽이 명령을 받는지 보여야 한다.
             RoundedRectangle(cornerRadius: Theme.corner)
-                .stroke(isActive ? Theme.accent : Color.clear, lineWidth: 4)
+                .stroke(isActive ? Theme.accent : Color.clear, lineWidth: 3)
         )
         // 칸을 하나의 포커스 구역으로 묶는다. 구역 안에서 더 갈 곳이 없으면
         // 포커스가 구역 밖으로 나가며, 좌우 끝에서는 툴바(위쪽 구역)로 빠진다.
