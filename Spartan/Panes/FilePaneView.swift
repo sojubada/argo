@@ -37,6 +37,22 @@ enum FileGlyph {
     }
 }
 
+/// 길게 눌렀을 때 쓸 동작들. 뷰는 무엇을 하는지 모르고 부르기만 한다.
+@available(tvOS 13.0, *)
+struct PaneRowMenu {
+    let copy: (Int) -> Void
+    let cut: (Int) -> Void
+    let paste: () -> Void
+    let canPaste: () -> Bool
+    let pasteLabel: () -> String
+    let hasOtherPane: () -> Bool
+    let sendToOtherPane: (Int, Bool) -> Void
+    let rename: (Int) -> Void
+    let info: (Int) -> Void
+    let delete: (Int) -> Void
+    let more: (Int) -> Void
+}
+
 @available(tvOS 13.0, *)
 struct FilePaneView: View {
     @ObservedObject var model: FilePaneModel
@@ -51,21 +67,23 @@ struct FilePaneView: View {
     /// 이 칸에 포커스가 들어왔을 때. 활성 칸을 바꾸는 데 쓴다.
     let onFocus: () -> Void
 
-    /// 길게 눌러 뜨는 메뉴. 활성 칸으로 바꾼 뒤 ContentView가 처리한다.
-    let onContextMenu: ((Int) -> Void)?
+    /// 길게 눌러 뜨는 메뉴의 동작들. ContentView 가 실제 일을 한다.
+    /// 전에는 '자세히' 하나뿐이어서 시트를 한 번 더 거쳐야 했다 —
+    /// 길게 누른 뜻이 '이 파일로 무언가 하겠다'인데 한 단계가 더 있었다.
+    let menu: PaneRowMenu?
 
     init(model: FilePaneModel,
          isActive: Bool,
          onOpen: @escaping (Int) -> Void,
          onGoUp: @escaping () -> Void,
          onFocus: @escaping () -> Void,
-         onContextMenu: ((Int) -> Void)? = nil) {
+         menu: PaneRowMenu? = nil) {
         self.model = model
         self.isActive = isActive
         self.onOpen = onOpen
         self.onGoUp = onGoUp
         self.onFocus = onFocus
-        self.onContextMenu = onContextMenu
+        self.menu = menu
     }
 
     var body: some View {
@@ -157,14 +175,43 @@ struct FilePaneView: View {
                 rowContent(index)
             }
             .contextMenu {
-                Button(action: {
-                    onFocus()
-                    onContextMenu?(index)
-                }) {
-                    Text("자세히")
+                // 동작을 바로 담는다. 여기서 한 번 더 시트를 거치면
+                // 길게 누른 의미가 없다.
+                if let menu = menu {
+                    Button(action: { onFocus(); menu.copy(index) }) {
+                        Text("복사")
+                    }
+                    Button(action: { onFocus(); menu.cut(index) }) {
+                        Text("잘라내기")
+                    }
+                    if menu.canPaste() {
+                        Button(action: { onFocus(); menu.paste() }) {
+                            Text(menu.pasteLabel())
+                        }
+                    }
+                    if menu.hasOtherPane() {
+                        Button(action: { onFocus(); menu.sendToOtherPane(index, false) }) {
+                            Text("반대 칸으로 복사")
+                        }
+                        Button(action: { onFocus(); menu.sendToOtherPane(index, true) }) {
+                            Text("반대 칸으로 이동")
+                        }
+                    }
+                    Button(action: { onFocus(); menu.rename(index) }) {
+                        Text("이름 바꾸기")
+                    }
+                    Button(action: { onFocus(); menu.info(index) }) {
+                        Text("정보")
+                    }
+                    Button(action: { onFocus(); menu.delete(index) }) {
+                        Text("삭제")
+                    }
+                    Button(action: { onFocus(); menu.more(index) }) {
+                        Text("더보기…")
+                    }
                 }
                 // tvOS 컨텍스트 메뉴는 버튼을 눌러야 닫힌다. 다른 방법이 없다.
-                Button("Dismiss", action: { })
+                Button("닫기", action: { })
             }
         } else {
             Button(action: {

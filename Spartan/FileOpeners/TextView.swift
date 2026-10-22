@@ -22,6 +22,13 @@ struct TextView: View {
     
     @State private var errorShow = false
     @State private var errorString = ""
+
+    /// 읽기 모드로 시작한다.
+    ///
+    /// 줄마다 TextField 를 쓰면 한 줄에 한 행이라 긴 줄이 그냥 잘린다.
+    /// 로그는 한 줄이 화면 몇 배로 길어서 사실상 읽을 수가 없었다.
+    /// 읽기 모드는 Text 로 그려 줄을 접는다. 편집이 필요하면 바꾸면 된다.
+    @State private var readOnly = true
     
     init(filePath: String, fileName: String, isPresented: Binding<Bool>) {
 		_filePath = State(initialValue: filePath)
@@ -50,6 +57,21 @@ struct TextView: View {
 				}
 				.font(.system(size: 40))
 				.multilineTextAlignment(.center)
+
+			HStack {
+				Button(action: {
+					readOnly.toggle()
+				}) {
+					HStack(spacing: 8) {
+						Image(systemName: readOnly ? "doc.plaintext" : "pencil")
+						Text(readOnly ? "읽기 — 줄 접힘" : "편집 — 한 줄씩")
+					}
+				}
+				Text("\(fileContents.count)줄")
+					.font(.caption)
+					.foregroundColor(.secondary)
+			}
+
 			HStack {
 				Button(action: {
 					if(index == 0) {
@@ -129,10 +151,22 @@ struct TextView: View {
 								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 							}
 					}
-					TextField(NSLocalizedString("LINEADD_DESCRIPTION", comment: "- You going to the funeral?"), text: $fileContents[indexB])
-						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-						}
+					if readOnly {
+						// 줄을 접어서 보여준다. fixedSize 가 없으면 List 가
+						// 행 높이를 한 줄로 잡아 접힌 부분이 잘려 보인다.
+						Text(fileContents[indexB])
+							.lineLimit(nil)
+							.fixedSize(horizontal: false, vertical: true)
+							.frame(maxWidth: .infinity, alignment: .leading)
+							.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+							}
+					} else {
+						TextField(NSLocalizedString("LINEADD_DESCRIPTION", comment: "- You going to the funeral?"), text: $fileContents[indexB])
+							.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+							}
+					}
 				}
 			}
         }

@@ -30,6 +30,7 @@ struct ContentView: View {
         nonmutating set { selection.active = newValue }
     }
     @StateObject var transfer = PaneTransfer()
+    @StateObject var clipboard = ArgoClipboard()
     /// 두 칸을 함께 보일지. 끄면 한 칸만 나와 기존 동작과 같다.
     @AppStorage("dualPaneEnabled") var dualPaneEnabled = false
     /// 툴바에 나머지 아이콘을 펼칠지. 기본은 접어 둔다 —
@@ -324,6 +325,29 @@ struct ContentView: View {
                     .sheet(isPresented: $showSubView[18], content: {
                         SettingsView()
                     })
+
+                    // 붙여넣을 것이 있을 때만 나타난다. 평소에 자리를 차지하지 않고,
+                    // 나타나면 그 자체가 '뭔가 담겨 있다'는 표시가 된다.
+                    if !clipboard.isEmpty {
+                        Button(action: {
+                            clipboardPaste()
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: clipboard.mode == .move
+                                      ? "scissors" : "doc.on.clipboard")
+                                Text("\(clipboard.count)")
+                            }
+                            .frame(height: 50)
+                            .padding(.horizontal, 10)
+                        }
+
+                        Button(action: {
+                            clipboard.clear()
+                        }) {
+                            Image(systemName: "xmark.circle")
+                                .frame(width: 50, height: 50)
+                        }
+                    }
 
                     Button(action: { //더보기 — 나머지 아이콘 펼치기
                         withAnimation { toolbarExpanded.toggle() }
@@ -692,13 +716,13 @@ struct ContentView: View {
                                          onOpen: { index in openInPane(.left, index: index) },
                                          onGoUp: { activeSide = .left; leftPane.goUp() },
                                          onFocus: { activeSide = .left },
-                                         onContextMenu: { index in openContextMenu(.left, index: index) })
+                                         menu: rowMenu(for: .left))
                             FilePaneView(model: rightPane,
                                          isActive: activeSide == .right,
                                          onOpen: { index in openInPane(.right, index: index) },
                                          onGoUp: { activeSide = .right; rightPane.goUp() },
                                          onFocus: { activeSide = .right },
-                                         onContextMenu: { index in openContextMenu(.right, index: index) })
+                                         menu: rowMenu(for: .right))
                         }
                     } else {
                         FilePaneView(model: leftPane,
@@ -708,7 +732,7 @@ struct ContentView: View {
                                      onOpen: { index in openInPane(.left, index: index) },
                                      onGoUp: { activeSide = .left; leftPane.goUp() },
                                      onFocus: { activeSide = .left },
-                                     onContextMenu: { index in openContextMenu(.left, index: index) })
+                                     menu: rowMenu(for: .left))
                     }
                 }
                 .alert(isPresented: $showAlert) {
@@ -1476,6 +1500,9 @@ struct ContentView: View {
             // 의미가 없고, 시트가 읽는 값이 넘어가는 순간 어긋난다.
             guard dualPaneEnabled, !showSubView.contains(true) else { return }
             activeSide = activeSide == .left ? .right : .left
+        case .clipboardCopy:     clipboardTake(mode: .copy)
+        case .clipboardCut:      clipboardTake(mode: .move)
+        case .clipboardPaste:    clipboardPaste()
         case .copyToOtherPane:   copySelectionToOtherPane(move: false)
         case .moveToOtherPane:   copySelectionToOtherPane(move: true)
         case .syncPanes:         syncOtherPaneToActive()
@@ -1550,6 +1577,118 @@ struct ContentView: View {
         guard let index = pane.indexOfFirstMatch(prefix: prefix) else { return }
         newViewFilePath = pane.masterFiles[index].fullPath
         newViewFileName = pane.masterFiles[index].name
+    }
+
+    /// 길게 눌렀을 때의 동작 묶음. 누른 칸을 먼저 활성으로 바꾸고
+    /// 그 칸의 항목을 대상으로 삼는다.
+    func rowMenu(for side: PaneSide) -> PaneRowMenu {
+        let model = side == .left ? leftPane : rightPane
+
+        func focusItem(_ index: Int) -> String? {
+            activeSide = side
+            guard model.masterFiles.indices.contains(index) else { return nil }
+            let file = model.masterFiles[index]
+            newViewFilePath = file.fullPath
+            newViewFileName = file.name
+            newViewFileIndex = index
+            return file.fullPath
+        }
+
+        return PaneRowMenu(
+            copy: { index in
+                guard let path = focusItem(index) else { return }
+                clipboard.take([path], mode: .copy)
+            },
+            cut: { index in
+                guard let path = focusItem(index) else { return }
+                clipboard.take([path], mode: .move)
+            },
+            paste: {
+                activeSide = side
+                clipboardPaste()
+            },
+            canPaste: { !clipboard.isEmpty },
+            pasteLabel: { "여기에 붙여넣기 — " + clipboard.summary },
+            hasOtherPane: { dualPaneEnabled },
+            sendToOtherPane: { index, move in
+                guard focusItem(index) != nil else { return }
+                copySelectionToOtherPane(move: move)
+            },
+            rename: { index in
+                guard focusItem(index) != nil else { return }
+                renameFileCurrentName = model.masterFiles[index].name
+                renameFileNewName = model.masterFiles[index].name
+                newViewFilePath = model.directory
+                showSubView[7] = true
+            },
+            info: { index in
+                guard let path = focusItem(index) else { return }
+                fileInfo = FileInfo.getFileInfo(filePath: path)
+                showSubView[3] = true
+            },
+            delete: { index in
+                guard focusItem(index) != nil else { return }
+                requestDeleteSelection()
+            },
+            more: { index in
+                guard focusItem(index) != nil else { return }
+                showSubView[1] = true
+            }
+        )
+    }
+
+    // MARK: - 클립보드
+
+    /// 지금 대상이 되는 항목들. 고른 것이 있으면 그것, 없으면 마지막으로 만진 파일.
+    var currentTargets: [String] {
+        let selected = pane.selectedPaths
+        if !selected.isEmpty { return selected }
+        return newViewFilePath.isEmpty ? [] : [newViewFilePath]
+    }
+
+    func clipboardTake(mode: ClipboardMode) {
+        let targets = currentTargets
+        guard !targets.isEmpty else {
+            alertTitle = "고른 항목이 없습니다"
+            alertMsg = "파일을 길게 눌러 고르거나 여러 개 고르기를 켜십시오."
+            showAlert = true
+            return
+        }
+        clipboard.take(targets, mode: mode)
+        pane.multiSelect = false
+        pane.resetMultiSelectArrays()
+    }
+
+    /// 지금 보고 있는 폴더에 붙여넣는다. 목적지를 입력할 일이 없다.
+    func clipboardPaste() {
+        guard !clipboard.isEmpty else { return }
+        let sources = clipboard.paths
+        let move = clipboard.mode == .move
+        let destination = pane.directory
+        let destinationPane = pane
+
+        transfer.run(sources: sources,
+                     destination: destination,
+                     move: move,
+                     onBlocked: { reason in
+                        alertTitle = move ? "이동이 차단되었습니다" : "복사가 차단되었습니다"
+                        alertMsg = reason
+                        showAlert = true
+                     },
+                     onFinish: { done, failed in
+                        destinationPane.updateFiles()
+                        // 잘라내기는 원본이 사라졌으니 양쪽 다 다시 읽는다.
+                        if move {
+                            leftPane.updateFiles()
+                            rightPane.updateFiles()
+                            clipboard.clear()
+                        }
+                        if !failed.isEmpty {
+                            alertTitle = "일부를 옮기지 못했습니다"
+                            alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
+                            showAlert = true
+                        }
+                     })
     }
 
     // MARK: - 두 칸 라우팅

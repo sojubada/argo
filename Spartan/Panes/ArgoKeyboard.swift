@@ -26,6 +26,9 @@ enum ArgoCommand: String {
     case goForward
     case toggleDualPane
     case switchPane
+    case clipboardCopy
+    case clipboardCut
+    case clipboardPaste
     case copyToOtherPane
     case moveToOtherPane
     case syncPanes
@@ -63,8 +66,11 @@ enum ArgoCommand: String {
         case .goForward:         return "앞으로"
         case .toggleDualPane:    return "두 칸 켜고 끄기"
         case .switchPane:        return "반대 칸으로"
-        case .copyToOtherPane:   return "반대 칸으로 복사"
-        case .moveToOtherPane:   return "반대 칸으로 이동"
+        case .clipboardCopy:     return "복사"
+        case .clipboardCut:      return "잘라내기"
+        case .clipboardPaste:    return "붙여넣기 (이 폴더에)"
+        case .copyToOtherPane:   return "반대 칸으로 바로 복사"
+        case .moveToOtherPane:   return "반대 칸으로 바로 이동"
         case .syncPanes:         return "반대 칸을 이 폴더로"
         case .toggleMultiSelect: return "여러 개 고르기"
         case .selectAll:         return "전부 고르기"
@@ -124,8 +130,14 @@ enum ArgoCommand: String {
         // 맨 Tab 은 포커스 엔진이 쓰는 키다. 수정키 없이 가로채면
         // 칸 사이 이동이 깨질 수 있어 ⌥ 를 붙였다.
         case .switchPane:        return ("\t", .alternate)
-        case .copyToOtherPane:   return ("c", .command)
-        case .moveToOtherPane:   return ("x", .command)
+        // 표준 자리를 표준 동작에 돌려준다. 전에는 ⌘C 가 '반대 칸으로 바로
+        // 복사'였는데, 한 칸만 쓰는 사람에게는 복사할 길이 아예 없었다.
+        case .clipboardCopy:     return ("c", .command)
+        case .clipboardCut:      return ("x", .command)
+        case .clipboardPaste:    return ("v", .command)
+        // 두 칸을 쓸 때의 지름길. 클립보드를 거치지 않는다.
+        case .copyToOtherPane:   return ("c", [.command, .alternate])
+        case .moveToOtherPane:   return ("x", [.command, .alternate])
         case .syncPanes:         return ("=", .command)
         case .toggleMultiSelect: return ("m", .command)
         case .selectAll:         return ("a", .command)
@@ -157,6 +169,7 @@ enum ArgoCommand: String {
     /// 도움말 화면의 묶음.
     static let groups: [(String, [ArgoCommand])] = [
         ("이동", [.goUp, .goBack, .goForward, .goHome, .goRoot, .focusPathField, .refresh]),
+        ("복사·이동", [.clipboardCopy, .clipboardCut, .clipboardPaste]),
         ("두 칸", [.toggleDualPane, .switchPane, .copyToOtherPane, .moveToOtherPane, .syncPanes]),
         ("고르기", [.toggleMultiSelect, .selectAll]),
         ("파일", [.newFolder, .newFile, .rename, .fileInfo, .deleteSelection, .compress, .extractArchive, .undo]),
