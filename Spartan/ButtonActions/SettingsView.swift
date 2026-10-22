@@ -380,6 +380,9 @@ struct IconButton: View {
 }
 
 func cacheFolder(_ directory: String) {
+    // 캐시 파일 이름을 못 읽으면 할 일이 없다.
+    guard let metaName = metadataName else { return }
+
     var masterFiles: [SpartanFile] = []
     do {
         let contents = try FileManager.default.contentsOfDirectory(atPath: directory)
@@ -390,7 +393,15 @@ func cacheFolder(_ directory: String) {
             FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory)
             return isDirectory.boolValue ? "\(file)/" : file
         }
-        files.remove(at: files.firstIndex(of: metadataName!)!) //hide the metadata file from view
+        // 캐시 파일이 폴더에 있을 때만 뺀다.
+        //
+        // 전에는 files.firstIndex(of:)! 로 강제 언래핑했다. 캐시가 아직 없는
+        // 폴더에서는 nil 이 나와 뒷줄 스레드에서 트랩이 났다 — 실행 직후 종료의
+        // 원인이다. 원래 코드에서는 updateFiles 가 캐시 없는 폴더에서 먼저
+        // return 해 여기까지 오지 않았고, 그 구조가 사라지면서 드러났다.
+        if let metaIndex = files.firstIndex(of: metaName) {
+            files.remove(at: metaIndex)
+        }
         for i in 0..<files.count {
             masterFiles.append(SpartanFile(name: files[i], fullPath: directory + files[i], isSelected: false, fileType: FileInfo.yandereDevFileType(file: directory + files[i]), isLoadingFile: false))
         }
@@ -404,5 +415,5 @@ func cacheFolder(_ directory: String) {
     } catch {
         print("failed to save cached metadata: \(error)")
     }
-    RootHelperActs.mvtemp(directory + metadataName!)
+    RootHelperActs.mvtemp(directory + metaName)
 }
