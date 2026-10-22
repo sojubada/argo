@@ -58,6 +58,9 @@ struct ContentView: View {
     var directoryBinding: Binding<String> {
         Binding(get: { pane.directory }, set: { pane.directory = $0 })
     }
+    var multiSelectBinding: Binding<Bool> {
+        Binding(get: { pane.multiSelect }, set: { pane.multiSelect = $0 })
+    }
     var multiSelectFilesBinding: Binding<[String]> {
         Binding(get: { pane.multiSelectFiles }, set: { pane.multiSelectFiles = $0 })
     }
@@ -100,7 +103,7 @@ struct ContentView: View {
     
     @State var didChangeDir = false
     
-    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 39)
+    @State private var showSubView: [Bool] = [Bool](repeating: false, count: 40)
     //createFileSelectShow = 0
     //contextMenuShow = 1
     //openInMenu = 2
@@ -140,7 +143,7 @@ struct ContentView: View {
     //pdfViewShow = 36
     //trashViewShow = 37
     //officeDocViewShow = 38
-    //batchDeletePreviewShow = 39 (안전장치 오버레이 대신 시트/상태 활용)
+    //keyboardHelpShow = 39
     
     @Binding var globalAVPlayer: AVPlayer 
     @State var isGlobalAVPlayerPlaying = false
@@ -502,10 +505,10 @@ struct ContentView: View {
                             RenameFileView(fileName: $renameFileCurrentName, newFileName: $renameFileNewName, filePath: $newViewFilePath, isPresented: $showSubView[7])
                         })
                         .sheet(isPresented: $showSubView[8], content: {
-                            MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: $multiSelect, isPresented: $showSubView[8])
+                            MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[8])
                         })
                         .sheet(isPresented: $showSubView[9], content: {
-                            CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: $multiSelect, isPresented: $showSubView[9])
+                            CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[9])
                         })
                         .sheet(isPresented: $showSubView[11], content: {
                             VideoPlayerView(videoPath: $newViewFilePath, videoName: $newViewFileName, isPresented: $showSubView[11], player: globalAVPlayer)
@@ -1052,6 +1055,19 @@ struct ContentView: View {
                     showAlert = true
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: ArgoCommand.notification)) { note in
+                if let raw = note.object as? String {
+                    handleKeyCommand(raw)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ArgoTypeAhead.notification)) { note in
+                if let prefix = note.object as? String {
+                    handleTypeAhead(prefix)
+                }
+            }
+            .sheet(isPresented: $showSubView[39], content: {
+                KeyboardHelpView(isPresented: $showSubView[39])
+            })
             
             // 배너
             if showSafetyBanner {
@@ -1300,6 +1316,102 @@ struct ContentView: View {
 
     func iterateOverFileWasSelected(boolToIterate: Bool) {
         pane.setAllSelected(boolToIterate)
+    }
+
+    // MARK: - 키보드 명령
+
+    /// 리스폰더 체인에서 올라온 단축키를 처리한다.
+    /// 전부 리모컨으로도 되는 일이어야 한다 — 단축키 전용 기능은 만들지 않는다.
+    func handleKeyCommand(_ raw: String) {
+        guard let command = ArgoCommand(rawValue: raw) else { return }
+        switch command {
+        case .refresh:           pane.updateFiles()
+        case .goUp:              pane.goUp()
+        case .goBack:            pane.goBack()
+        case .goForward:         pane.goForward()
+        case .goHome:            pane.navigate(to: "/var/mobile/Media/")
+        case .goRoot:            pane.navigate(to: "/")
+
+        case .toggleDualPane:
+            withAnimation { dualPaneEnabled.toggle() }
+            if dualPaneEnabled && rightPane.masterFiles.isEmpty {
+                rightPane.updateFiles()
+            }
+        case .switchPane:
+            guard dualPaneEnabled else { return }
+            activeSide = activeSide == .left ? .right : .left
+        case .copyToOtherPane:   copySelectionToOtherPane(move: false)
+        case .moveToOtherPane:   copySelectionToOtherPane(move: true)
+        case .syncPanes:         syncOtherPaneToActive()
+
+        case .toggleMultiSelect:
+            withAnimation { pane.multiSelect.toggle() }
+            if !pane.multiSelect { pane.resetMultiSelectArrays() }
+        case .selectAll:
+            pane.multiSelect = true
+            pane.setAllSelected(!pane.allWereSelected)
+
+        // 삭제는 전용 시트가 없다. 선택이 있으면 미리보기를 거쳐 휴지통으로 보낸다.
+        case .deleteSelection:   requestDeleteSelection()
+        case .rename:            showSubView[7] = true   // renameFileShow
+        case .fileInfo:          showSubView[3] = true   // fileInfoShow
+        case .newFolder:         showSubView[6] = true   // createDirectoryShow
+        case .newFile:           showSubView[5] = true   // createFileShow
+        case .compress:          showSubView[14] = true  // compFileShow
+        case .extractArchive:    showSubView[34] = true  // uncompFileShow
+        case .search:            showSubView[19] = true  // searchShow
+        case .showHelp:          showSubView[39] = true  // keyboardHelpShow
+
+        case .toggleHidden:
+            pane.showHidden.toggle()
+            UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+            pane.applySortAndFilter()
+        case .sortByName:        setSort(.name)
+        case .sortBySize:        setSort(.size)
+        case .sortByDate:        setSort(.date)
+        case .sortByKind:        setSort(.kind)
+        case .reverseSort:
+            pane.ascending.toggle()
+            pane.applySortAndFilter()
+
+        case .focusPathField:
+            // 경로 칸은 TextField라 포커스를 코드로 줄 수 없다.
+            // 대신 경로를 알려주는 찾기 시트를 연다.
+            showSubView[19] = true
+        }
+    }
+
+    /// ⌫ 로 삭제. 기존 일괄 삭제 미리보기를 거친다 — 되돌릴 수 없는 일이라 확인을 뺄 수 없다.
+    func requestDeleteSelection() {
+        let targets = pane.selectedPaths.isEmpty
+            ? (newViewFilePath.isEmpty ? [] : [newViewFilePath])
+            : pane.selectedPaths
+        guard !targets.isEmpty else {
+            alertTitle = "삭제할 항목이 없습니다"
+            alertMsg = "먼저 항목을 고르십시오."
+            showAlert = true
+            return
+        }
+        cautionCountForBatch = targets.filter { PathSafety.risk(of: $0) != .safe }.count
+        showBatchDeletePreview = true
+    }
+
+    /// 같은 기준을 다시 누르면 오르내림이 뒤집힌다. 파인더와 같다.
+    func setSort(_ key: SortKey) {
+        if pane.sort == key {
+            pane.ascending.toggle()
+        } else {
+            pane.sort = key
+            pane.ascending = true
+        }
+        pane.applySortAndFilter()
+    }
+
+    /// 글자를 치면 그 글자로 시작하는 첫 항목을 고른다.
+    func handleTypeAhead(_ prefix: String) {
+        guard let index = pane.indexOfFirstMatch(prefix: prefix) else { return }
+        newViewFilePath = pane.masterFiles[index].fullPath
+        newViewFileName = pane.masterFiles[index].name
     }
 
     // MARK: - 두 칸 라우팅

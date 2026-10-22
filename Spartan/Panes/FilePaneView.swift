@@ -14,8 +14,8 @@ import SwiftUI
 /// 파일 종류 번호 → 아이콘. 원래 ContentView의 639줄 switch가 하던 일이다.
 /// tvOS 13/14 분기로 같은 switch가 두 번 들어 있었다.
 enum FileGlyph {
-    static func symbol(for fileType: Int, name: String) -> String {
-        switch fileType {
+    static func symbol(for fileType: Double, name: String) -> String {
+        switch Int(fileType) {
         case 0:  return name.hasSuffix("/") ? "folder" : "folder.fill"
         case 1:  return "waveform.circle"
         case 2:  return "video"
