@@ -92,23 +92,31 @@ struct ContentView: View {
     //pdfViewShow = 36
     //trashViewShow = 37
     //officeDocViewShow = 38
+    //batchDeletePreviewShow = 39 (안전장치 오버레이 대신 시트/상태 활용)
     
-    @Binding var globalAVPlayer: AVPlayer //this is because Spartan has the ability to play music without the AudioPlayerView being shown. It took about a week to get working properly and I'm proud of it
+    @Binding var globalAVPlayer: AVPlayer 
     @State var isGlobalAVPlayerPlaying = false
     @State var callback = true
     
-    //@Binding var webServer: GCDWebUploader
-    
     @State private var isLoadingView = false
-    @State var blankString: [String] = [""] //dont question it
-    @State private var nonexistentFile = "" //REALLY dont question it
+    @State var blankString: [String] = [""] 
+    @State private var nonexistentFile = "" 
     
     @State private var isImageSVG: [Bool] = [false, false]
     
+    // Safety Variables
+    @State private var showSafetyBanner = false
+    @State private var safetyBannerRisk: PathRisk = .safe
+    @State private var safetyBannerMsg: String = ""
+    @State private var currentDirRisk: PathRisk = .safe
+    @State private var showBatchDeletePreview = false
+    @State private var cautionCountForBatch = 0
+    
     var body: some View {
-        VStack {
+        ZStack {
             VStack {
-                HStack { //input directory + refresh
+                VStack {
+                    HStack { //input directory + refresh
                     TextField(NSLocalizedString("INPUT_DIRECTORY", comment: "According to all known laws of aviation"), text: $directory, onCommit: {
                         if directory == "" {
                             directory = "/"
@@ -360,16 +368,17 @@ struct ContentView: View {
                             }
                         
                             Button(action: {
-                                if(directory == "/private/var/mobile/Media/.Trash/"){
-                                    for file in multiSelectFiles {
-                                        TrashManager.shared.deletePathDirectly(directory + file)
-                                    }
-                                    updateFiles()
-                                } else {
-                                    for file in multiSelectFiles {
-                                        TrashManager.shared.moveToTrash(path: directory + file)
-                                    }
-                                    updateFiles()
+                                if multiSelectFiles.isEmpty { return }
+                                // 보안 검사 먼저 수행 (다중 선택)
+                                let fullPaths = multiSelectFiles.map { directory + $0 }
+                                switch FileGuard.authorize(action: "batch_delete", paths: fullPaths) {
+                                case .success:
+                                    cautionCountForBatch = fullPaths.filter { PathSafety.risk(of: $0) == .caution }.count
+                                    showBatchDeletePreview = true // 승인 후 팝업 띄움
+                                case .failure(let err):
+                                    alertTitle = "작업 차단됨"
+                                    alertMsg = err.localizedDescription
+                                    showAlert = true
                                 }
                             }) {
                                 ZStack {
@@ -535,6 +544,16 @@ struct ContentView: View {
                                                 Image(systemName: masterFiles[index].isSelected ? "checkmark.circle" : "circle")
                                                     .transition(.opacity)
                                             }
+                                            // 위험도 계산 (부모 상속 최적화)
+                                            let isSym = masterFiles[index].fileType == 8
+                                            let itemRisk = PathSafety.fastRisk(parentRisk: currentDirRisk, fullPath: masterFiles[index].fullPath, isSymlink: isSym)
+                                            
+                                            // 위험 배지 UI
+                                            if let symbol = itemRisk.badgeSymbol {
+                                                Image(systemName: symbol)
+                                                    .foregroundColor(itemRisk.badgeColor)
+                                            }
+                                            
                                             switch masterFiles[index].fileType {
                                             case 0:
                                                 if (directory == "/Applications/") { //shush.
@@ -650,10 +669,13 @@ struct ContentView: View {
                                                 } else {
                                                     if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 1) {
                                                         Image(systemName: "folder")
+                                                            .foregroundColor(itemRisk == .forbidden ? .red : .cyan)
                                                     } else if (FileInfo.isDirectoryEmpty(atPath: masterFiles[index].fullPath) == 0) {
                                                         Image(systemName: "folder.fill")
+                                                            .foregroundColor(itemRisk == .forbidden ? .red : .cyan)
                                                     } else {
                                                         Image(systemName: "folder.badge.questionmark")
+                                                            .foregroundColor(itemRisk == .forbidden ? .red : .cyan)
                                                     } //It's a small thing but useful. Spartan will check if a directory has contents or not and display a filled or empty folder based on that. If it doesn't know, it will display a question mark (which usually means you don't have permission to access it)
                                                     
                                                     //future me wants you to know i forgot i wrote comments. im currently doing nothing in my CS class so I'm actually documenting/explaining stuff for once.
@@ -1540,13 +1562,39 @@ struct ContentView: View {
 			showSubView[10] = true
 		} //this lets you access the music player from anywhere. it does create a new instance of the view, but it's accessing the same AV player always, so it never loses its place. it doesn't break when you open it without a music file loaded, too - that took far too long
         .onExitCommand {
-            if(directory == "/"){
-                ObjCFunctions.suspendNow() //an objc function. the first bit of objc I wrote.
-                //i have written a lot more for Alcatraz, but it's so ugly and annoying. i do not like using it
-            } else {
-                goBack()
+                if(directory == "/"){
+                    ObjCFunctions.suspendNow() 
+                } else {
+                    goBack()
+                }
             }
-        } //this handles going back directories with the menu button.
+            
+            // 배너
+            if showSafetyBanner {
+                VStack {
+                    PathSafetyBanner(risk: safetyBannerRisk, message: safetyBannerMsg)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    Spacer()
+                }
+                .zIndex(10)
+            }
+            
+            // 일괄 삭제 미리보기
+            if showBatchDeletePreview {
+                BatchDeletePreview(
+                    files: multiSelectFiles,
+                    cautionCount: cautionCountForBatch,
+                    onConfirm: {
+                        showBatchDeletePreview = false
+                        executeBatchDelete()
+                    },
+                    onCancel: {
+                        showBatchDeletePreview = false
+                    }
+                )
+                .zIndex(20)
+            }
+        } // End ZStack
     }
     
     @ViewBuilder
@@ -1812,6 +1860,19 @@ struct ContentView: View {
         if directory == "//" {
 			directory = "/"
 		}
+        
+        // 폴더 위험도 판정 및 1.2초 배너
+        currentDirRisk = PathSafety.risk(of: directory)
+        if currentDirRisk != .safe {
+            safetyBannerRisk = currentDirRisk
+            let isCaution = currentDirRisk == .caution
+            safetyBannerMsg = isCaution ? "주의 — 시스템에 영향을 줄 수 있습니다" : "시스템 폴더 — 쓰기가 차단됩니다"
+            withAnimation { showSafetyBanner = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                withAnimation { showSafetyBanner = false }
+            }
+        }
+        
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
             cacheFolder(directory)
         }
@@ -1928,6 +1989,23 @@ struct ContentView: View {
             return nil
         }
         return components.suffix(3).joined(separator: ".")
+    }
+    
+    // 일괄 삭제 미리보기에서 확인 시 호출되는 함수
+    func executeBatchDelete() {
+        if(directory == "/private/var/mobile/Media/.Trash/"){
+            for file in multiSelectFiles {
+                TrashManager.shared.deletePathDirectly(directory + file)
+            }
+            updateFiles()
+        } else {
+            for file in multiSelectFiles {
+                TrashManager.shared.moveToTrash(path: directory + file)
+            }
+            updateFiles()
+        }
+        multiSelect = false
+        resetMultiSelectArrays()
     }
 }
 

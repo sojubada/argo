@@ -73,6 +73,8 @@ struct SpartanApp: App {
             print("We are jailbroken!")
         #endif
         
+        UserDefaults.settings.register(defaults: ["safeModeEnabled": true])
+        
         if(!(FileManager.default.fileExists(atPath: "/private/var/mobile/Media/.Trash"))){
             RootHelperActs.mkdir("/private/var/mobile/Media/.Trash")
         } else {
