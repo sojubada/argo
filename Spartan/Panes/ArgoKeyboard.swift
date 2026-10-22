@@ -121,7 +121,9 @@ enum ArgoCommand: String {
         case .goBack:            return ("[", .command)
         case .goForward:         return ("]", .command)
         case .toggleDualPane:    return ("2", .command)
-        case .switchPane:        return ("\t", [])
+        // 맨 Tab 은 포커스 엔진이 쓰는 키다. 수정키 없이 가로채면
+        // 칸 사이 이동이 깨질 수 있어 ⌥ 를 붙였다.
+        case .switchPane:        return ("\t", .alternate)
         case .copyToOtherPane:   return ("c", .command)
         case .moveToOtherPane:   return ("x", .command)
         case .syncPanes:         return ("=", .command)
@@ -165,8 +167,13 @@ enum ArgoCommand: String {
 
 /// ContentView를 담는 호스팅 컨트롤러. 단축키는 여기서 리스폰더 체인에 낀다.
 /// SwiftUI 뷰는 리스폰더가 아니라 keyCommands를 직접 가질 수 없다.
+///
+/// 제네릭이 아니다. @objc 선택자(#selector)를 쓰기 때문이다 —
+/// 제네릭 클래스의 멤버는 Objective-C 런타임에 온전히 노출되지 않아,
+/// UIKit이 그 선택자를 보낼 때 찾지 못할 수 있다. keyCommands는 실행 직후
+/// 조회되므로 그 위험을 실행 경로 한가운데 두는 셈이 된다.
 @available(tvOS 13.0, *)
-final class ArgoHostingController<Content: View>: UIHostingController<Content> {
+final class ArgoHostingController: UIHostingController<ContentView> {
 
     /// 글자 입력 점프를 모으는 버퍼. 파일 300개 폴더에서 가장 큰 이득이다.
     private var typeAheadBuffer = ""
