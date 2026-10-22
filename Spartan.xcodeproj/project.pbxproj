@@ -23,6 +23,10 @@
 		DA224B286CDFDE8437AB583C /* PDFReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22EB1B0433C5A4AE349D6F /* PDFReaderView.swift */; };
 		DA19ED3E597CD4E5196D12A3 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA19B70CAF54CAC53790D498 /* FavoritesStore.swift */; };
 		DA18F4FFA15F2E9355290505 /* TrashManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1841A433A5C12931505747 /* TrashManager.swift */; };
+		99F1F287C3EF4AAB8306EF13 /* SafetyBannerAndPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADCEDCFD6F204A7D9855769D /* SafetyBannerAndPreview.swift */; };
+		E96C8414F63C41EFA104F58D /* FileGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F8D541CF4243BCA2A1FBE9 /* FileGuard.swift */; };
+		CB7B3F2DFD55462C97BF83A5 /* OperationLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DBD67D2B634FEFA7C692DB /* OperationLog.swift */; };
+		552E0935447148F38D7677CE /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5ED9BB984043D88372ED41 /* PathSafety.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
 		DA17B8E2F203D6193BAF75A7 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1704A1BED4F852B009A51E /* WebDAVClient.swift */; };
@@ -114,6 +118,10 @@
 		DA22EB1B0433C5A4AE349D6F /* PDFReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFReaderView.swift; sourceTree = "<group>"; };
 		DA19B70CAF54CAC53790D498 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
 		DA1841A433A5C12931505747 /* TrashManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashManager.swift; sourceTree = "<group>"; };
+		ADCEDCFD6F204A7D9855769D /* SafetyBannerAndPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyBannerAndPreview.swift; sourceTree = "<group>"; };
+		80F8D541CF4243BCA2A1FBE9 /* FileGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileGuard.swift; sourceTree = "<group>"; };
+		B5DBD67D2B634FEFA7C692DB /* OperationLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationLog.swift; sourceTree = "<group>"; };
+		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
 		DA1704A1BED4F852B009A51E /* WebDAVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift; sourceTree = "<group>"; };
@@ -257,6 +265,17 @@
 			path = Diagnostics;
 			sourceTree = "<group>";
 		};
+		E9DA58C85DF94CDB9259C829 /* Safety */ = {
+			isa = PBXGroup;
+			children = (
+				4F5ED9BB984043D88372ED41 /* PathSafety.swift */,
+				B5DBD67D2B634FEFA7C692DB /* OperationLog.swift */,
+				80F8D541CF4243BCA2A1FBE9 /* FileGuard.swift */,
+				ADCEDCFD6F204A7D9855769D /* SafetyBannerAndPreview.swift */,
+			);
+			path = Safety;
+			sourceTree = "<group>";
+		};
 		DA18E847725284F498AD423E /* Trash */ = {
 			isa = PBXGroup;
 			children = (
@@ -341,6 +360,7 @@
 				F8EA28D129F8ACAB0063206D /* FileOpeners */,
 				DA1995C5F5ED9405B6E826B1 /* Favorites */,
 				DA18E847725284F498AD423E /* Trash */,
+				E9DA58C85DF94CDB9259C829 /* Safety */,
 				204E5A23D3DF4DC2A2BB14E3 /* Diagnostics */,
 				DA171D28474254F303DA124A /* WebDAV */,
 				F8CC212629E5206B008C7B88 /* SpareViews.swift */,
@@ -582,6 +602,10 @@
 				DA224B286CDFDE8437AB583C /* PDFReaderView.swift in Sources */,
 								DA19ED3E597CD4E5196D12A3 /* FavoritesStore.swift in Sources */,
 				DA18F4FFA15F2E9355290505 /* TrashManager.swift in Sources */,
+				99F1F287C3EF4AAB8306EF13 /* SafetyBannerAndPreview.swift in Sources */,
+				E96C8414F63C41EFA104F58D /* FileGuard.swift in Sources */,
+				CB7B3F2DFD55462C97BF83A5 /* OperationLog.swift in Sources */,
+				552E0935447148F38D7677CE /* PathSafety.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
 				DA17B8E2F203D6193BAF75A7 /* WebDAVClient.swift in Sources */,

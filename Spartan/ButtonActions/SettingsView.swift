@@ -8,13 +8,18 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @State private var showView: [Bool] = [Bool](repeating: false, count: 5)
+    // showView 배열 크기 5 -> 6 확장 (로그 뷰어 추가)
+    @State private var showView: [Bool] = [Bool](repeating: false, count: 6)
     @State private var descriptiveTitlesPre = UserDefaults.settings.bool(forKey: "descriptiveTitles")
     @State private var descriptiveTimestampsPre = UserDefaults.settings.bool(forKey: "verboseTimestamps")
     @State private var autoCompletePre = UserDefaults.settings.bool(forKey: "autoComplete")
     @State private var logWindowFontSizePre = UserDefaults.settings.integer(forKey: "logWindowFontSize")
     @State private var sheikahFontApplyPre = UserDefaults.settings.bool(forKey: "sheikahFontApply")
     @State private var dateFormatPre: String = UserDefaults.settings.string(forKey: "dateFormat") ?? ""
+    
+    // 안전모드 설정 (기본값 True)
+    @State private var safeModeEnabledPre = UserDefaults.settings.object(forKey: "safeModeEnabled") == nil ? true : UserDefaults.settings.bool(forKey: "safeModeEnabled")
+    @State private var showSafeModeWarning = false
     
     @State var test = 0.0
 
@@ -48,6 +53,49 @@ struct SettingsView: View {
 			Text(" ")
 			sheikahFont
 			Text(" ")
+            
+            // 안전 모드 스위치
+            Button(action: {
+                if safeModeEnabledPre {
+                    showSafeModeWarning = true // 끌 때만 경고
+                } else {
+                    safeModeEnabledPre = true
+                    UserDefaults.settings.set(true, forKey: "safeModeEnabled")
+                }
+            }) {
+                HStack {
+                    Image(systemName: safeModeEnabledPre ? "checkmark.shield.fill" : "shield.slash")
+                        .foregroundColor(safeModeEnabledPre ? .green : .red)
+                    Text("Safe Mode (Blocks System Writes)")
+                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                        }
+                }
+            }
+            .alert(isPresented: $showSafeModeWarning) {
+                Alert(
+                    title: Text("Disable Safe Mode?"),
+                    message: Text("System files can now be modified or deleted. A mistake could render your Apple TV unbootable. Proceed?"),
+                    primaryButton: .destructive(Text("Disable"), action: {
+                        safeModeEnabledPre = false
+                        UserDefaults.settings.set(false, forKey: "safeModeEnabled")
+                    }),
+                    secondaryButton: .cancel(Text("Keep Safe"))
+                )
+            }
+            
+            Button(action: {
+                showView[5] = true
+            }) {
+                HStack {
+                    Image(systemName: "doc.text.magnifyingglass")
+                    Text("View Operation Log")
+                }
+            }
+            .sheet(isPresented: $showView[5]) {
+                TextView(filePath: "/private/var/mobile/Media/", fileName: "argo-operations.log", isPresented: $showView[5])
+            }
+            Text(" ")
 			
 			GeometryReader { geometry in
 				HStack {
