@@ -174,7 +174,10 @@ struct CompressionFileData {
 
 class Compression {
     class func compressFile(filePath: String, directory: String, destination: String, compType: CompressionType, tarCompType: TarCompressionType) throws {
-        if case .failure(let err) = FileGuard.authorize(action: "compress", paths: [destination]) {
+        // 관문 + 빈 공간. 공간이 모자라면 시작하지 않는다 —
+        // 반쯤 쓰다 멈춘 아카이브가 가장 수습하기 어렵다.
+        if case .failure(let err) = FileGuard.authorizeCompression(sources: [directory + filePath],
+                                                                  destination: destination) {
             throw CompressionError.blockedBySafety(err.localizedDescription)
         }
 
@@ -201,7 +204,8 @@ class Compression {
     }
     
     class func compressFiles(listOfFiles: [String], directory: String, destination: String, compType: CompressionType, tarCompType: TarCompressionType = .none) throws {
-        if case .failure(let err) = FileGuard.authorize(action: "compress", paths: [destination]) {
+        if case .failure(let err) = FileGuard.authorizeCompression(sources: listOfFiles.map { directory + $0 },
+                                                                   destination: destination) {
             throw CompressionError.blockedBySafety(err.localizedDescription)
         }
 

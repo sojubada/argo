@@ -28,9 +28,13 @@ struct CompressFileView: View {
     
     @State var error2: CompressionError?
     @State var errorShow = false
+    @StateObject private var runner = CompressionRunner()
     
     var body: some View {
         VStack {
+            if runner.isRunning {
+                CompressionProgressView(runner: runner, fileName: destPath)
+            } else {
             Text(localizedString: "COMP_TITLE")
                 .font(.system(size: 60))
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
@@ -121,16 +125,22 @@ struct CompressFileView: View {
             }
             
             Button(action: {
-                do {
-                    if multipleFiles {
-                        try Compression.compressFiles(listOfFiles: fileNames, directory: directory, destination: directory + destPath, compType: selectedCompType, tarCompType: selectedTarCompType)
+                // 뒷줄에서 돈다. 메인에서 돌리면 10GB 파일에 화면이 멈춘다.
+                let multiple = multipleFiles
+                let names = fileNames
+                let dir = directory
+                let dest = directory + destPath
+                let comp = selectedCompType
+                let tarComp = selectedTarCompType
+                runner.run("압축하는 중", work: {
+                    if multiple {
+                        try Compression.compressFiles(listOfFiles: names, directory: dir, destination: dest, compType: comp, tarCompType: tarComp)
                     } else {
-                        try Compression.compressFile(filePath: fileNames[0], directory: directory, destination: directory + destPath, compType: selectedCompType, tarCompType: selectedTarCompType)
+                        try Compression.compressFile(filePath: names[0], directory: dir, destination: dest, compType: comp, tarCompType: tarComp)
                     }
-                } catch {
-                    error2 = error as? CompressionError
-                }
-                isPresented = false
+                }, onFinish: {
+                    isPresented = false
+                })
             }) {
                 Text(localizedString: "CONFIRM")
             }
@@ -150,6 +160,10 @@ struct CompressFileView: View {
                         }
                     }
             }
+            }
+        }
+        .onReceive(runner.$failure.compactMap { $0 }) { err in
+            error2 = err as? CompressionError
         }
     }
 }
@@ -162,9 +176,13 @@ struct UncompressFileView: View {
     
     @State var errorShow = false
     @State var error2: CompressionError?
+    @StateObject private var runner = CompressionRunner()
     
     var body: some View {
         VStack {
+            if runner.isRunning {
+                CompressionProgressView(runner: runner, fileName: fileName)
+            } else {
             Text(localizedString: "UNCOMP_TITLE")
                 .font(.system(size: 60))
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
@@ -190,12 +208,16 @@ struct UncompressFileView: View {
             }
             
             Button(action: {
-                do {
-                    try Compression.uncompressFile(filePath: filePath + fileName, destination: extractFilePath, compType: Compression.archiveType(filePath: filePath + fileName))
+                // 뒷줄에서 돈다. 공간 검사는 FileGuard 가 헤더를 훑으며 이미 한다.
+                let archive = filePath + fileName
+                let dest = extractFilePath
+                runner.run("압축을 푸는 중", work: {
+                    try Compression.uncompressFile(filePath: archive,
+                                                   destination: dest,
+                                                   compType: Compression.archiveType(filePath: archive))
+                }, onFinish: {
                     isPresented = false
-                } catch {
-                    error2 = error as? CompressionError
-                }
+                })
             }) {
                 Text("CONFIRM")
                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
@@ -203,6 +225,10 @@ struct UncompressFileView: View {
                     }
             }
             .disabled(extractFilePath == "")
+            }
+        }
+        .onReceive(runner.$failure.compactMap { $0 }) { err in
+            error2 = err as? CompressionError
         }
     }
 }

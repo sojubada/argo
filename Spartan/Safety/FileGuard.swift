@@ -13,10 +13,11 @@ extension Notification.Name {
 enum GuardError: LocalizedError {
     case forbidden(String)
     case safeModeActive(String)
+    case notEnoughSpace(String)
 
     var errorDescription: String? {
         switch self {
-        case .forbidden(let msg), .safeModeActive(let msg):
+        case .forbidden(let msg), .safeModeActive(let msg), .notEnoughSpace(let msg):
             return msg
         }
     }
@@ -161,6 +162,9 @@ enum FileGuard {
             return refuseUncheckable("압축 파일을 열 수 없습니다")
         }
 
+        // 헤더를 어차피 훑으므로 풀었을 때의 크기를 같이 센다 — 공짜다.
+        var totalUncompressed: Int64 = 0
+
         var entry: OpaquePointer? = nil
         var readStatus = archive_read_next_header(archive, &entry)
         while readStatus == ARCHIVE_OK {
@@ -216,6 +220,10 @@ enum FileGuard {
                     }
                 }
             }
+            if let currentEntry = entry {
+                let size = archive_entry_size(currentEntry)
+                if size > 0 { totalUncompressed += Int64(size) }
+            }
             archive_read_data_skip(archive)
             readStatus = archive_read_next_header(archive, &entry)
         }
@@ -226,7 +234,82 @@ enum FileGuard {
             return refuseUncheckable("압축 파일이 손상되어 검사를 끝내지 못했습니다")
         }
 
+        // 공간이 모자라면 시작하지 않는다. 반쯤 풀린 상태가 가장 수습하기 어렵다.
+        if totalUncompressed > 0 {
+            if case .failure(let err) = checkFreeSpace(needed: totalUncompressed,
+                                                       at: resolvedDest,
+                                                       what: "압축을 풀기") {
+                return .failure(err)
+            }
+        }
+
         return .success(())
+    }
+
+    // MARK: - 빈 공간
+
+    /// 애플TV는 저장공간이 넉넉하지 않다. 10GB 파일을 다루면 원본과 결과가
+    /// 동시에 올라가므로, 시작 전에 들어갈 자리가 있는지 본다.
+    /// 여유 10%를 둔다 — 파일시스템 메타데이터와 임시 파일 몫이다.
+    static func checkFreeSpace(needed: Int64,
+                               at path: String,
+                               what: String) -> Result<Void, GuardError> {
+        guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: path),
+              let free = (attrs[.systemFreeSize] as? NSNumber)?.int64Value else {
+            // 알 수 없으면 막지 않는다. 이것은 안전 검사가 아니라 편의 검사다 —
+            // 막아야 할 쓰기를 놓치는 것이 아니라 실패를 미리 알려 주는 것이다.
+            return .success(())
+        }
+
+        let withMargin = needed + needed / 10
+        guard free < withMargin else { return .success(()) }
+
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        let msg = "\(what)에 약 \(f.string(fromByteCount: withMargin)) 가 필요하지만 "
+                + "남은 공간은 \(f.string(fromByteCount: free)) 입니다."
+        reportBlocked(msg)
+        return .failure(.notEnoughSpace(msg))
+    }
+
+    /// 압축하기 전. 원본 합계만큼은 있어야 한다 (압축이 전혀 안 되는 경우 기준).
+    static func authorizeCompression(sources: [String],
+                                     destination: String) -> Result<Void, GuardError> {
+        if case .failure(let err) = authorize(action: "compress", paths: [destination]) {
+            return .failure(err)
+        }
+
+        var total: Int64 = 0
+        for path in sources {
+            total += directorySize(of: path)
+        }
+        guard total > 0 else { return .success(()) }
+
+        let parent = (destination as NSString).deletingLastPathComponent
+        return checkFreeSpace(needed: total, at: parent, what: "압축하기")
+    }
+
+    /// 파일이면 크기, 폴더면 아래 전부의 합.
+    private static func directorySize(of path: String) -> Int64 {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return 0 }
+
+        if !isDir.boolValue {
+            let attrs = try? fm.attributesOfItem(atPath: path)
+            return (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        }
+
+        var total: Int64 = 0
+        guard let e = fm.enumerator(atPath: path) else { return 0 }
+        for case let name as String in e {
+            let full = (path as NSString).appendingPathComponent(name)
+            if let attrs = try? fm.attributesOfItem(atPath: full),
+               let size = (attrs[.size] as? NSNumber)?.int64Value {
+                total += size
+            }
+        }
+        return total
     }
 
     /// 검사 자체가 불가능할 때는 통과시키지 않고 막는다.

@@ -694,10 +694,13 @@ struct ContentView: View {
 					}) //i got tired of having the same copy pasted button thing so I made it a wrapper struct with only the parameters I need. cut down on filesize a lot
 					
 					ContextMenuButtonTV(stringKey: "INFO", action: {
-                        fileInfo = FileInfo.getFileInfo(filePath: masterFiles[newViewFileIndex].fullPath)
+                        // 0.5초 지연 전에 고정한다. masterFiles 는 활성 칸을 가리키는
+                        // 계산 속성이라, 지연 중에 칸이 넘어가면 반대 칸의 파일을 읽는다.
+                        let selectedFile = masterFiles[newViewFileIndex]
+                        fileInfo = FileInfo.getFileInfo(filePath: selectedFile.fullPath)
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            newViewFileName = masterFiles[newViewFileIndex].name
+                            newViewFileName = selectedFile.name
                             showSubView[3] = true
                         }
 					})
@@ -1428,7 +1431,9 @@ struct ContentView: View {
                 rightPane.updateFiles()
             }
         case .switchPane:
-            guard dualPaneEnabled else { return }
+            // 시트가 떠 있으면 칸을 넘기지 않는다. 모달 안에서는 칸 전환이
+            // 의미가 없고, 시트가 읽는 값이 넘어가는 순간 어긋난다.
+            guard dualPaneEnabled, !showSubView.contains(true) else { return }
             activeSide = activeSide == .left ? .right : .left
         case .copyToOtherPane:   copySelectionToOtherPane(move: false)
         case .moveToOtherPane:   copySelectionToOtherPane(move: true)

@@ -35,6 +35,7 @@
 		2A0DACC2F4A24A1985520419 /* PrintProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */; };
 		F0F318CE8B0942F3A5B8CD46 /* ArgoTheme.m in Sources */ = {isa = PBXBuildFile; fileRef = E9E752021CA74F4691440910 /* ArgoTheme.m */; };
 		61A2A587A0844DD181E5059E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E053B4856F941D3867A064B /* Theme.swift */; };
+		D0EEC548B3514C6A8E4FAA23 /* CompressionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 751647905BE146D390C03713 /* CompressionRunner.swift */; };
 		552E0935447148F38D7677CE /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5ED9BB984043D88372ED41 /* PathSafety.swift */; };
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
@@ -141,6 +142,7 @@
 		E9E752021CA74F4691440910 /* ArgoTheme.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ArgoTheme.m; sourceTree = "<group>"; };
 		21EA41A9C9C84B95B16BE7B0 /* ArgoTheme.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ArgoTheme.h; sourceTree = "<group>"; };
 		1E053B4856F941D3867A064B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		751647905BE146D390C03713 /* CompressionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressionRunner.swift; sourceTree = "<group>"; };
 		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
@@ -353,6 +355,7 @@
 		420F3A8A2B1A9C6D00185EFD /* Compression */ = {
 			isa = PBXGroup;
 			children = (
+				751647905BE146D390C03713 /* CompressionRunner.swift */,
 				F8CC214329EB9503008C7B88 /* CompressFileView.swift */,
 				420F3A8B2B1A9C7D00185EFD /* Compression.swift */,
 			);
@@ -661,6 +664,7 @@
 				2A0DACC2F4A24A1985520419 /* PrintProbeView.swift in Sources */,
 				F0F318CE8B0942F3A5B8CD46 /* ArgoTheme.m in Sources */,
 				61A2A587A0844DD181E5059E /* Theme.swift in Sources */,
+				D0EEC548B3514C6A8E4FAA23 /* CompressionRunner.swift in Sources */,
 				552E0935447148F38D7677CE /* PathSafety.swift in Sources */,
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
