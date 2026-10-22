@@ -199,7 +199,7 @@ struct SettingsView: View {
 				}
 			}
 			.fullScreenCover(isPresented: $showView[6]) {
-				PrintPipelineProbeView(isPresented: $showView[6])
+				PrintProbeView(isPresented: $showView[6])
 					.edgesIgnoringSafeArea(.all)
 			}
 
