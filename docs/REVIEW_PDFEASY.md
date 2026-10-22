@@ -40,31 +40,49 @@ return CGFloat(inkedCount) / CGFloat(width * height)
 
 ---
 
-## 2. tvOS 에서 되는지 — SDK 에 물었습니다
+## 2. tvOS 에서 되는지 — 두 번 물어야 했습니다
 
-PDFKit 도 WebKit 도 없는 tvOS 에서 이 세 다리가 설 수 있나. **인쇄 API 는 tvOS 기능이 아니므로 없을 것이라 예상했는데, 틀렸습니다.**
+### 첫 답은 제가 틀렸습니다
 
-SDK 조회 (실행 39766805425, tvOS 17.5 SDK):
+SDK 를 조회해 "인쇄 API 가 전부 PRESENT" 라고 드렸습니다. **틀렸습니다.**
 
-| API | 결과 |
+헤더에 **이름은 있지만 `API_UNAVAILABLE(tvos)` 로 막혀 있습니다.** 제 조회 도구가 이름만 grep 하고 같은 줄의 가용성 속성을 안 읽었습니다. 빌드가 즉시 거부했습니다.
+
+```
+error: 'UIPrintPageRenderer' is unavailable in tvOS
+error: 'UIMarkupTextPrintFormatter' is unavailable in tvOS
+error: 'UISimpleTextPrintFormatter' is unavailable in tvOS
+```
+
+**도구를 고쳤습니다.** 이제 세 가지로 답합니다.
+
+| 판정 | 뜻 |
 |---|---|
-| `UIPrintPageRenderer` | **PRESENT** |
-| `UIPrintFormatter` | **PRESENT** |
-| `UISimpleTextPrintFormatter` | **PRESENT** |
-| `UIMarkupTextPrintFormatter` | **PRESENT** |
-| `viewPrintFormatter` | **PRESENT** |
-| `UIGraphicsPDFRenderer` | **PRESENT** |
-| `CGPDFDocument` | **PRESENT** |
-| `CGContextDrawPDFPage` | **PRESENT** |
-| `PDFKit` · `WebKit` · `QuickLook` | ABSENT (기존과 동일) |
+| `USABLE` | declare 되어 있고 tvOS 에서 막히지 않음 |
+| `BLOCKED` | declare 되어 있으나 `API_UNAVAILABLE(tvos)`. **컴파일러는 거부한다. 바이너리에 있는지는 별개 질문이고 기기 탐침만 답한다** |
+| `ABSENT` | SDK 에 아예 없음 |
 
-**인쇄 서식기가 전부 들어 있습니다.** tvOS 에 인쇄 기능이 없는데도 클래스는 ship 됩니다.
+### 두 번째 질문 — 막힌 것과 없는 것은 다릅니다
 
-없는 것은 `PDFDocument` 하나이고, 그 역할(되읽기 + 빈 쪽 판정)은 **`CGPDFDocument` + `CGContextDrawPDFPage` 로 그대로 대체됩니다.** 잉크 세기는 `PDFPage.thumbnail` 대신 `CGContext` 에 직접 그려서 하면 됩니다.
+**WebKit 이 정확히 이랬습니다.** SDK 에 없는데 기기에는 있었고, `dlopen` 으로 꺼내 `WKWebView` 를 완전히 썼습니다.
 
-그리고 **`UIMarkupTextPrintFormatter` 가 있다는 것이 결정적입니다.** 이것은 **HTML 을 받아 쪽으로 나눕니다 — WebKit 이 전혀 필요 없습니다.**
+인쇄 서식기도 같을 수 있습니다. `UIKit` 은 애플이 플랫폼마다 따로 빌드하지 않고 **하나의 바이너리를 공유**하므로, tvOS 에서 가려 놓은 클래스가 실제로는 들어 있을 가능성이 실재합니다.
 
----
+**이것은 기기만 답할 수 있습니다.** 그래서 탐침을 만들었습니다.
+
+### 확정된 것
+
+| API | 상태 |
+|---|---|
+| `CGPDFDocument` · `CGPDFPage` | **쓸 수 있음** (확인) |
+| `CGContextDrawPDFPage` | **쓸 수 있음** (확인) |
+| `CGPDFContextCreate` | **쓸 수 있음** (확인) |
+| `CoreText` | **쓸 수 있음** (확인) |
+| 인쇄 서식기 일가 | **BLOCKED — 기기 확인 대기** |
+| `UIGraphicsPDFRenderer` | **BLOCKED — 기기 확인 대기** |
+| `PDFKit` · `WebKit` · `QuickLook` | ABSENT |
+
+**PDF 를 읽고 쪽 단위로 그리는 쪽은 이미 확정입니다.** 불확실한 것은 **쪽을 나누는 쪽** 하나입니다.
 
 ## 3. 그래서 3단계가 이렇게 바뀝니다
 
@@ -76,7 +94,7 @@ SDK 조회 (실행 39766805425, tvOS 17.5 SDK):
 
 쪽이 없습니다. 맞춤·2장 보기·책장 넘기기가 불가능합니다.
 
-### 바뀐 뒤
+### 바뀐 뒤 (탐침이 통과하면)
 
 ```
 문서 → JS 렌더러 → HTML → UIMarkupTextPrintFormatter
@@ -100,6 +118,13 @@ SDK 조회 (실행 39766805425, tvOS 17.5 SDK):
 - **쪽 나누기가 레이아웃을 다시 잡습니다.** 원본 생김새가 조금 달라질 수 있습니다 — 특히 넓은 엑셀 표가 A4 폭에서 잘릴 수 있습니다. 용지 크기를 가로로 두거나 축소 배율을 주는 선택지가 필요합니다
 - **PDFEasy 도 한계를 인정합니다.** 주석에 "Word/RTF 는 좋고 복잡한 표와 docx 머리말·로고·물결무늬는 약하다"고 적혀 있습니다. 다만 우리는 WebKit 의 Office 렌더링이 아니라 **우리 JS 렌더러의 HTML** 을 넣으므로 이 한계는 그대로 적용되지 않습니다
 - **한글 글꼴** — 서식기가 한글을 그리는지 확인이 필요합니다
+- **서식기가 기기에 없으면** 이 설계는 성립하지 않습니다. 그때는 `CoreText` 로 직접 쪽을 나눕니다 (아래)
+
+### 서식기가 없을 때의 길 — CoreText
+
+`CoreText` 는 확정입니다. `CTFramesetterCreateWithAttributedString` 으로 글을 쪽 크기 틀에 차례로 흘려 넣으면 **쪽 나누기를 직접 할 수 있습니다.** 손이 훨씬 많이 가고 HTML 의 표·이미지를 잃지만, 확실합니다.
+
+그 경우 docx·hwp 같은 **글 위주 문서는 CoreText 로** 쪽을 나누고, xlsx·pptx 처럼 **배치가 중요한 것은 지금처럼 HTML 스크롤**로 두는 혼합이 현실적입니다.
 
 ---
 
@@ -119,7 +144,13 @@ SDK 조회 (실행 39766805425, tvOS 17.5 SDK):
 
 **"declare 되어 있다"는 "작동한다"가 아닙니다.** PDFKit 때 그 차이로 한 번 다시 썼습니다.
 
-`Lab ③ 인쇄 파이프라인 탐침` 을 만들었습니다 (설정 안). 묻는 것은 '클래스가 있나'가 아니라 **'잉크가 나오나'** 입니다.
+`Lab ③ 인쇄 파이프라인 탐침` 을 만들었습니다 (설정 안). **빌드 통과** (실행 39768174397).
+
+**인쇄 심볼을 컴파일 시점에 하나도 참조하지 않습니다.** 전부 `NSClassFromString` + `objc_msgSend` 로 갑니다 — AirDrop 때 `Sharing.framework`, 문서 뷰 때 WebKit 에 썼던 그 방법입니다. 그래서 Swift 가 아니라 Objective-C 로 썼습니다.
+
+`UIGraphicsPDFRenderer` 도 막혀 있을 수 있으니 쪽은 **`CGPDFContextCreate` 로 직접 찍습니다.** 인쇄 좌표계는 위에서 아래로, PDF 는 아래에서 위로 가므로 뒤집어 줍니다.
+
+묻는 것은 '클래스가 있나'가 아니라 **'잉크가 나오나'** 입니다.
 
 1. 런타임에 클래스가 실제로 있는지 (`NSClassFromString`, `instancesRespond(to:)`)
 2. 글자 300줄이 **여러 쪽으로 나뉘는지** — 한 쪽으로 나오면 쪽 나누기가 안 되는 것입니다
