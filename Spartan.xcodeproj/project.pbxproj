@@ -134,7 +134,7 @@
 		B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoKeyboard.swift; sourceTree = "<group>"; };
 		A4B38B012B684A9C928BE9AF /* KeyboardHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHelpView.swift; sourceTree = "<group>"; };
 		1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTransfer.swift; sourceTree = "<group>"; };
-		891E5DD5390D449FBBA34DE0 /* PrintProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintProbe.m; sourceTree = "<group>"; };
+		891E5DD5390D449FBBA34DE0 /* PrintProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PrintProbe.m; sourceTree = "<group>"; };
 		3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintProbeView.swift; sourceTree = "<group>"; };
 		4F5ED9BB984043D88372ED41 /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
