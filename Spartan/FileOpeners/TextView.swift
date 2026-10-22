@@ -84,12 +84,18 @@ struct TextView: View {
 				Button(action: {
 					do {
 						let fullPath = filePath + fileName
+						if case .failure(let guardErr) = FileGuard.authorize(action: "write_text", paths: [fullPath], notifyOnBlock: false) {
+							errorString = guardErr.localizedDescription
+							errorShow = true
+							return
+						}
 						if filePathIsNotMobileWritable(fullPath) {
 							try stringArrayToString(inputArray: fileContents).write(to: URL(fileURLWithPath: tempPath), atomically: true, encoding: encoding)
 							RootHelperActs.rm(fullPath)
 							RootHelperActs.mvtemp(fullPath)
 						} else {
 							try stringArrayToString(inputArray: fileContents).write(to: URL(fileURLWithPath: fullPath), atomically: true, encoding: encoding)
+							OperationLog.record(action: "EDIT_TEXT", path: fullPath)
 						}
 						isPresented = false
 					} catch {
