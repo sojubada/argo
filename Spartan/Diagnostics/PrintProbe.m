@@ -64,12 +64,31 @@ static const CGFloat kPageMargin = 20.0;
 
 - (void)runAll {
     [self step1ClassesInBinary];
+
+    // 2~5단계는 더 이상 돌리지 않는다.
+    //
+    // 실기기에서 SIGSEGV 로 앱이 죽었다 (주소가 어떤 영역에도 없음).
+    // 클래스는 바이너리에 있지만, 호출하면 tvOS 에서 초기화되지 않은
+    // 인쇄 기반을 건드려 UIKit 안에서 터진다. 잡을 수 있는 예외가 아니라
+    // 메모리 접근 위반이라 @try 로도 못 막는다.
+    //
+    // 질문에는 답이 나왔다. '막혀 있다'가 '컴파일러만 거부한다'가 아니라
+    // '기기에서도 못 쓴다'였다. 더 캐물을 것이 없으므로 호출을 멈춘다.
+    [self log:@""];
+    [self log:@"[2-5] 돌리지 않습니다"];
+    [self log:@"    이 호출들은 실기기에서 SIGSEGV 로 앱을 죽였습니다."];
+    [self log:@"    클래스는 있지만 tvOS 에서 실제로 동작하지 않습니다."];
+    [self log:@"    -> 3단계는 CoreText 로 직접 쪽을 나누는 길로 갑니다."];
+    [self log:@""];
+    [self log:@"=== 끝. 메뉴 버튼으로 닫습니다 ==="];
+}
+
+/// 아래 호출들은 기기를 죽인다. 기록을 위해 남겨 두되 부르지 않는다.
+- (void)unusedDangerousSteps {
     [self step2SimpleText];
     [self step3Markup];
     [self step4ReadBack];
     [self step5Korean];
-    [self log:@""];
-    [self log:@"=== 끝. 메뉴 버튼으로 닫습니다 ==="];
 }
 
 #pragma mark - 1. 클래스가 기기의 UIKit 바이너리에 있는가

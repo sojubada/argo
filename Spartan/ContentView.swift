@@ -1328,6 +1328,13 @@ struct ContentView: View {
             let fileType = masterFiles[index].fileType
             switch fileType {
             case 0:
+                // 이 폴더를 읽을 수 있었는지는 '지금 이 호출'의 결과로만 판단한다.
+                //
+                // 전에는 공유 깃발 showAlert 를 봤다. 그 깃발은 원래 권한 오류
+                // 전용이었는데, FileGuard 차단 알림을 같은 깃발에 연결하면서
+                // 폴더를 읽을 때마다 도는 캐시 쓰기가 주의 폴더에서 막히면
+                // 깃발이 서고, 그 뒤로 모든 폴더 진입이 조용히 무시됐다.
+                var denied = false
                 do {
                     try fileManager.contentsOfDirectory(atPath: directory + fileToCheck[index])
                 } catch {
@@ -1337,9 +1344,10 @@ struct ContentView: View {
                         alertTitle = NSLocalizedString("SHOW_DENIED", comment: "Here's the graduate.")
                         alertMsg = NSLocalizedString("INFO_DENIED", comment: "You're monsters!")
                         showAlert = true
+                        denied = true
                     }
                 }
-                if(!showAlert){
+                if(!denied){
                     if(isDirectPath) {
                         updateFiles()
                     } else {

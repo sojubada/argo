@@ -100,8 +100,10 @@ final class FilePaneModel: ObservableObject {
         normalizeDirectoryPath()
         evaluateRisk()
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [directory] in
-            cacheFolder(directory)
+        if PathSafety.isWriteAllowed(directory) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [directory] in
+                cacheFolder(directory)
+            }
         }
     }
 
@@ -188,16 +190,29 @@ final class FilePaneModel: ObservableObject {
             for name in try currentNames() {
                 out.append(makeFile(name))
             }
-            let encoder = JSONEncoder()
-            let encoded = try encoder.encode(out)
-            try encoded.write(to: URL(fileURLWithPath: tempPath))
-            if let metaName = metadataName {
-                RootHelperActs.mvtemp(directory + metaName)
-            }
+            writeCacheIfWritable(out)
         } catch {
             print("[FilePane] \(directory) 를 읽지 못했습니다: \(error.localizedDescription)")
         }
         return out
+    }
+
+    /// 캐시는 쓸 수 있는 곳에만 쓴다.
+    ///
+    /// 전에는 폴더를 읽을 때마다 무조건 썼다. 주의·금지 폴더에서는 관문이
+    /// 막았고, 그 차단이 알림으로 올라와 폴더를 둘러보는 내내 경고가 떴다.
+    /// 캐시는 편의일 뿐이라 못 쓰면 조용히 넘어가는 것이 맞다.
+    private func writeCacheIfWritable(_ files: [SpartanFile]) {
+        guard let metaName = metadataName else { return }
+        guard PathSafety.isWriteAllowed(directory) else { return }
+        let target = directory + metaName
+        do {
+            let encoded = try JSONEncoder().encode(files)
+            try encoded.write(to: URL(fileURLWithPath: target), options: .atomic)
+        } catch {
+            // 캐시를 못 썼을 뿐이다. 목록은 이미 읽었다.
+            print("[FilePane] 캐시를 쓰지 못했습니다: \(error.localizedDescription)")
+        }
     }
 
     private func currentNames() throws -> [String] {
@@ -241,15 +256,15 @@ final class FilePaneModel: ObservableObject {
     private func pruneCache(decoded: [SpartanFile], live: [SpartanFile]) {
         guard let metaName = metadataName else { return }
         let dir = directory
+        guard PathSafety.isWriteAllowed(dir) else { return }
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
             // 원본은 순회 중에 remove(at:)를 해서 인덱스가 밀렸다. filter로 바꿨다.
             let kept = decoded.filter { live.contains($0) }
             do {
                 let encoded = try JSONEncoder().encode(kept)
-                try encoded.write(to: URL(fileURLWithPath: tempPath))
-                RootHelperActs.mvtemp(dir + metaName)
+                try encoded.write(to: URL(fileURLWithPath: dir + metaName), options: .atomic)
             } catch {
-                print("[FilePane] 캐시를 갱신하지 못했습니다: \(error)")
+                print("[FilePane] 캐시를 갱신하지 못했습니다: \(error.localizedDescription)")
             }
         }
     }
