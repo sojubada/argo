@@ -260,7 +260,7 @@ final class ArgoTextReaderController: UIViewController {
         fontSize = sizes[(i + 1) % sizes.count]
         UserDefaults.settings.set(Double(fontSize), forKey: "readerFontSize")
         textView.attributedText = styled(textView.text ?? "")
-        setToolbar(visible: true, interactive: false, animated: true)
+        setToolbar(visible: true, interactive: true, animated: true)
         updateStatus()
     }
 
@@ -324,15 +324,24 @@ final class ArgoTextReaderController: UIViewController {
             (sub as? UIControl)?.isEnabled = toolbarInteractive
         }
         ArgoDiag.log("toolbar", "visible=\(visible) interactive=\(toolbarInteractive)")
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
 
         let apply = {
             let a: CGFloat = visible ? (self.toolbarInteractive ? 1.0 : 0.55) : 0
             self.toolbar.alpha = a
             self.toolbarSurface.alpha = a
         }
-        if animated { UIView.animate(withDuration: 0.2, animations: apply) } else { apply() }
+        // alpha 0 인 뷰는 포커스 후보에서 빠진다. 들어갈 때는 투명도를
+        // **먼저** 맞춘 뒤 포커스를 요청한다 — 애니메이션에 맡기면 요청
+        // 시점에 아직 안 보여서 엔진이 지나친다. 첫 select 가 먹지 않고
+        // 두 번 눌러야 했던 이유다.
+        if animated && !toolbarInteractive {
+            UIView.animate(withDuration: 0.2, animations: apply)
+        } else {
+            apply()
+        }
+
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
 
         if visible {
             let wait: TimeInterval = toolbarInteractive ? 12 : 5

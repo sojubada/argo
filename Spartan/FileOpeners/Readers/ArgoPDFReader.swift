@@ -555,7 +555,7 @@ final class ArgoPDFReaderController: UIViewController {
         }
         UserDefaults.settings.set(fitMode.rawValue, forKey: "pdfFitMode")
         renderCurrentPage()
-        setToolbar(visible: true, interactive: false, animated: true)
+        setToolbar(visible: true, interactive: true, animated: true)
     }
 
     // MARK: 도구 모음
@@ -645,8 +645,6 @@ final class ArgoPDFReaderController: UIViewController {
             (sub as? UIControl)?.isEnabled = toolbarInteractive
         }
         ArgoDiag.log("toolbar", "visible=\(visible) interactive=\(toolbarInteractive)")
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
 
         let apply = {
             // 보이기만 할 때는 옅게 — 지금 눌리지 않는다는 뜻이다.
@@ -654,7 +652,18 @@ final class ArgoPDFReaderController: UIViewController {
             self.toolbar.alpha = a
             self.toolbarSurface.alpha = a
         }
-        if animated { UIView.animate(withDuration: 0.2, animations: apply) } else { apply() }
+        // alpha 0 인 뷰는 포커스 후보에서 빠진다. 그래서 들어갈 때는
+        // 투명도를 **먼저** 맞춘 뒤에 포커스를 요청한다. 애니메이션에 맡기면
+        // 요청 시점에 도구 모음이 아직 안 보여 엔진이 그냥 지나친다 —
+        // 첫 select 가 먹지 않고 두 번 눌러야 했던 이유다.
+        if animated && !toolbarInteractive {
+            UIView.animate(withDuration: 0.2, animations: apply)
+        } else {
+            apply()
+        }
+
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
 
         if visible {
             let wait: TimeInterval = toolbarInteractive ? 12 : 5
