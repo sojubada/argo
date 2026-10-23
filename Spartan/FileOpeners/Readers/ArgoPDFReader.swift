@@ -46,17 +46,36 @@ enum PDFFitMode: Int, CaseIterable {
 
 // MARK: - 리모컨을 받는 캔버스
 
-/// 쪽 위에 올려 두는 유일한 포커스 대상.
+/// 문서 위에 올려 두는 유일한 포커스 대상.
 ///
 /// 뷰컨트롤러에서 pressesBegan 을 받으면 방향키가 전부 포커스 이동에
 /// 먹힌다 — 문서 뷰어에서 한 번 크게 당한 지점이다.
 /// 입력은 포커스를 가진 뷰에 먼저 가므로, 포커스를 가진 쪽이 받아야 한다.
+///
+/// **UIButton 이 아니라 UIView 다.** 전에는 UIButton 이었는데, tvOS 는
+/// 포커스를 받은 버튼에 흰색 포커스 판을 깔아 준다. 이 뷰는 화면 전체를
+/// 덮으므로 그 판이 **문서를 통째로 가렸다** — PDF 가 흰 화면으로 나오던
+/// 원인이다. 쪽은 멀쩡히 그려져 있었고 그 위가 흰색이었다.
+/// 포커스가 툴바로 넘어가면 판이 사라져 문서가 드러났는데, 그게
+/// "선택 버튼을 누르면 흰 화면이 없어진다"의 정체다.
+///
+/// 평범한 UIView 는 포커스를 받아도 아무것도 그리지 않는다. 그래서 이쪽이다.
 @available(tvOS 13.0, *)
-final class PDFCanvasButton: UIButton {
+final class ArgoFocusCanvas: UIView {
+    /// 방향키·재생 등. true 를 돌려주면 그 입력은 여기서 끝난다.
     var onPress: ((UIPress.PressType) -> Bool)?
+    /// 가운데 선택 버튼.
+    var onSelect: (() -> Void)?
+
+    /// 포커스를 받아야 입력이 온다. UIView 는 기본이 false 다.
+    override var canBecomeFocused: Bool { true }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         for press in presses {
+            if press.type == .select {
+                onSelect?()
+                return
+            }
             if let handled = onPress?(press.type), handled { return }
         }
         super.pressesBegan(presses, with: event)
@@ -82,7 +101,7 @@ final class ArgoPDFReaderController: UIViewController {
 
     private let scrollHost = UIScrollView()
     private let pageImage = UIImageView()
-    private var canvas = PDFCanvasButton(type: .custom)
+    private var canvas = ArgoFocusCanvas()
 
     private var toolbarSurface = ArgoSurfaceView.makeSurface()
     private var toolbar = UIStackView()
@@ -119,8 +138,8 @@ final class ArgoPDFReaderController: UIViewController {
         scrollHost.addSubview(pageImage)
 
         canvas.translatesAutoresizingMaskIntoConstraints = false
-        canvas.addTarget(self, action: #selector(toggleToolbar),
-                         for: .primaryActionTriggered)
+        canvas.backgroundColor = .clear
+        canvas.onSelect = { [weak self] in self?.toggleToolbar() }
         canvas.onPress = { [weak self] type in
             self?.handlePress(type) ?? false
         }

@@ -11,13 +11,29 @@
 
 // The focused view is where a press arrives first. Handling it on the
 // view controller meant it had already been spent moving focus.
-@interface ArgoCanvasButton : UIButton
+/// 문서 위에 올려 두는 유일한 포커스 대상.
+///
+/// **UIButton 이 아니라 UIView 입니다.** 전에는 버튼이었는데, tvOS 는
+/// 포커스를 받은 버튼에 흰색 포커스 판을 깔아 줍니다. 이 뷰는 화면 전체를
+/// 덮으므로 그 판이 문서를 통째로 가립니다 — PDF 뷰어가 흰 화면으로 나오던
+/// 원인이고, 여기도 같은 구조라 같은 병을 갖고 있었습니다.
+/// 포커스가 툴바에 있을 때만 문서가 보였던 것입니다.
+@interface ArgoCanvasButton : UIView
 @property (nonatomic, copy) BOOL (^onPress)(UIPressType type);
+@property (nonatomic, copy) void (^onSelect)(void);
 @end
 
 @implementation ArgoCanvasButton
+
+/// 포커스를 받아야 입력이 옵니다. UIView 는 기본이 NO 입니다.
+- (BOOL)canBecomeFocused { return YES; }
+
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     for (UIPress *press in presses) {
+        if (press.type == UIPressTypeSelect) {
+            if (self.onSelect) { self.onSelect(); }
+            return;
+        }
         if (self.onPress && self.onPress(press.type)) { return; }
     }
     [super pressesBegan:presses withEvent:event];
@@ -73,11 +89,11 @@
     // One focusable thing over the page. The remote talks to the
     // document through it, because tvOS gives a web view no focus of
     // its own and there is nothing in a document to focus on anyway.
-    self.canvas = [ArgoCanvasButton buttonWithType:UIButtonTypeCustom];
+    self.canvas = [[ArgoCanvasButton alloc] init];
     self.canvas.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.canvas addTarget:self action:@selector(toggleToolbar)
-          forControlEvents:UIControlEventPrimaryActionTriggered];
+    self.canvas.backgroundColor = [UIColor clearColor];
     __weak typeof(self) weakSelf = self;
+    self.canvas.onSelect = ^{ [weakSelf toggleToolbar]; };
     self.canvas.onPress = ^BOOL(UIPressType type) {
         return [weakSelf handlePress:type];
     };

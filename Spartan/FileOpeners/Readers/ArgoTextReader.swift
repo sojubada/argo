@@ -27,7 +27,7 @@ final class ArgoTextReaderController: UIViewController {
     private static let maxBytes = 8 * 1024 * 1024
 
     private let textView = UITextView()
-    private var canvas = PDFCanvasButton(type: .custom)
+    private var canvas = ArgoFocusCanvas()
 
     private var toolbarSurface = ArgoSurfaceView.makeSurface()
     private var toolbar = UIStackView()
@@ -74,7 +74,8 @@ final class ArgoTextReaderController: UIViewController {
         view.addSubview(textView)
 
         canvas.translatesAutoresizingMaskIntoConstraints = false
-        canvas.addTarget(self, action: #selector(toggleToolbar), for: .primaryActionTriggered)
+        canvas.backgroundColor = .clear
+        canvas.onSelect = { [weak self] in self?.toggleToolbar() }
         canvas.onPress = { [weak self] type in self?.handlePress(type) ?? false }
         view.addSubview(canvas)
 
