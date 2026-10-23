@@ -38,6 +38,7 @@
 		D0EEC548B3514C6A8E4FAA23 /* CompressionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 751647905BE146D390C03713 /* CompressionRunner.swift */; };
 		DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */; };
 		A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */; };
+		D1A90001C0DE4A0099110001 /* ArgoDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A90002C0DE4A0099110002 /* ArgoDiag.swift */; };
 		17F6A368634645CBB74213DE /* ArgoTextReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */; };
 		0FCDBED9E88946C698FE7331 /* AirDropBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = F193AB4B4D65481DA47D1474 /* AirDropBridge.m */; };
 		824076D6CD59403AABEAC85E /* AirDropState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A07E270887FE401A955F6758 /* AirDropState.swift */; };
@@ -150,6 +151,7 @@
 		751647905BE146D390C03713 /* CompressionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressionRunner.swift; sourceTree = "<group>"; };
 		9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoClipboard.swift; sourceTree = "<group>"; };
 		7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoPDFReader.swift; sourceTree = "<group>"; };
+		D1A90002C0DE4A0099110002 /* ArgoDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoDiag.swift; sourceTree = "<group>"; };
 		A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoTextReader.swift; sourceTree = "<group>"; };
 		F193AB4B4D65481DA47D1474 /* AirDropBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AirDropBridge.m; sourceTree = "<group>"; };
 		D1A897F946C64304A153E65C /* AirDropBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AirDropBridge.h; sourceTree = "<group>"; };
@@ -328,6 +330,7 @@
 			isa = PBXGroup;
 			children = (
 				7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */,
+				D1A90002C0DE4A0099110002 /* ArgoDiag.swift */,
 				A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */,
 			);
 			path = FileOpeners/Readers;
@@ -700,6 +703,7 @@
 				D0EEC548B3514C6A8E4FAA23 /* CompressionRunner.swift in Sources */,
 				DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */,
 				A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */,
+				D1A90001C0DE4A0099110001 /* ArgoDiag.swift in Sources */,
 				17F6A368634645CBB74213DE /* ArgoTextReader.swift in Sources */,
 				0FCDBED9E88946C698FE7331 /* AirDropBridge.m in Sources */,
 				824076D6CD59403AABEAC85E /* AirDropState.swift in Sources */,

@@ -725,6 +725,10 @@ struct ContentView: View {
                             ArgoPDFReaderView(filePath: newViewFilePath,
                                               fileName: newViewFileName,
                                               isPresented: $showSubView[36])
+                                // 고유 크기가 없는 Representable 이다. 이걸 안 주면
+                                // SwiftUI 가 0에 가까운 크기를 주고 시트 가운데에 앉힌다 —
+                                // 쪽이 아래쪽에 손톱만 하게 나오던 원인이다.
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .edgesIgnoringSafeArea(.all)
                         })
                         .sheet(isPresented: $showSubView[40], content: {
@@ -737,6 +741,7 @@ struct ContentView: View {
                                                        showSubView[4] = true
                                                    }
                                                })
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .edgesIgnoringSafeArea(.all)
                         })
                         .sheet(isPresented: $showSubView[38], content: {
