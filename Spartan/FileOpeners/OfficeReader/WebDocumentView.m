@@ -464,6 +464,13 @@
     box.alpha = 1;
     self.panelView = box;
     [self.view bringSubviewToFront:box];
+    // 배치를 먼저 끝냅니다. 방금 붙인 버튼들은 아직 크기가 0 인데,
+    // 크기 0 인 뷰는 투명한 뷰와 마찬가지로 포커스 후보가 아닙니다.
+    // 패널 버튼이 하나도 안 눌리던 두 번째 원인입니다.
+    [self.view layoutIfNeeded];
+    [ArgoDiagLog log:@"panel"
+             message:[NSString stringWithFormat:@"열림 버튼수=%lu",
+                      (unsigned long)box.subviews.count]];
 
     [self setNeedsFocusUpdate];
     [self updateFocusIfNeeded];
@@ -562,6 +569,13 @@
 
     self.panelView = box;
     [self.view bringSubviewToFront:box];
+    // 배치를 먼저 끝냅니다. 방금 붙인 버튼들은 아직 크기가 0 인데,
+    // 크기 0 인 뷰는 투명한 뷰와 마찬가지로 포커스 후보가 아닙니다.
+    // 패널 버튼이 하나도 안 눌리던 두 번째 원인입니다.
+    [self.view layoutIfNeeded];
+    [ArgoDiagLog log:@"panel"
+             message:[NSString stringWithFormat:@"열림 버튼수=%lu",
+                      (unsigned long)box.subviews.count]];
     [self setNeedsFocusUpdate];
     [self updateFocusIfNeeded];
 }

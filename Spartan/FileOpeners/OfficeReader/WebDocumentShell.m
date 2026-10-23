@@ -30,6 +30,7 @@
                 " var pages=C.querySelectorAll('section.docx');"
                 " nav.units=function(){return pages;};"
                 " installScreenPaging('화면');"
+                " nav.read(1);"
                 " ready(pages.length+'쪽');"
                 "}).catch(fail);";
     }
@@ -101,6 +102,7 @@
                 " if(!pages.length){pages=C.querySelectorAll('div > div');}"
                 " nav.units=function(){return pages;};"
                 " installScreenPaging('화면');"
+                " nav.read(1);"
                 " ready(pages.length+'쪽');"
                 "})();";
     }
@@ -214,12 +216,18 @@
     "  var id='argo-read';var st=document.getElementById(id);"
     "  if(!st){st=document.createElement('style');st.id=id;"
     "   document.head.appendChild(st);}"
-    "  if(!s||s<=1.001){st.textContent='';C.style.zoom=1;report();return;}"
-    "  var col=Math.round(1500/s);"
-    "  st.textContent='section.docx,[class*=page]{'"
-    "   +'width:'+col+'px !important;min-width:0 !important;'"
-    "   +'max-width:'+col+'px !important;box-sizing:border-box !important;'"
-    "   +'padding:40px !important;margin:0 auto 24px !important;}';"
+    "  s=s||1;"
+    // 단 폭은 어느 단계에서나 같습니다. 전에는 '보통'에서만 폭 제한을
+    // 걸지 않아, 보통(794px) → 125%(1500px) 에서 폭이 두 배로 튀고
+    // 그 뒤로는 거의 변하지 않았습니다 — 단계가 고르지 않던 이유입니다.
+    "  var col=Math.round(1460/s);"
+    "  st.textContent='#c{width:'+col+'px !important;'"
+    "   +'margin:0 auto !important;}'"
+    // 렌더러마다 쪽을 담는 요소가 달라, 바깥 그릇을 묶고 안쪽은 꽉 채웁니다.
+    "   +'section.docx,[class*=page]{width:100% !important;'"
+    "   +'min-width:0 !important;max-width:100% !important;'"
+    "   +'box-sizing:border-box !important;padding:36px !important;'"
+    "   +'margin:0 auto 20px !important;}';"
     "  C.style.zoom=s;report();},"
     " paint:function(){}};"
     "window.argoNav=nav;"
