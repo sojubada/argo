@@ -53,9 +53,15 @@ enum ArgoDiag {
         guard isEnabled else { return }
         rotateIfBig()
         let s = UIScreen.main
+        // 빌드 번호를 박아 둔다. 기기에 새 빌드가 실제로 올라갔는지
+        // 로그만 보고 알 수 있어야 한다 — 한 번 옛 빌드의 로그를 놓고
+        // 고친 코드가 안 먹는다고 헤맨 적이 있다.
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        let ver   = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
         write("""
 
         ========================================
+        Argo \(ver) build \(build)
         \(what)  \(Date())
         screen bounds=\(s.bounds.size) native=\(s.nativeBounds.size) \
         scale=\(s.scale) nativeScale=\(s.nativeScale)
