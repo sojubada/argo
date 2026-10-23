@@ -8,6 +8,8 @@
 #import "WebDocumentShell.h"
 #import <dlfcn.h>
 #import <objc/message.h>
+// Swift 쪽 진단 기록. 모듈 이름은 Argo 입니다.
+#import "Argo-Swift.h"
 
 // The focused view is where a press arrives first. Handling it on the
 // view controller meant it had already been spent moving focus.
@@ -29,6 +31,11 @@
 - (BOOL)canBecomeFocused { return YES; }
 
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    for (UIPress *pr in presses) {
+        [ArgoDiagLog log:@"canvas"
+                 message:[NSString stringWithFormat:@"press type=%ld focused=%d",
+                          (long)pr.type, (int)self.isFocused]];
+    }
     for (UIPress *press in presses) {
         if (press.type == UIPressTypeSelect) {
             if (self.onSelect) { self.onSelect(); }
@@ -64,6 +71,9 @@
 /// 보이는 것과 입력을 받는 것은 다릅니다. 열자마자 버튼이 포커스를
 /// 가져가면 화살표가 버튼 사이만 오가고 쪽은 꼼짝도 하지 않습니다.
 @property (nonatomic, assign) BOOL toolbarInteractive;
+/// 0 원래 크기, 1 가로 꽉 참, 2 세로 꽉 참.
+@property (nonatomic, assign) NSInteger fitIndex;
+@property (nonatomic, strong) UIButton *fitButton;
 @property (nonatomic, strong) NSTimer *hideTimer;
 @end
 
@@ -154,8 +164,26 @@
     menu.allowedPressTypes = @[ @(UIPressTypeMenu) ];
     [self.view addGestureRecognizer:menu];
 
+    [ArgoDiagLog begin:[NSString stringWithFormat:@"오피스 뷰어: %@",
+                        self.documentPath.lastPathComponent]];
     [self setToolbarVisible:YES animated:NO];
     [self prepareWebViewAndRender];
+}
+
+/// 원래 크기 → 가로 꽉 참 → 세로 꽉 참 을 돕니다.
+///
+/// 쪽 하나의 실제 크기를 재서 배율을 겁니다. docx 는 폭이 pt 로 못 박혀
+/// 있고 pptx 는 1180x664 로 그려지므로, 손대지 않으면 TV 에서 작게 뜹니다.
+- (void)cycleFit {
+    self.fitIndex = (self.fitIndex + 1) % 3;
+    NSArray<NSString *> *modes  = @[ @"", @"w", @"h" ];
+    NSArray<NSString *> *titles = @[ @"원래 크기", @"가로 꽉 참", @"세로 꽉 참" ];
+    [self.fitButton setTitle:titles[self.fitIndex] forState:UIControlStateNormal];
+    [ArgoDiagLog log:@"fit" message:titles[self.fitIndex]];
+    [self js:[NSString stringWithFormat:@"argoNav.fit('%@');argoNav.label()",
+              modes[self.fitIndex]]
+         then:^(id label) { [self showStatus:label]; }];
+    [self setToolbarVisible:YES interactive:YES animated:YES];
 }
 
 - (UIButton *)barButton:(NSString *)title action:(SEL)sel {
@@ -241,6 +269,10 @@
     NSMutableArray *items = [NSMutableArray arrayWithObjects:
                              self.prevButton, self.nextButton, self.statusLabel, nil];
 
+    // 맞춤은 자주 쓰므로 설정 안에 묻지 않습니다. PDF 뷰어와 같은 자리입니다.
+    self.fitButton = [self barButton:@"원래 크기" action:@selector(cycleFit)];
+    [items addObject:self.fitButton];
+
     // 나머지는 전부 설정 하나로 모았습니다. 명세의 '버튼을 흩뿌리지 말 것'입니다.
     [items addObject:[self barButton:@"설정" action:@selector(showPanel)]];
     [items addObject:[self barButton:@"닫기" action:@selector(closeNow)]];
@@ -265,6 +297,9 @@
               interactive:(BOOL)interactive
                  animated:(BOOL)animated {
     BOOL wasInteractive = self.toolbarInteractive;
+    [ArgoDiagLog log:@"toolbar"
+             message:[NSString stringWithFormat:@"visible=%d interactive=%d",
+                      (int)visible, (int)(visible && interactive)]];
     self.toolbarVisible = visible;
     self.toolbarInteractive = visible && interactive;
     [self.hideTimer invalidate];
@@ -311,7 +346,16 @@
     [self setToolbarVisible:YES interactive:!self.toolbarInteractive animated:YES];
 }
 
+- (void)didUpdateFocusInContext:(UIFocusUpdateContext *)context
+       withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator {
+    [super didUpdateFocusInContext:context withAnimationCoordinator:coordinator];
+    [ArgoDiagLog log:@"focus"
+             message:NSStringFromClass([context.nextFocusedItem class]) ?: @"nil"];
+}
+
 - (NSArray<id<UIFocusEnvironment>> *)preferredFocusEnvironments {
+    [ArgoDiagLog log:@"focusAsk"
+             message:[NSString stringWithFormat:@"interactive=%d", (int)self.toolbarInteractive]];
     // 패널이 열리면 포커스가 그 안에 머물러야 합니다. 뒤에 있는
     // 캔버스로 빠지면 방향키가 문서를 움직여 패널을 쓸 수 없습니다.
     if (self.errorView) { return @[ self.errorView ]; }
@@ -373,6 +417,10 @@
     [box addSubview:stack];
 
     CGFloat pad = [ArgoTheme screenMargin] * 0.6;
+    // 계층에 먼저 넣는다. self.view 쪽 앵커와 묶는 제약은
+    // 공통 조상이 있어야 활성화된다 — 없으면 예외가 던져지고,
+    // 잡는 곳이 없어 앱이 그대로 죽는다.
+    [self.view addSubview:box];
     [NSLayoutConstraint activateConstraints:@[
         [head.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
         [head.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
@@ -392,7 +440,6 @@
 
     box.alpha = 0;
     self.panelView = box;
-    [self.view addSubview:box];
     [self.view bringSubviewToFront:box];
     [UIView animateWithDuration:0.2 animations:^{ box.alpha = 1; }];
 
@@ -468,6 +515,10 @@
     [box addSubview:close];
 
     CGFloat pad = [ArgoTheme screenMargin] * 0.6;
+    // 계층에 먼저 넣는다. self.view 쪽 앵커와 묶는 제약은
+    // 공통 조상이 있어야 활성화된다 — 없으면 예외가 던져지고,
+    // 잡는 곳이 없어 앱이 그대로 죽는다.
+    [self.view addSubview:box];
     [NSLayoutConstraint activateConstraints:@[
         [head.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
         [head.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
@@ -488,7 +539,6 @@
     ]];
 
     self.panelView = box;
-    [self.view addSubview:box];
     [self.view bringSubviewToFront:box];
     [self setNeedsFocusUpdate];
     [self updateFocusIfNeeded];
@@ -760,6 +810,10 @@
     for (UIView *v in @[ head, why, name, buttons ]) { [box addSubview:v]; }
 
     CGFloat pad = [ArgoTheme screenMargin] * 0.7;
+    // 계층에 먼저 넣는다. self.view 쪽 앵커와 묶는 제약은
+    // 공통 조상이 있어야 활성화된다 — 없으면 예외가 던져지고,
+    // 잡는 곳이 없어 앱이 그대로 죽는다.
+    [self.view addSubview:box];
     [NSLayoutConstraint activateConstraints:@[
         [head.topAnchor constraintEqualToAnchor:box.topAnchor constant:pad],
         [head.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:pad],
@@ -783,7 +837,6 @@
     ]];
 
     self.errorView = box;
-    [self.view addSubview:box];
     [self.view bringSubviewToFront:box];
     // 패널이 열리면 포커스가 패널 안으로 들어가야 합니다.
     [self setNeedsFocusUpdate];

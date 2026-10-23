@@ -105,3 +105,15 @@ enum ArgoDiag {
         }
     }
 }
+
+/// ObjC 에서 부르는 창구.
+///
+/// ArgoDiag 는 Swift 열거형이라 ObjC 에서 보이지 않습니다. 오피스 뷰어는
+/// ObjC 로 되어 있어 그동안 로그를 한 줄도 남기지 못했습니다 —
+/// '로그 폴더에 파일이 없다'의 정체입니다.
+@available(tvOS 13.0, *)
+@objc(ArgoDiagLog)
+final class ArgoDiagLog: NSObject {
+    @objc static func begin(_ what: String) { ArgoDiag.begin(what) }
+    @objc static func log(_ tag: String, _ message: String) { ArgoDiag.log(tag, message) }
+}

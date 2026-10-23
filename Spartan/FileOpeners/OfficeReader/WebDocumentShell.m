@@ -29,7 +29,7 @@
                 ".then(function(){"
                 " var pages=C.querySelectorAll('section.docx');"
                 " nav.units=function(){return pages;};"
-                " nav.label=function(){return (nav.i+1)+' / '+pages.length+' 쪽';};"
+                " installScreenPaging('화면');"
                 " ready(pages.length+'쪽');"
                 "}).catch(fail);";
     }
@@ -86,7 +86,6 @@
                 "   document.head.appendChild(st);}"
                 "  st.textContent=css?('.slide-background{background:'+css+' !important;}'):'';"
                 " };"
-                " nav.paint(guessSlideFill());"
                 " ready(slides.length+'장');"
                 "}).catch(fail);";
     }
@@ -101,7 +100,7 @@
                 " var pages=C.querySelectorAll('[class*=page]');"
                 " if(!pages.length){pages=C.querySelectorAll('div > div');}"
                 " nav.units=function(){return pages;};"
-                " nav.label=function(){return pages.length?((nav.i+1)+' / '+pages.length+' 쪽'):'';};"
+                " installScreenPaging('화면');"
                 " ready(pages.length+'쪽');"
                 "})();";
     }
@@ -195,9 +194,34 @@
     " prev:function(){nav.go(nav.i-1);},"
     " night:function(on){C.className=on?'night':'';"
     "  document.body.className=on?'night':'';},"
+    // 쪽 하나의 실제 크기를 재서 화면에 맞춥니다. docx 는 pt 로 못 박힌
+    // 폭을 갖고 pptx 는 1180x664 로 그려져, 그대로 두면 TV 에서 작게 뜹니다.
+    " fit:function(mode){"
+    "  var u=nav.units();var el=(u&&u.length)?u[0]:C;"
+    "  C.style.zoom=1;"
+    "  var w=el.offsetWidth,h=el.offsetHeight;"
+    "  if(!w||!h){return;}"
+    "  var z=(mode==='w')?(window.innerWidth/w)"
+    "       :(mode==='h')?(window.innerHeight/h):1;"
+    "  if(!isFinite(z)||z<=0){z=1;}"
+    "  C.style.zoom=z;report();},"
     " paint:function(){}};"
     "window.argoNav=nav;"
     "function report(){window.__argoInfo=nav.label();}"
+    // 한 화면씩 넘기기.
+    //
+    // docx-preview 와 hwp.js 가 내놓는 '쪽'은 원본의 쪽과 다릅니다 —
+    // 명시적 쪽나눔이 있을 때만 쪼개져, 여러 쪽짜리 문서가 1~2 조각으로
+    // 나옵니다. 없는 쪽수를 지어내느니 화면 수를 세는 편이 정직합니다.
+    "function screens(){return Math.max(1,Math.ceil("
+    " document.body.scrollHeight/Math.max(1,window.innerHeight)));}"
+    "function installScreenPaging(unit){"
+    " nav.go=function(k){var t=screens();if(k<0||k>=t)return;"
+    "  nav.i=k;window.scrollTo(0,k*window.innerHeight);report();};"
+    " nav.scroll=function(dy){window.scrollBy(0,dy);"
+    "  nav.i=Math.round(window.scrollY/Math.max(1,window.innerHeight));report();};"
+    " nav.label=function(){return (nav.i+1)+' / '+screens()+' '+unit;};"
+    "}"
     "function ready(info){window.__argoInfo=nav.label()||info;"
     " window.__argoState='done';}"
     "function fail(e){window.__argoState='error';"
