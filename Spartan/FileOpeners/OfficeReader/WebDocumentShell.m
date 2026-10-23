@@ -205,6 +205,22 @@
     "       :(mode==='h')?(window.innerHeight/h):1;"
     "  if(!isFinite(z)||z<=0){z=1;}"
     "  C.style.zoom=z;report();},"
+    // 읽기 모드.
+    //
+    // zoom 만 걸면 쪽이 통째로 넓어져 한 줄이 화면 끝까지 갑니다. 3미터
+    // 떨어져서는 그 줄을 따라가기가 어렵습니다. 그래서 쪽 폭을 배율로 나눠
+    // 미리 좁혀 둡니다 — 글자는 커지고 단 폭은 1500px 근처로 묶입니다.
+    " read:function(s){"
+    "  var id='argo-read';var st=document.getElementById(id);"
+    "  if(!st){st=document.createElement('style');st.id=id;"
+    "   document.head.appendChild(st);}"
+    "  if(!s||s<=1.001){st.textContent='';C.style.zoom=1;report();return;}"
+    "  var col=Math.round(1500/s);"
+    "  st.textContent='section.docx,[class*=page]{'"
+    "   +'width:'+col+'px !important;min-width:0 !important;'"
+    "   +'max-width:'+col+'px !important;box-sizing:border-box !important;'"
+    "   +'padding:40px !important;margin:0 auto 24px !important;}';"
+    "  C.style.zoom=s;report();},"
     " paint:function(){}};"
     "window.argoNav=nav;"
     "function report(){window.__argoInfo=nav.label();}"

@@ -174,15 +174,34 @@
 ///
 /// 쪽 하나의 실제 크기를 재서 배율을 겁니다. docx 는 폭이 pt 로 못 박혀
 /// 있고 pptx 는 1180x664 로 그려지므로, 손대지 않으면 TV 에서 작게 뜹니다.
+- (BOOL)isProse { return !self.isDeck && !self.isSheet; }
+
 - (void)cycleFit {
-    self.fitIndex = (self.fitIndex + 1) % 3;
-    NSArray<NSString *> *modes  = @[ @"", @"w", @"h" ];
-    NSArray<NSString *> *titles = @[ @"원래 크기", @"가로 꽉 참", @"세로 꽉 참" ];
-    [self.fitButton setTitle:titles[self.fitIndex] forState:UIControlStateNormal];
-    [ArgoDiagLog log:@"fit" message:titles[self.fitIndex]];
-    [self js:[NSString stringWithFormat:@"argoNav.fit('%@');argoNav.label()",
-              modes[self.fitIndex]]
-         then:^(id label) { [self showStatus:label]; }];
+    NSString *js;
+    NSString *title;
+
+    if (self.isProse) {
+        // 글 문서는 늘리는 것이 답이 아닙니다. 화면 폭까지 늘리면 한 줄이
+        // 1920px 이 되어, 거실 거리에서는 줄을 놓칩니다. 글자만 키우고
+        // 단 폭은 묶습니다.
+        NSArray<NSNumber *> *steps = @[ @1.0, @1.25, @1.5, @2.0 ];
+        self.fitIndex = (self.fitIndex + 1) % steps.count;
+        double s = steps[self.fitIndex].doubleValue;
+        title = (s == 1.0) ? @"글자 보통"
+                           : [NSString stringWithFormat:@"글자 %d%%", (int)(s * 100)];
+        js = [NSString stringWithFormat:@"argoNav.read(%g);argoNav.label()", s];
+    } else {
+        NSArray<NSString *> *modes  = @[ @"", @"w", @"h" ];
+        NSArray<NSString *> *titles = @[ @"원래 크기", @"가로 꽉 참", @"세로 꽉 참" ];
+        self.fitIndex = (self.fitIndex + 1) % modes.count;
+        title = titles[self.fitIndex];
+        js = [NSString stringWithFormat:@"argoNav.fit('%@');argoNav.label()",
+              modes[self.fitIndex]];
+    }
+
+    [self.fitButton setTitle:title forState:UIControlStateNormal];
+    [ArgoDiagLog log:@"fit" message:title];
+    [self js:js then:^(id label) { [self showStatus:label]; }];
     [self setToolbarVisible:YES interactive:YES animated:YES];
 }
 
@@ -270,7 +289,8 @@
                              self.prevButton, self.nextButton, self.statusLabel, nil];
 
     // 맞춤은 자주 쓰므로 설정 안에 묻지 않습니다. PDF 뷰어와 같은 자리입니다.
-    self.fitButton = [self barButton:@"원래 크기" action:@selector(cycleFit)];
+    self.fitButton = [self barButton:(self.isProse ? @"글자 보통" : @"원래 크기")
+                          action:@selector(cycleFit)];
     [items addObject:self.fitButton];
 
     // 나머지는 전부 설정 하나로 모았습니다. 명세의 '버튼을 흩뿌리지 말 것'입니다.
@@ -438,10 +458,12 @@
         [box.widthAnchor constraintEqualToConstant:620],
     ]];
 
-    box.alpha = 0;
+    // 투명한 채로 포커스를 요청하면 엔진이 후보에서 빼 버립니다.
+    // 패널 버튼이 하나도 안 눌리던 원인입니다 — 도구 모음에서 겪은 것과
+    // 같은 일입니다. 페이드는 포기하고 바로 보입니다.
+    box.alpha = 1;
     self.panelView = box;
     [self.view bringSubviewToFront:box];
-    [UIView animateWithDuration:0.2 animations:^{ box.alpha = 1; }];
 
     [self setNeedsFocusUpdate];
     [self updateFocusIfNeeded];
