@@ -4,6 +4,8 @@
 //! tvOS 의 std 는 Tier 3 라 파일 메타데이터 쪽이 아직 비어 있고,
 //! 그 빈 곳을 아예 지나가지 않기 위해서다. 읽고 쓰는 일은 Swift 가 한다.
 
+mod hwp;
+
 use std::os::raw::{c_char, c_int};
 use std::slice;
 
@@ -33,6 +35,10 @@ pub unsafe extern "C" fn argoconv_register_font(
         return ARGOCONV_BAD_ARGS;
     };
     let bytes = slice::from_raw_parts(data, len).to_vec();
+    // SVG 쪽(한글 문서)에도 같은 폰트가 필요합니다.
+    if let Ok(mut fonts) = hwp::SVG_FONTS.lock() {
+        fonts.push(bytes.clone());
+    }
     minipdf::register_font(name.to_owned(), bytes);
     ARGOCONV_OK
 }

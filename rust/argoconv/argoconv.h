@@ -20,6 +20,10 @@ int argoconv_register_font(const char *name, const uint8_t *data, size_t len);
 int argoconv_to_pdf(const uint8_t *input, size_t len,
                     uint8_t **out, size_t *out_len);
 
+/// hwp · hwpx -> PDF. 성공하면 out 버퍼를 argoconv_free 로 돌려줄 것.
+int argoconv_hwp_to_pdf(const uint8_t *input, size_t len,
+                        uint8_t **out, size_t *out_len);
+
 /// argoconv_to_pdf 가 준 버퍼를 돌려준다.
 void argoconv_free(uint8_t *ptr, size_t len);
 

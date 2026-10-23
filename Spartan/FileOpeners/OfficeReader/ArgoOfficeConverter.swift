@@ -26,7 +26,7 @@ enum ArgoOfficeConverter {
     ///
     /// xlsx 는 당분간 뺍니다. 변환 자체는 되지만 엑셀의 인쇄 방식 그대로
     /// 넓은 시트를 열 묶음별로 쪼개서, 화면으로 따라 읽기가 어렵습니다.
-    static let handled: Set<String> = ["docx", "pptx"]
+    static let handled: Set<String> = ["docx", "pptx", "hwp", "hwpx"]
 
     static func handles(_ path: String) -> Bool {
         handled.contains((path as NSString).pathExtension.lowercased())
@@ -94,9 +94,15 @@ enum ArgoOfficeConverter {
         var outLen = 0
         let started = Date()
 
+        // 한글 문서는 다른 길로 갑니다. hwpers 가 쪽마다 SVG 로 그리고
+        // 그걸 PDF 로 옮깁니다 — 끝에 나오는 것은 똑같이 PDF 하나입니다.
+        let isHangul = ["hwp", "hwpx"].contains((path as NSString).pathExtension.lowercased())
+
         let code = input.withUnsafeBytes { raw -> Int32 in
             guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return ARGOCONV_BAD_ARGS }
-            return argoconv_to_pdf(base, input.count, &out, &outLen)
+            return isHangul
+                ? argoconv_hwp_to_pdf(base, input.count, &out, &outLen)
+                : argoconv_to_pdf(base, input.count, &out, &outLen)
         }
 
         guard code == ARGOCONV_OK, let buffer = out, outLen > 0 else {

@@ -12,6 +12,11 @@ crate-type = ["staticlib"]
 [dependencies]
 # 벤더링한 사본을 쓴다. 슬라이드 제목이 사라지던 문제를 고쳤다.
 minipdf = { path = "../vendor/minipdf" }
+# 한글 문서: hwp·hwpx 를 읽어 쪽마다 SVG 로 그린다.
+hwpers = "0.5"
+# 그 SVG 를 PDF 로 옮긴다. 둘 다 순수 Rust 라 tvOS 로 간다.
+svg2pdf = "0.13"
+pdf-writer = "0.12"
 
 [profile.release]
 opt-level = "z"     # 크기 우선. 변환은 이미 0.1 초 안쪽이라 속도를 더 살 이유가 없다.
