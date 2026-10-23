@@ -22,5 +22,6 @@ pdf-writer = "0.12"
 opt-level = "z"     # 크기 우선. 변환은 이미 0.1 초 안쪽이라 속도를 더 살 이유가 없다.
 lto = true
 codegen-units = 1
-panic = "abort"
+# panic = "abort" 를 쓰지 않는다. 변환기가 패닉하면 앱이 통째로 죽었다 —
+# 낯선 문서 하나가 파일 탐색기를 끌고 가서는 안 된다.
 strip = true

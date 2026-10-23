@@ -56,7 +56,7 @@ jobs:
           export TVOS_DEPLOYMENT_TARGET=16.0
           cd rust/argoconv
           cargo +nightly build --release \
-            -Z build-std=std,panic_abort \
+            -Z build-std=std,panic_unwind \
             --target aarch64-apple-tvos
           mkdir -p "$GITHUB_WORKSPACE/rust/lib"
           cp target/aarch64-apple-tvos/release/libargoconv.a \

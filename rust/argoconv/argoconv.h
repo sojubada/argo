@@ -12,6 +12,7 @@
 #define ARGOCONV_OK              0
 #define ARGOCONV_BAD_ARGS       -1
 #define ARGOCONV_CONVERT_FAILED -2
+#define ARGOCONV_PANICKED       -3
 
 /// 폰트를 등록한다. tvOS 에는 fontconfig 가 없어 직접 먹여야 한다.
 int argoconv_register_font(const char *name, const uint8_t *data, size_t len);
@@ -23,6 +24,9 @@ int argoconv_to_pdf(const uint8_t *input, size_t len,
 /// hwp · hwpx -> PDF. 성공하면 out 버퍼를 argoconv_free 로 돌려줄 것.
 int argoconv_hwp_to_pdf(const uint8_t *input, size_t len,
                         uint8_t **out, size_t *out_len);
+
+/// 마지막 패닉 메시지를 담는다. 담은 바이트 수를 돌려준다.
+size_t argoconv_last_error(uint8_t *buffer, size_t cap);
 
 /// argoconv_to_pdf 가 준 버퍼를 돌려준다.
 void argoconv_free(uint8_t *ptr, size_t len);

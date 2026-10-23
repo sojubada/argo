@@ -106,7 +106,18 @@ enum ArgoOfficeConverter {
         }
 
         guard code == ARGOCONV_OK, let buffer = out, outLen > 0 else {
-            ArgoDiag.log("convert", "실패 code=\(code) \((path as NSString).lastPathComponent)")
+            // 패닉이면 이유를 꺼내 둡니다. 파일이 없어도 무엇이 터졌는지
+            // 로그만으로 알 수 있어야 합니다.
+            var why = ""
+            if code == ARGOCONV_PANICKED {
+                var scratch = [UInt8](repeating: 0, count: 1024)
+                let n = scratch.withUnsafeMutableBufferPointer { raw -> Int in
+                    guard let base = raw.baseAddress else { return 0 }
+                    return argoconv_last_error(base, raw.count)
+                }
+                if n > 0 { why = " — " + (String(bytes: scratch[0..<n], encoding: .utf8) ?? "") }
+            }
+            ArgoDiag.log("convert", "실패 code=\(code) \((path as NSString).lastPathComponent)\(why)")
             throw Failure.conversionFailed(code)
         }
         defer { argoconv_free(buffer, outLen) }

@@ -13,7 +13,7 @@ use hwpers::{HwpReader, HwpxReader};
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref};
 use svg2pdf::usvg;
 
-use crate::{ARGOCONV_BAD_ARGS, ARGOCONV_CONVERT_FAILED, ARGOCONV_OK};
+use crate::{guard, ARGOCONV_BAD_ARGS, ARGOCONV_CONVERT_FAILED, ARGOCONV_OK};
 
 /// SVG 안의 글자를 그리려면 usvg 쪽에도 폰트가 있어야 합니다.
 /// minipdf 에 넘긴 것과 같은 바이트를 여기에도 쌓아 둡니다.
@@ -60,7 +60,12 @@ pub unsafe extern "C" fn argoconv_hwp_to_pdf(
     *out_len = 0;
 
     let bytes = slice::from_raw_parts(input, len);
+    let (out_ptr, out_size) = (out, out_len);
+    guard(move || convert(bytes, out_ptr, out_size))
+}
 
+/// 패닉을 잡는 바깥쪽과 실제 일을 나눕니다.
+unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int {
     // hwpx 는 ZIP, hwp 는 CFB 입니다. 확장자를 믿지 않고 앞 네 바이트로 가립니다.
     let document = if bytes.starts_with(b"PK") {
         HwpxReader::from_bytes(bytes)

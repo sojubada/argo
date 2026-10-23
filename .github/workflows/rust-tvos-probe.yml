@@ -55,7 +55,7 @@ jobs:
           export TVOS_DEPLOYMENT_TARGET=16.0
           set -o pipefail
           cargo +nightly build --release \
-            -Z build-std=std,panic_abort \
+            -Z build-std=std,panic_unwind \
             --target aarch64-apple-tvos 2>&1 | tee /tmp/build.log
 
       - name: 판정

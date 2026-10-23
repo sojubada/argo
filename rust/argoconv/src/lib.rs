@@ -6,6 +6,49 @@
 
 mod hwp;
 
+use std::panic;
+use std::sync::Mutex;
+
+pub const ARGOCONV_PANICKED: c_int = -3;
+
+/// 마지막 패닉 메시지. 무엇이 왜 죽었는지 로그로 꺼내 보기 위한 것이다.
+static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
+
+/// 패닉을 잡아 오류 코드로 바꾼다.
+///
+/// 변환기는 남이 만든 파서를 두 개 품고 있고, 그것들은 낯선 바이너리를
+/// 읽는다. 어딘가에서 범위를 벗어나는 것은 시간문제다. 그때 앱이 죽는
+/// 대신 코드를 돌려주면, Swift 가 조용히 기존 뷰어로 되돌아간다.
+fn guard<F: FnOnce() -> c_int + panic::UnwindSafe>(work: F) -> c_int {
+    let previous = panic::take_hook();
+    panic::set_hook(Box::new(|info| {
+        if let Ok(mut slot) = LAST_PANIC.lock() {
+            *slot = info.to_string();
+        }
+    }));
+    let outcome = panic::catch_unwind(work);
+    panic::set_hook(previous);
+    outcome.unwrap_or(ARGOCONV_PANICKED)
+}
+
+/// 마지막 패닉 메시지를 버퍼에 담는다. 담은 바이트 수를 돌려준다.
+///
+/// # Safety
+/// `buffer`/`cap` 은 쓸 수 있는 버퍼여야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_last_error(buffer: *mut u8, cap: usize) -> usize {
+    if buffer.is_null() || cap == 0 {
+        return 0;
+    }
+    let Ok(message) = LAST_PANIC.lock() else {
+        return 0;
+    };
+    let bytes = message.as_bytes();
+    let n = bytes.len().min(cap);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer, n);
+    n
+}
+
 use std::os::raw::{c_char, c_int};
 use std::slice;
 
@@ -64,15 +107,17 @@ pub unsafe extern "C" fn argoconv_to_pdf(
     *out_len = 0;
 
     let bytes = slice::from_raw_parts(input, len);
-    let Ok(pdf) = minipdf::convert_bytes_to_pdf(bytes) else {
-        return ARGOCONV_CONVERT_FAILED;
-    };
-
-    let mut boxed = pdf.into_boxed_slice();
-    *out_len = boxed.len();
-    *out = boxed.as_mut_ptr();
-    std::mem::forget(boxed);
-    ARGOCONV_OK
+    let (out_ptr, out_size) = (out, out_len);
+    guard(move || {
+        let Ok(pdf) = minipdf::convert_bytes_to_pdf(bytes) else {
+            return ARGOCONV_CONVERT_FAILED;
+        };
+        let mut boxed = pdf.into_boxed_slice();
+        *out_size = boxed.len();
+        *out_ptr = boxed.as_mut_ptr();
+        std::mem::forget(boxed);
+        ARGOCONV_OK
+    })
 }
 
 /// `argoconv_to_pdf` 가 준 버퍼를 돌려준다.
