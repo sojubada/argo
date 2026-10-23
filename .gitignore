@@ -1,3 +1,7 @@
 .DS_Store
 *.xip
 Applications
+# Rust 빌드 산출물
+rust/target/
+rust/*/target/
+rust/lib/

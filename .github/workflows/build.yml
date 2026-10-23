@@ -45,6 +45,24 @@ jobs:
           sudo cp "$SDK_PATH/usr/include/spawn.h" "$SDK_PATH/usr/include/spawn.h.orig" || true
           sudo cp spawn.h "$SDK_PATH/usr/include/spawn.h"
 
+      - name: Rust 로 변환기 빌드
+        run: |
+          # 오피스 문서를 기기 안에서 PDF 로 바꾸는 라이브러리다.
+          # aarch64-apple-tvos 는 Tier 3 라 표준 라이브러리가 미리 빌드되어
+          # 있지 않다 — nightly 로 std 까지 같이 짓는다.
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          export SDKROOT=$(xcrun --sdk appletvos --show-sdk-path)
+          export TVOS_DEPLOYMENT_TARGET=16.0
+          cd rust/argoconv
+          cargo +nightly build --release \
+            -Z build-std=std,panic_abort \
+            --target aarch64-apple-tvos
+          mkdir -p "$GITHUB_WORKSPACE/rust/lib"
+          cp target/aarch64-apple-tvos/release/libargoconv.a \
+             "$GITHUB_WORKSPACE/rust/lib/"
+          ls -lh "$GITHUB_WORKSPACE/rust/lib/"
+
       - name: Install ldid
         run: |
           brew install ldid || brew install ldid-procursus

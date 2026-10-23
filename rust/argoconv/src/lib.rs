@@ -1,0 +1,82 @@
+//! 오피스 문서를 PDF 로 바꾸는 C 창구.
+//!
+//! 파일을 건드리지 않는다. 바이트를 받아 바이트를 돌려준다 —
+//! tvOS 의 std 는 Tier 3 라 파일 메타데이터 쪽이 아직 비어 있고,
+//! 그 빈 곳을 아예 지나가지 않기 위해서다. 읽고 쓰는 일은 Swift 가 한다.
+
+use std::os::raw::{c_char, c_int};
+use std::slice;
+
+/// 0 성공. 음수는 실패 이유.
+pub const ARGOCONV_OK: c_int = 0;
+pub const ARGOCONV_BAD_ARGS: c_int = -1;
+pub const ARGOCONV_CONVERT_FAILED: c_int = -2;
+
+/// 한글 폰트를 등록한다.
+///
+/// tvOS 에는 fontconfig 가 없고 minipdf 의 시스템 폰트 탐색도 돌지 않는다.
+/// 대신 Swift 가 /System/Library/Fonts/AppleSDGothicNeo.ttc 를 읽어
+/// 이리로 넘긴다. 사용자가 폰트 폴더에 넣은 것도 같은 길로 들어온다.
+///
+/// # Safety
+/// `name` 은 NUL 로 끝나는 문자열, `data`/`len` 은 유효한 버퍼여야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_register_font(
+    name: *const c_char,
+    data: *const u8,
+    len: usize,
+) -> c_int {
+    if name.is_null() || data.is_null() || len == 0 {
+        return ARGOCONV_BAD_ARGS;
+    }
+    let Ok(name) = std::ffi::CStr::from_ptr(name).to_str() else {
+        return ARGOCONV_BAD_ARGS;
+    };
+    let bytes = slice::from_raw_parts(data, len).to_vec();
+    minipdf::register_font(name.to_owned(), bytes);
+    ARGOCONV_OK
+}
+
+/// docx · xlsx · pptx 를 PDF 로 바꾼다.
+///
+/// 성공하면 `out` 에 버퍼를, `out_len` 에 길이를 넣는다.
+/// 그 버퍼는 반드시 `argoconv_free` 로 돌려줘야 한다.
+///
+/// # Safety
+/// `input`/`len` 은 유효한 버퍼, `out`/`out_len` 은 쓸 수 있는 포인터여야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_to_pdf(
+    input: *const u8,
+    len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> c_int {
+    if input.is_null() || len == 0 || out.is_null() || out_len.is_null() {
+        return ARGOCONV_BAD_ARGS;
+    }
+    *out = std::ptr::null_mut();
+    *out_len = 0;
+
+    let bytes = slice::from_raw_parts(input, len);
+    let Ok(pdf) = minipdf::convert_bytes_to_pdf(bytes) else {
+        return ARGOCONV_CONVERT_FAILED;
+    };
+
+    let mut boxed = pdf.into_boxed_slice();
+    *out_len = boxed.len();
+    *out = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    ARGOCONV_OK
+}
+
+/// `argoconv_to_pdf` 가 준 버퍼를 돌려준다.
+///
+/// # Safety
+/// `argoconv_to_pdf` 가 준 포인터와 길이를 그대로 넘겨야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_free(ptr: *mut u8, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    drop(Box::from_raw(slice::from_raw_parts_mut(ptr, len)));
+}
