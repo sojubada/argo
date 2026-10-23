@@ -72,13 +72,18 @@ enum PDFFitMode: Int, CaseIterable {
 ///
 /// 평범한 UIView 는 포커스를 받아도 아무것도 그리지 않는다. 그래서 이쪽이다.
 @available(tvOS 13.0, *)
-final class ArgoFocusCanvas: UIView {
+final class ArgoFocusCanvas: UIControl {
     /// 방향키·재생 등. true 를 돌려주면 그 입력은 여기서 끝난다.
     var onPress: ((UIPress.PressType) -> Bool)?
     /// 가운데 선택 버튼.
     var onSelect: (() -> Void)?
 
-    /// 포커스를 받아야 입력이 온다. UIView 는 기본이 false 다.
+    /// 포커스를 받아야 입력이 온다.
+    ///
+    /// UIView 로 두었더니 포커스 엔진이 아예 집어 가지 않았다 — 진단 로그에
+    /// didUpdateFocus 가 한 줄도 없었다. UIButton 으로 돌리면 포커스는
+    /// 받지만 흰 포커스 판이 문서를 덮는다. UIControl 이 그 사이다:
+    /// 포커스 대상이면서 기본 외형이 없다.
     override var canBecomeFocused: Bool { true }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -248,8 +253,18 @@ final class ArgoPDFReaderController: UIViewController {
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        // 이 줄이 로그에 안 보이면 아무도 우리에게 포커스를 묻지 않은 것이다.
+        ArgoDiag.log("focusAsk", "preferredFocusEnvironments interactive=\(toolbarInteractive)")
         if pageProblemLabel?.isHidden == false { return [canvas] }
         return toolbarInteractive ? [toolbar] : [canvas]
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        ArgoDiag.log("appear", "canvas focusable=\(canvas.canBecomeFocused) "
+                             + "focused=\(canvas.isFocused) window=\(view.window != nil)")
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
     }
 
     override func viewDidLayoutSubviews() {
@@ -677,6 +692,7 @@ final class ArgoPDFReaderController: UIViewController {
     }
 
     @objc private func menuPressed() {
+        ArgoDiag.log("gesture", "menu")
         // 한 겹씩 벗긴다. 도구 모음 → 닫기.
         if toolbarInteractive {
             setToolbar(visible: false, interactive: false, animated: true)

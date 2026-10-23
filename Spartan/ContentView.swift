@@ -1389,6 +1389,50 @@ struct ContentView: View {
 		.frame(maxWidth: .infinity, alignment: .leading)
     }
     
+    // MARK: - 뷰어 띄우기
+
+    /// 뷰어는 SwiftUI 시트가 아니라 UIKit 으로 직접 띄운다.
+    ///
+    /// 시트 안의 UIViewControllerRepresentable 은 포커스를 받지 못한다.
+    /// 진단 로그에서 didUpdateFocus 가 한 번도 오지 않았고 pressesBegan 도
+    /// 없었다 — 포커스가 뷰어 안으로 들어온 적이 아예 없다는 뜻이다.
+    /// 포커스된 항목이 없으면 방향키와 선택 버튼은 포커스 엔진이 삼켜서
+    /// 제스처로도 오지 않는다. menu 키만 살아 있던 것이 그 증거다.
+    ///
+    /// 직접 present 하면 그 뷰컨트롤러가 자기 포커스 환경의 주인이 되고,
+    /// preferredFocusEnvironments 가 제대로 불린다.
+    private func presentReader(_ vc: UIViewController) {
+        guard let top = AirDropBridge.topViewController() else {
+            ArgoDiag.log("present", "최상위 뷰컨트롤러를 못 찾았다")
+            return
+        }
+        vc.modalPresentationStyle = .fullScreen
+        top.present(vc, animated: true)
+    }
+
+    private func readerPath() -> String {
+        newViewFilePath.hasSuffix("/") ? newViewFilePath + newViewFileName : newViewFilePath
+    }
+
+    private func presentPDFReader() {
+        let vc = ArgoPDFReaderController()
+        vc.documentPath = readerPath()
+        vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+        presentReader(vc)
+    }
+
+    private func presentTextReader() {
+        let vc = ArgoTextReaderController()
+        vc.filePath = readerPath()
+        vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+        vc.onEdit = { [weak vc] in
+            vc?.dismiss(animated: true) {
+                showSubView[4] = true
+            }
+        }
+        presentReader(vc)
+    }
+
     func defaultAction(index: Int, isDirectPath: Bool) { //this function was created to allow tvOS 13 support. it is probably the most important function in this entire file manager. without it, nothing aside from directory listing works
         var fileToCheck: [String] = masterFiles.map { $0.name }
         if(isDirectPath) {
@@ -1448,7 +1492,7 @@ struct ContentView: View {
             case 4:
                 // 편집기가 아니라 읽기 뷰어로 연다. 줄이 접히고 글자 크기를
                 // 바꿀 수 있다 — 로그는 읽는 것이 목적이지 고치는 것이 아니다.
-                showSubView[40] = true
+                presentTextReader()
             case 5:
                 showSubView[13] = true
             case 6:
@@ -1499,7 +1543,7 @@ struct ContentView: View {
 			case 14:
 				showSubView[33] = true
 			case 15:
-				showSubView[36] = true
+				presentPDFReader()
 			case 16:
 				showSubView[38] = true
             default:

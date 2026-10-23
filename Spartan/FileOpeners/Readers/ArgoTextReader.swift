@@ -154,8 +154,17 @@ final class ArgoTextReaderController: UIViewController {
         ArgoDiag.log("focus", "\(String(describing: context.nextFocusedItem.map { type(of: $0) }))")
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        ArgoDiag.log("appear", "canvas focusable=\(canvas.canBecomeFocused) "
+                             + "focused=\(canvas.isFocused) window=\(view.window != nil)")
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
+
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        toolbarInteractive ? [toolbar] : [canvas]
+        ArgoDiag.log("focusAsk", "preferredFocusEnvironments interactive=\(toolbarInteractive)")
+        return toolbarInteractive ? [toolbar] : [canvas]
     }
 
     // MARK: 읽기
@@ -363,6 +372,7 @@ final class ArgoTextReaderController: UIViewController {
     }
 
     @objc private func menuPressed() {
+        ArgoDiag.log("gesture", "menu")
         if toolbarInteractive {
             setToolbar(visible: false, interactive: false, animated: true)
         } else {
