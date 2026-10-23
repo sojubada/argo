@@ -20,15 +20,21 @@ import CoreGraphics
 // MARK: - 맞춤 방식
 
 enum PDFFitMode: Int, CaseIterable {
-    /// 가로 꽉 참. 쪽이 화면보다 길어지면 위아래로 움직인다.
+    /// 가로 꽉 참. 쪽이 화면보다 길어지면 위아래로 움직인다. 글 문서에 맞다.
     case fitWidth
     /// 세로 꽉 참. 쪽 하나가 통째로 보인다.
     case fitHeight
+    /// 두 쪽을 나란히. 만화·그림책의 펼침면이다.
+    ///
+    /// 세로 쪽 둘을 옆에 놓으면 가로세로비가 1.4 안팎이 되어 16:9 화면을
+    /// 거의 채운다. 세로 꽉 참으로 한 쪽만 보면 화면의 3분의 2가 빈다.
+    case twoPage
 
     var label: String {
         switch self {
         case .fitWidth:  return "가로 꽉 참"
         case .fitHeight: return "세로 꽉 참"
+        case .twoPage:   return "두 쪽"
         }
     }
 
@@ -36,11 +42,16 @@ enum PDFFitMode: Int, CaseIterable {
         switch self {
         case .fitWidth:  return "arrow.left.and.right"
         case .fitHeight: return "arrow.up.and.down"
+        case .twoPage:   return "book"
         }
     }
 
     var next: PDFFitMode {
-        self == .fitWidth ? .fitHeight : .fitWidth
+        switch self {
+        case .fitWidth:  return .fitHeight
+        case .fitHeight: return .twoPage
+        case .twoPage:   return .fitWidth
+        }
     }
 }
 
@@ -93,7 +104,12 @@ final class ArgoPDFReaderController: UIViewController {
     private var document: CGPDFDocument?
     private var pageCount = 0
     private var currentPage = 1
-    private var fitMode: PDFFitMode = .fitWidth
+    /// 지난번에 고른 맞춤으로 연다. 저장만 하고 읽지 않아서 만화책을 열 때마다
+    /// 두 쪽을 다시 눌러야 했다.
+    private var fitMode: PDFFitMode = {
+        let raw = UserDefaults.settings.object(forKey: "pdfFitMode") as? Int
+        return PDFFitMode(rawValue: raw ?? 0) ?? .fitWidth
+    }()
 
     /// 가로 맞춤에서 쪽이 화면보다 길 때의 세로 위치 (0 = 맨 위).
     private var scrollOffset: CGFloat = 0
@@ -217,53 +233,73 @@ final class ArgoPDFReaderController: UIViewController {
 
     // MARK: 쪽 그리기
 
-    /// 쪽 하나를 화면 크기에 맞춰 그린다.
+    /// 지금 보여 줄 쪽들. 두 쪽 모드면 펼침면 한 쌍이다.
     ///
-    /// UIGraphicsImageRenderer 로 간다. 직접 만든 CGBitmapContext 에
-    /// drawPDFPage 를 했더니 흰 종이만 나왔다 — 그림이 어디로 갔는지
-    /// 알 길이 없었다. 이쪽은 UIKit 이 컨텍스트를 세워 주므로
-    /// 좌표계와 색 공간을 내가 맞출 필요가 없다.
+    /// 표지는 혼자 선다 — (1), (2,3), (4,5) … 실제 책이 그렇게 펼쳐지고,
+    /// 스캔한 만화·그림책은 1쪽이 표지인 경우가 대부분이다.
+    private func pagesForCurrentView() -> [Int] {
+        guard fitMode == .twoPage else { return [currentPage] }
+        if currentPage <= 1 { return [1] }
+        let left = currentPage % 2 == 0 ? currentPage : currentPage - 1
+        let right = left + 1
+        return right <= pageCount ? [left, right] : [left]
+    }
+
+    /// 쪽(또는 펼침면)을 화면 크기에 맞춰 그린다.
     ///
-    /// 대신 뒤집기는 내가 한다. UIKit 컨텍스트는 위에서 아래로,
-    /// PDF 는 아래에서 위로 간다.
+    /// UIGraphicsImageRenderer 로 간다. 뒤집기는 내가 한다 — UIKit 컨텍스트는
+    /// 위에서 아래로, PDF 는 아래에서 위로 간다.
     ///
     /// /Rotate 가 걸린 쪽이 있으므로 변환은 getDrawingTransform 에서 받아온다 —
     /// 직접 계산하면 90도 돌아간 스캔 문서가 눕는다.
     private func renderCurrentPage() {
-        guard let doc = document,
-              let page = doc.page(at: currentPage),
-              view.bounds.width > 0 else { return }
+        guard let doc = document, view.bounds.width > 0 else { return }
 
-        // cropBox 가 비어 있는 PDF 가 있다. 그때는 mediaBox 로 물러선다.
-        var usedBox = CGPDFBox.cropBox
-        var box = page.getBoxRect(.cropBox)
-        if box.width <= 0 || box.height <= 0 {
-            usedBox = .mediaBox
-            box = page.getBoxRect(.mediaBox)
+        let numbers = pagesForCurrentView()
+        var pages: [(page: CGPDFPage, box: CGRect, boxKind: CGPDFBox, rotation: Int)] = []
+        for n in numbers {
+            guard let page = doc.page(at: n) else { continue }
+            // cropBox 가 비어 있는 PDF 가 있다. 그때는 mediaBox 로 물러선다.
+            var kind = CGPDFBox.cropBox
+            var box = page.getBoxRect(.cropBox)
+            if box.width <= 0 || box.height <= 0 {
+                kind = .mediaBox
+                box = page.getBoxRect(.mediaBox)
+            }
+            guard box.width > 0, box.height > 0 else { continue }
+
+            let rotation = Int(page.rotationAngle)
+            let turned = (rotation / 90) % 2 != 0
+            let shown = turned ? CGRect(x: 0, y: 0, width: box.height, height: box.width) : box
+            pages.append((page, shown, kind, rotation))
         }
-        guard box.width > 0, box.height > 0 else {
+        guard !pages.isEmpty else {
             showPageProblem("이 쪽의 크기를 읽을 수 없습니다.")
             return
         }
 
-        let rotation = Int(page.rotationAngle)
-        let turned = (rotation / 90) % 2 != 0
-        let pageW = turned ? box.height : box.width
-        let pageH = turned ? box.width : box.height
-
+        // 쪽들을 같은 높이로 맞춰 옆으로 늘어놓았을 때의 전체 가로세로비.
+        let aspect = pages.reduce(0) { $0 + $1.box.width / $1.box.height }
         let available = view.bounds.size
-        let scale: CGFloat
-        switch fitMode {
-        case .fitWidth:  scale = available.width / pageW
-        case .fitHeight: scale = available.height / pageH
-        }
 
-        let size = CGSize(width: max(1, (pageW * scale).rounded()),
-                          height: max(1, (pageH * scale).rounded()))
+        // 점(point) 기준의 최종 크기.
+        let size: CGSize
+        switch fitMode {
+        case .fitWidth:
+            let w = available.width
+            size = CGSize(width: w, height: (w / aspect).rounded())
+        case .fitHeight:
+            let h = available.height
+            size = CGSize(width: (h * aspect).rounded(), height: h)
+        case .twoPage:
+            // 펼침면은 가로·세로 둘 다 넘지 않게 맞춘다.
+            let h = min(available.height, available.width / aspect)
+            size = CGSize(width: (h * aspect).rounded(), height: h.rounded())
+        }
+        guard size.width >= 1, size.height >= 1 else { return }
 
         let format = UIGraphicsImageRendererFormat.default()
-        // 화면 밀도까지 곱하면 큰 쪽 하나가 수백 MB 가 된다. 등배로 충분하다.
-        format.scale = 1
+        format.scale = Self.renderScale(for: size)
         format.opaque = true
 
         let image = UIGraphicsImageRenderer(size: size, format: format).image { rc in
@@ -273,13 +309,24 @@ final class ArgoPDFReaderController: UIViewController {
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
 
-            ctx.translateBy(x: 0, y: size.height)
-            ctx.scaleBy(x: 1, y: -1)
-            ctx.concatenate(page.getDrawingTransform(usedBox,
-                                                     rect: CGRect(origin: .zero, size: size),
-                                                     rotate: 0,
-                                                     preserveAspectRatio: true))
-            ctx.drawPDFPage(page)
+            var x: CGFloat = 0
+            for item in pages {
+                let w = (item.box.width / item.box.height) * size.height
+                let slot = CGRect(x: x, y: 0, width: w, height: size.height)
+                ctx.saveGState()
+                ctx.clip(to: slot)
+                // 이 쪽의 자리로 원점을 옮긴 뒤, 그 안에서 뒤집는다.
+                ctx.translateBy(x: slot.minX, y: slot.maxY)
+                ctx.scaleBy(x: 1, y: -1)
+                ctx.concatenate(item.page.getDrawingTransform(
+                    item.boxKind,
+                    rect: CGRect(origin: .zero, size: slot.size),
+                    rotate: 0,
+                    preserveAspectRatio: true))
+                ctx.drawPDFPage(item.page)
+                ctx.restoreGState()
+                x += w
+            }
         }
 
         pageImage.image = image
@@ -287,21 +334,35 @@ final class ArgoPDFReaderController: UIViewController {
         layoutPage()
         updateStatus()
 
-        // 흰 화면을 그냥 보여 주지 않는다. 그리지 못한 것과 원래 빈 쪽은
-        // 눈으로 구별할 수 없고, 아무 말이 없으면 고장으로 보인다.
         if Self.isBlank(image) {
-            // 왜 비었는지 숫자를 같이 남긴다. '비어 보인다' 만으로는
-            // 안 그려진 것인지 원래 빈 쪽인지 구별할 수 없다.
-            let detail = String(format: "쪽 %.0f×%.0f · 회전 %d · %@ · 그린 크기 %.0f×%.0f",
-                                box.width, box.height, rotation,
-                                usedBox == .cropBox ? "cropBox" : "mediaBox",
-                                size.width, size.height)
+            let first = pages[0]
+            let detail = String(format: "쪽 %.0f×%.0f · 회전 %d · %@ · 그린 크기 %.0f×%.0f @%.0fx",
+                                first.box.width, first.box.height, first.rotation,
+                                first.boxKind == .cropBox ? "cropBox" : "mediaBox",
+                                size.width, size.height, format.scale)
             showPageProblem("이 쪽에서 그려진 것이 없습니다.\n"
                             + "원래 빈 쪽이거나, 이 기기가 그리지 못하는 내용입니다.\n\n"
                             + detail)
         } else {
             hidePageProblem()
         }
+    }
+
+    /// 몇 배로 그릴지. 4K 화면에서는 두 배로 그려야 글자가 또렷하다.
+    ///
+    /// 등배로만 그리면 4K 애플TV 에서도 1080p 품질로 보인다. 다만 가로 꽉 참의
+    /// 긴 쪽은 두 배로 올리면 한 장이 수천만 화소가 되므로 화소 예산을 둔다 —
+    /// 예산을 넘으면 그만큼만 올린다.
+    private static func renderScale(for size: CGSize) -> CGFloat {
+        let wanted = min(UIScreen.main.nativeScale, 2.0)
+        guard wanted > 1 else { return 1 }
+
+        let budget: CGFloat = 24_000_000      // 화소. 32비트면 약 96MB.
+        let atWanted = size.width * size.height * wanted * wanted
+        guard atWanted > budget else { return wanted }
+
+        let fitted = (budget / (size.width * size.height)).squareRoot()
+        return max(1, min(wanted, fitted))
     }
 
     /// 작게 줄여 어두운 점이 있는지 센다. 사람 눈으로는 못 하는 판정이다.
@@ -387,17 +448,17 @@ final class ArgoPDFReaderController: UIViewController {
         // 아무 일도 일어나지 않는다.
         switch type {
         case .leftArrow:
-            goToPage(currentPage - 1)
+            goToPage(previousViewStart())
             return true
         case .rightArrow:
-            goToPage(currentPage + 1)
+            goToPage(nextViewStart())
             return true
         case .upArrow:
             // 쪽이 길면 쪽 안에서 올라가고, 맨 위면 앞 쪽으로 넘어간다.
             if canScrollWithinPage && scrollOffset > 0 {
                 scrollBy(-view.bounds.height * 0.85)
             } else {
-                goToPage(currentPage - 1, landAtBottom: true)
+                goToPage(previousViewStart(), landAtBottom: true)
             }
             return true
         case .downArrow:
@@ -405,7 +466,7 @@ final class ArgoPDFReaderController: UIViewController {
             if canScrollWithinPage && scrollOffset < maxOffset - 1 {
                 scrollBy(view.bounds.height * 0.85)
             } else {
-                goToPage(currentPage + 1)
+                goToPage(nextViewStart())
             }
             return true
         case .playPause:
@@ -439,6 +500,10 @@ final class ArgoPDFReaderController: UIViewController {
     @objc private func cycleFit() {
         fitMode = fitMode.next
         scrollOffset = 0
+        // 두 쪽으로 들어가면 지금 쪽이 든 펼침면의 왼쪽으로 맞춘다.
+        if fitMode == .twoPage, currentPage > 1, currentPage % 2 == 1 {
+            currentPage -= 1
+        }
         UserDefaults.settings.set(fitMode.rawValue, forKey: "pdfFitMode")
         renderCurrentPage()
         setToolbar(visible: true, interactive: false, animated: true)
@@ -478,13 +543,34 @@ final class ArgoPDFReaderController: UIViewController {
         toolbarSurface.addSubview(toolbar)
     }
 
-    @objc private func prevPage() { goToPage(currentPage - 1) }
-    @objc private func nextPage() { goToPage(currentPage + 1) }
+    @objc private func prevPage() { goToPage(previousViewStart()) }
+    @objc private func nextPage() { goToPage(nextViewStart()) }
+
+    /// 다음으로 보여 줄 묶음의 첫 쪽. 두 쪽 모드면 한 번에 두 장씩 간다.
+    private func nextViewStart() -> Int {
+        guard fitMode == .twoPage else { return currentPage + 1 }
+        let shown = pagesForCurrentView()
+        return (shown.last ?? currentPage) + 1
+    }
+
+    private func previousViewStart() -> Int {
+        guard fitMode == .twoPage else { return currentPage - 1 }
+        let first = pagesForCurrentView().first ?? currentPage
+        if first <= 1 { return 0 }          // 범위 밖 — goToPage 가 막는다
+        if first == 2 { return 1 }          // 표지로
+        return first - 2
+    }
     @objc private func goFirst()  { goToPage(1) }
     @objc private func goLast()   { goToPage(pageCount) }
 
     private func updateStatus() {
-        var text = "\(currentPage) / \(pageCount)"
+        let shown = pagesForCurrentView()
+        var text: String
+        if shown.count > 1, let a = shown.first, let b = shown.last {
+            text = "\(a)–\(b) / \(pageCount)"
+        } else {
+            text = "\(shown.first ?? currentPage) / \(pageCount)"
+        }
         if canScrollWithinPage {
             let maxOffset = max(1, renderedPageHeight - view.bounds.height)
             let percent = Int((scrollOffset / maxOffset * 100).rounded())
