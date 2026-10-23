@@ -6147,7 +6147,7 @@ mod tests {
         };
         let mut document = PdfDocument::new();
 
-        render_sheet(&mut document, &sheet, &[], PageSize::A4);
+        render_sheet(&mut document, &sheet, &[], PageSize::A4, false);
 
         assert_eq!(document.pages().len(), 12);
     }

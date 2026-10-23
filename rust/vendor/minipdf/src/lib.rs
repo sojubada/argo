@@ -3,6 +3,7 @@ mod fonts;
 mod office;
 mod pdf;
 mod pptx;
+mod pptx_presets;
 mod xlsx;
 
 use std::fs;

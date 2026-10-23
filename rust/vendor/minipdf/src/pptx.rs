@@ -597,14 +597,42 @@ fn read_shape(
         .and_then(|node| read_fill(node, theme))
         .or_else(|| read_style_fill(shape, theme))
         .or_else(|| inherited.and_then(|style| style.fill));
+    // 글상자도 자리표시자도 아닌 도형은 파워포인트가 글을 한가운데에
+    // 놓는다. 이걸 빼면 네모 왼쪽 위에 글이 붙어 도형 밖으로 삐져나온
+    // 것처럼 보인다.
+    let is_text_box = child(shape, "nvSpPr")
+        .and_then(|node| child(node, "cNvSpPr"))
+        .and_then(|node| node.attribute("txBox"))
+        .is_some_and(read_bool);
+    let autoshape = inherited.is_none() && !is_text_box;
+    let default_alignment = if autoshape {
+        TextAlignment::Center
+    } else {
+        TextAlignment::Left
+    };
+
     let paragraphs = child(shape, "txBody")
-        .map(|body| read_paragraphs(body, theme, inherited))
+        .map(|body| {
+            read_paragraphs(
+                body,
+                theme,
+                inherited,
+                read_style_font_color(shape, theme),
+                default_alignment,
+            )
+        })
         .unwrap_or_default();
-    let text_body = child(shape, "txBody")
+    let mut text_body = child(shape, "txBody")
         .and_then(|body| child(body, "bodyPr"))
         .map(|body| read_text_body(body, inherited.map(|style| style.text_body)))
         .or_else(|| inherited.map(|style| style.text_body))
         .unwrap_or_default();
+    let anchor_given = child(shape, "txBody")
+        .and_then(|body| child(body, "bodyPr"))
+        .is_some_and(|node| node.attribute("anchor").is_some());
+    if autoshape && !anchor_given {
+        text_body.anchor = VerticalAnchor::Middle;
+    }
     if fill.is_some() || outline.is_some() || !paragraphs.is_empty() {
         elements.push(PptxElement::Shape(PptxShape {
             shape_type,
@@ -788,7 +816,7 @@ fn read_graphic_frame(
             let properties = child(cell_node, "tcPr");
             let fill = properties.and_then(|node| read_fill(node, theme));
             let paragraphs = child(cell_node, "txBody")
-                .map(|body| read_paragraphs(body, theme, None))
+                .map(|body| read_paragraphs(body, theme, None, None, TextAlignment::Left))
                 .unwrap_or_default();
             elements.push(PptxElement::Shape(PptxShape {
                 shape_type: "rect".to_owned(),
@@ -1033,6 +1061,8 @@ fn read_paragraphs(
     text_body: Node<'_, '_>,
     theme: &HashMap<String, PdfColor>,
     inherited_style: Option<&PlaceholderStyle>,
+    style_color: Option<PdfColor>,
+    default_alignment: TextAlignment,
 ) -> Vec<PptxParagraph> {
     text_body
         .children()
@@ -1076,6 +1106,7 @@ fn read_paragraphs(
                                 default_run,
                                 inherited.map(|style| &style.run),
                                 theme,
+                                style_color,
                             ));
                             has_text = true;
                         }
@@ -1086,6 +1117,7 @@ fn read_paragraphs(
                         default_run,
                         inherited.map(|style| &style.run),
                         theme,
+                        style_color,
                     )),
                     "tab" => runs.push(read_run(
                         "\t".to_owned(),
@@ -1093,6 +1125,7 @@ fn read_paragraphs(
                         default_run,
                         inherited.map(|style| &style.run),
                         theme,
+                        style_color,
                     )),
                     _ => {}
                 }
@@ -1101,7 +1134,7 @@ fn read_paragraphs(
                 runs,
                 alignment: read_alignment(properties)
                     .or_else(|| inherited.and_then(|style| style.alignment))
-                    .unwrap_or(TextAlignment::Left),
+                    .unwrap_or(default_alignment),
                 margin_left: emu_attribute(properties, "marL")
                     .or_else(|| inherited.and_then(|style| style.margin_left))
                     .unwrap_or(0.0),
@@ -1125,6 +1158,7 @@ fn read_run(
     defaults: Option<Node<'_, '_>>,
     inherited: Option<&RunDefaults>,
     theme: &HashMap<String, PdfColor>,
+    style_color: Option<PdfColor>,
 ) -> PptxRun {
     let font_size = properties
         .and_then(|node| node.attribute("sz"))
@@ -1137,6 +1171,10 @@ fn read_run(
         .and_then(|node| read_fill(node, theme))
         .or_else(|| defaults.and_then(|node| read_fill(node, theme)))
         .or_else(|| inherited.and_then(|style| style.color))
+        // 도형의 style/fontRef 가 정한 글자색. 파워포인트는 짙은 강조색
+        // 도형 위에 흰 글씨를 얹는다. 이걸 빼면 남색 위에 검은 글씨가
+        // 되어 아무것도 안 읽힌다.
+        .or(style_color)
         .or_else(|| theme.get("tx1").copied())
         .unwrap_or(PdfColor::BLACK);
     let bold = optional_bool_attribute(properties, "b")
@@ -1394,6 +1432,17 @@ fn read_fill(node: Node<'_, '_>, theme: &HashMap<String, PdfColor>) -> Option<Pd
 fn read_style_fill(shape: Node<'_, '_>, theme: &HashMap<String, PdfColor>) -> Option<PdfColor> {
     child(shape, "style")
         .and_then(|style| child(style, "fillRef"))
+        .and_then(|reference| reference.children().find(Node::is_element))
+        .and_then(|color| read_color_node(color, theme))
+}
+
+/// 도형 모양표가 정한 글자색 (style/fontRef).
+fn read_style_font_color(
+    shape: Node<'_, '_>,
+    theme: &HashMap<String, PdfColor>,
+) -> Option<PdfColor> {
+    child(shape, "style")
+        .and_then(|style| child(style, "fontRef"))
         .and_then(|reference| reference.children().find(Node::is_element))
         .and_then(|color| read_color_node(color, theme))
 }
@@ -1941,31 +1990,61 @@ fn render_shape(
 ) {
     let bounds = scale_rect(shape.bounds, scale_x, scale_y);
     let bottom = page_height - bounds.y - bounds.height;
-    let ellipse = matches!(shape.shape_type.as_str(), "ellipse" | "arc");
+    let ellipse = matches!(
+        shape.shape_type.as_str(),
+        "ellipse" | "arc" | "oval" | "flowChartConnector"
+    );
+
+    // 기본 도형의 모양을 점으로 받는다. 못 받으면 네모로 돌아간다 —
+    // 모르는 도형을 안 그리는 것보다는 네모라도 자리를 잡는 편이 낫다.
+    let outline_points = if ellipse {
+        None
+    } else {
+        crate::pptx_presets::preset_points(&shape.shape_type, bounds.width, bounds.height).map(
+            |points| {
+                points
+                    .into_iter()
+                    .map(|(fx, fy)| (bounds.x + fx * bounds.width, bottom + fy * bounds.height))
+                    .collect::<Vec<_>>()
+            },
+        )
+    };
+
     if let Some(fill) = shape.fill {
-        if ellipse {
-            page.add_ellipse(bounds.x, bottom, bounds.width, bounds.height, fill);
-        } else {
-            page.add_rect(bounds.x, bottom, bounds.width, bounds.height, fill);
+        match (&outline_points, ellipse) {
+            (Some(points), _) => {
+                let mut commands = vec![crate::pdf::PdfPathCommand::MoveTo(points[0].0, points[0].1)];
+                commands.extend(
+                    points[1..]
+                        .iter()
+                        .map(|(x, y)| crate::pdf::PdfPathCommand::LineTo(*x, *y)),
+                );
+                commands.push(crate::pdf::PdfPathCommand::Close);
+                page.add_path(commands, fill);
+            }
+            (None, true) => page.add_ellipse(bounds.x, bottom, bounds.width, bounds.height, fill),
+            (None, false) => page.add_rect(bounds.x, bottom, bounds.width, bounds.height, fill),
         }
     }
-    if !ellipse {
-        if let Some(outline) = &shape.outline {
+
+    if let Some(outline) = &shape.outline {
+        if !ellipse {
             let left = bounds.x;
             let right = bounds.x + bounds.width;
             let top = page_height - bounds.y;
-            let bottom = top - bounds.height;
-            for (start, end) in [
-                ((left, top), (right, top)),
-                ((right, top), (right, bottom)),
-                ((right, bottom), (left, bottom)),
-                ((left, bottom), (left, top)),
-            ] {
+            let floor = top - bounds.height;
+            let corners = outline_points.clone().unwrap_or_else(|| {
+                vec![(left, top), (right, top), (right, floor), (left, floor)]
+            });
+            let width = outline.width * scale_x.min(scale_y);
+            for index in 0..corners.len() {
+                let start = corners[index];
+                let end = corners[(index + 1) % corners.len()];
                 page.add_line_with_dash_pattern(
                     start,
                     end,
                     outline.color,
-                    outline.width * scale_x.min(scale_y),
+                    width,
                     &outline.dash_pattern,
                 );
             }
