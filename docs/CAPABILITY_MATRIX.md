@@ -201,3 +201,40 @@
   그 위에 CSS 로 폭을 덮어쓰느라 zoom 과 단 폭이 계속 어긋났다.
 - 파서가 폭을 포기하면 글자 크기만 키우면 된다. "글자가 안 커진다" 의 정답일 수 있다.
 - 측정 로그(`[measure]`)로 바로 가린다.
+
+### MiniPdf — 오피스를 앱 안에서 PDF 로 바꾸기 (가장 유망)
+
+- **무엇인가**: Apache-2.0, docx·xlsx·pptx → PDF. https://github.com/mini-software/MiniPdf
+- **왜 유망한가**: Rust 구현의 의존성이 **전부 순수 Rust** 다 —
+  chrono, flate2, image, roxmltree, rustybuzz, subsetter, thiserror, ttf-parser,
+  unicode-bidi, zip. Skia 도 C++ 라이브러리도 없고 PDF 1.4 를 직접 쓴다.
+  같은 성격의 dxpdf 는 skia-safe 에 묶여 있어 tvOS 가 사실상 막힌다.
+- **무엇이 달라지는가**:
+  docx/xlsx/pptx → (앱 안 Rust) → PDF → 이미 잘 도는 CoreGraphics 뷰어.
+  xlsx 표 서식, docx 글자 크기·단 폭, pptx 색 추측이 한꺼번에 사라지고,
+  WebKit 이 오피스 경로에서 통째로 빠진다 — 크래시 위험도 포커스 싸움도 없어진다.
+- **남은 장벽**: `aarch64-apple-tvos` 는 Rust Tier 3 다. nightly + `-Z build-std`,
+  staticlib 로 뽑아 cbindgen 헤더로 링크. 번거롭지만 C++ 빌드와는 난이도가 다르다.
+- **먼저 할 일 (공짜)**: CLI·Node·Python 패키지가 있으니 **PC 에서 실제 파일로 품질을 먼저 본다.**
+  쓸 만하면 그때 이식을 판단하고, 아니면 큰 일을 시작하기 전에 알게 된다.
+  이식 전까지는 PC 에서 변환해 AirDrop 으로 보내는 것만으로도 쓸 수 있다.
+
+### dxpdf — docx 전용, Skia 에 묶임
+
+- MIT, Rust, docx → PDF. https://github.com/nerdy-pro/dxpdf
+- 유일한 그래픽 의존성이 `skia-safe` 이고 PDF 출력도 Skia 백엔드를 거친다.
+  rust-skia 는 tvOS 바이너리를 배포하지 않아 Skia 를 직접 빌드해야 한다 — Tier 3 위에 한 겹 더다.
+- **당장의 쓸모**: PC 에서 docx → PDF 로 바꿔 AirDrop 으로 보내면 오늘부터 Word 를 제대로 읽는다.
+
+### 막다른 길 (다시 찾지 않기 위해 적어 둔다)
+
+- **LibreOffice 껍데기**: unoconv(2025-03 보관), unoserver, DeepSeek office-to-pdf.
+  변환은 전부 LibreOffice 가 한다. 수백 MB 라 tvOS 에 올릴 수 없다.
+- **상용 바이너리**: Apryse. 구조는 옳지만(기기 안 Office→PDF) tvOS 슬라이스가 없고,
+  속을 볼 수 없는 바이너리를 no-sandbox 앱에 넣는 것은 위험하다.
+- **클라우드 API**: Office 365 SDK for iOS. 문서를 그리지 않는다. 2024-06 보관.
+- **JS 집합체**: file-viewer 등. 우리가 쓰는 것과 같은 상류 라이브러리를 묶어 놓은 것이라
+  얻는 것 없이 공급망 위험만 는다. flyfish 는 CAD 런타임이 AGPL 이라 라이선스 덫도 있다.
+- **인쇄 경로**: UIPrintInfo·UIPrintPageRenderer·UIPrinter 전부 BLOCKED,
+  기기에서 호출하면 SIGSEGV. iOS 의 print→PDF 우회법은 시스템 오피스 변환기에 기대는데
+  tvOS 에는 그것이 없다. 두 겹으로 막혔다.
