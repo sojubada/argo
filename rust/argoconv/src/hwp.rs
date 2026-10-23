@@ -76,7 +76,26 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
         return ARGOCONV_CONVERT_FAILED;
     };
 
+    // 표를 몇 개나 봤는지 세어 로그로 넘긴다. 기기에서 표가 안 보일 때
+    // 못 읽은 것인지 못 그린 것인지 이 숫자 하나로 갈린다.
+    let mut tables = 0usize;
+    let mut cells = 0usize;
+    let mut paragraphs = 0usize;
+    for section in document.sections() {
+        paragraphs += section.paragraphs.len();
+        for para in &section.paragraphs {
+            if let Some(table) = para.table_data.as_ref() {
+                tables += 1;
+                cells += table.cells.len();
+            }
+        }
+    }
+
     let rendered = HwpRenderer::new(&document, RenderOptions::default()).render();
+    crate::note(format!(
+        "hwp 문단 {paragraphs}개, 표 {tables}개, 칸 {cells}개, 쪽 {}장",
+        rendered.pages.len()
+    ));
     if rendered.pages.is_empty() {
         return ARGOCONV_CONVERT_FAILED;
     }

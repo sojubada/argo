@@ -8,7 +8,7 @@ pub struct Section {
     pub page_def: Option<crate::model::PageDef>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Paragraph {
     pub text: Option<ParaText>,
     pub control_mask: u32,
@@ -35,19 +35,15 @@ impl Paragraph {
     pub fn from_header_record(record: &Record) -> Result<Self> {
         let mut reader = record.data_reader();
 
-        // For tag 0x42, we have a simpler structure
-        if record.tag_id() == 0x42 {
-            // This is a minimal paragraph header
-            return Ok(Self::default());
-        }
-
-        // Standard paragraph header (tag 0x50)
-        if reader.remaining() < 18 {
+        // HWPTAG_PARA_HEADER 는 0x42 다. 맨 앞 4바이트는 글자 수이고,
+        // 그 다음이 컨트롤 마스크다 — 예전에는 글자 수를 마스크로 읽었다.
+        if reader.remaining() < 22 {
             return Err(crate::error::HwpError::ParseError(
                 "Insufficient data for paragraph header".to_string(),
             ));
         }
 
+        let _char_count = reader.read_u32()?;
         Ok(Self {
             control_mask: reader.read_u32()?,
             para_shape_id: reader.read_u16()?,
@@ -69,7 +65,7 @@ impl Paragraph {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParaText {
     pub content: String,
 }

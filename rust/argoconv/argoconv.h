@@ -28,6 +28,9 @@ int argoconv_hwp_to_pdf(const uint8_t *input, size_t len,
 /// 마지막 패닉 메시지를 담는다. 담은 바이트 수를 돌려준다.
 size_t argoconv_last_error(uint8_t *buffer, size_t cap);
 
+/// 마지막 변환이 남긴 한 줄(무엇을 봤는지)을 담는다.
+size_t argoconv_last_note(uint8_t *buffer, size_t cap);
+
 /// argoconv_to_pdf 가 준 버퍼를 돌려준다.
 void argoconv_free(uint8_t *ptr, size_t len);
 

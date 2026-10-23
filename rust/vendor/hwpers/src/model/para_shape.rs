@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::parser::record::Record;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ParaShape {
     pub properties1: u32,
     pub left_margin: i32,
@@ -23,6 +23,17 @@ pub struct ParaShape {
 }
 
 impl ParaShape {
+    /// 모양표에 없는 번호를 가리키는 문단을 위한 기본값.
+    ///
+    /// 전에는 모양을 못 찾으면 문단을 통째로 버렸다 — 글이 조용히
+    /// 사라지는 쪽보다 기본 줄간격으로라도 보이는 편이 낫다.
+    pub fn fallback() -> Self {
+        Self {
+            line_space: 160,
+            ..Default::default()
+        }
+    }
+
     pub fn get_alignment(&self) -> u8 {
         // Alignment is stored in bits 2-4 of properties1
         ((self.properties1 >> 2) & 0x7) as u8

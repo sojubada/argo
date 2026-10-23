@@ -52,6 +52,33 @@ pub unsafe extern "C" fn argoconv_last_error(buffer: *mut u8, cap: usize) -> usi
 use std::os::raw::{c_char, c_int};
 use std::slice;
 
+/// 변환기가 무엇을 봤는지 한 줄. 기기 로그로 넘겨 눈으로 확인한다.
+pub(crate) static LAST_NOTE: Mutex<String> = Mutex::new(String::new());
+
+pub(crate) fn note(line: String) {
+    if let Ok(mut slot) = LAST_NOTE.lock() {
+        *slot = line;
+    }
+}
+
+/// 마지막 변환이 남긴 한 줄을 버퍼에 담는다.
+///
+/// # Safety
+/// `buffer`/`cap` 은 쓸 수 있는 버퍼여야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_last_note(buffer: *mut u8, cap: usize) -> usize {
+    if buffer.is_null() || cap == 0 {
+        return 0;
+    }
+    let Ok(line) = LAST_NOTE.lock() else {
+        return 0;
+    };
+    let bytes = line.as_bytes();
+    let n = bytes.len().min(cap);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer, n);
+    n
+}
+
 /// 0 성공. 음수는 실패 이유.
 pub const ARGOCONV_OK: c_int = 0;
 pub const ARGOCONV_BAD_ARGS: c_int = -1;
@@ -118,6 +145,7 @@ pub unsafe extern "C" fn argoconv_to_pdf(
         let Ok(pdf) = minipdf::convert_bytes_to_pdf_with_options(bytes, &options) else {
             return ARGOCONV_CONVERT_FAILED;
         };
+        note(format!("office {} 바이트 PDF", pdf.len()));
         let mut boxed = pdf.into_boxed_slice();
         *out_size = boxed.len();
         *out_ptr = boxed.as_mut_ptr();

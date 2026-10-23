@@ -80,23 +80,28 @@ pub enum ControlType {
 
 impl ControlType {
     pub fn from_ctrl_id(ctrl_id: u32) -> Self {
+        // 네 글자 컨트롤 ID. 파일에는 거꾸로 들어 있어서 리틀엔디언으로
+        // 읽으면 'tbl ' 이 0x746C6220 이 된다 — 예전 값들은 두 글자짜리
+        // 였고, 그래서 표를 한 번도 못 알아봤다.
         match ctrl_id {
-            0x5442 => Self::Table,                 // 'TB'
-            0x6F73 => Self::Gso,                   // 'so'
-            0x7874 => Self::TextBox,               // 'tx'
-            0x7165 => Self::Equation,              // 'eq'
-            0x636573 => Self::SectionDefinition,   // 'sec'
-            0x6C6F63 => Self::ColumnDefinition,    // 'col'
-            0x646E65 => Self::Endnote,             // 'end'
-            0x746F66 => Self::Footnote,            // 'fot'
-            0x676170 => Self::PageNumberPosition,  // 'pag'
-            0x6B6D62 => Self::BookMark,            // 'bmk'
-            0x6F6961 => Self::AutoNumber,          // 'aio'
-            0x6E756E => Self::NewNumber,           // 'nun'
-            0x65646968 => Self::PageHide,          // 'hide'
-            0x74636573 => Self::OverlappingLetter, // 'tcmt'
-            0x6B6469 => Self::IndexMark,           // 'idx'
-            0x646C66 => Self::Field,               // 'fld'
+            0x74626C20 => Self::Table, // 'tbl '
+            0x67736F20 => Self::Gso, // 'gso '
+            0x24726563 => Self::TextBox, // '$rec'
+            0x65716564 => Self::Equation, // 'eqed'
+            0x73656364 => Self::SectionDefinition, // 'secd'
+            0x636F6C64 => Self::ColumnDefinition, // 'cold'
+            0x68656164 => Self::HeaderFooter, // 'head'
+            0x666F6F74 => Self::HeaderFooter, // 'foot'
+            0x666E2020 => Self::Footnote, // 'fn  '
+            0x656E2020 => Self::Endnote, // 'en  '
+            0x61746E6F => Self::AutoNumber, // 'atno'
+            0x6E776E6F => Self::NewNumber, // 'nwno'
+            0x70676864 => Self::PageHide, // 'pghd'
+            0x70676E70 => Self::PageNumberPosition, // 'pgnp'
+            0x6964786D => Self::IndexMark, // 'idxm'
+            0x626F6B6D => Self::BookMark, // 'bokm'
+            0x74637073 => Self::OverlappingLetter, // 'tcps'
+            0x74636D74 => Self::HiddenComment, // 'tcmt'
             _ => Self::Unknown,
         }
     }

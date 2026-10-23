@@ -1,5 +1,7 @@
 use crate::model::ParaShape;
-use crate::render::layout::{LayoutEngine, RenderedLine, RenderedPage, RenderedParagraph, TextRun};
+use crate::render::layout::{
+    LayoutEngine, RenderedLine, RenderedPage, RenderedParagraph, TextRun,
+};
 use crate::HwpDocument;
 
 /// Rendering options
@@ -60,6 +62,24 @@ impl<'a> HwpRenderer<'a> {
             elements.extend(self.render_paragraph(para));
         }
 
+        // 표는 칸 테두리를 먼저 긋고 그 위에 글을 올린다.
+        for table in &page.tables {
+            for cell in &table.cells {
+                elements.push(RenderElement::Rectangle {
+                    x: self.hwp_to_px(cell.x),
+                    y: self.hwp_to_px(cell.y),
+                    width: self.hwp_to_px(cell.width),
+                    height: self.hwp_to_px(cell.height),
+                    fill_color: None,
+                    stroke_color: Some(0x000000),
+                    stroke_width: 1.0,
+                });
+                for para in &cell.paragraphs {
+                    elements.extend(self.render_paragraph(para));
+                }
+            }
+        }
+
         RenderedPageOutput {
             width: width_px,
             height: height_px,
@@ -115,21 +135,24 @@ impl<'a> HwpRenderer<'a> {
 
     /// Render a text run
     fn render_text_run(&self, run: &TextRun, baseline_y: i32) -> Option<RenderElement> {
-        let char_shape = self.document.get_char_shape(run.char_shape_id as usize)?;
-        let font_face = self
-            .document
-            .get_face_name(char_shape.face_name_ids[0] as usize)?;
+        // 글자 모양이나 글꼴 이름을 못 찾아도 글은 내보낸다. 없는 번호를
+        // 가리키는 문단 하나 때문에 쪽 전체가 비는 일이 있었다.
+        let char_shape = self.document.get_char_shape(run.char_shape_id as usize);
+        let font_family = char_shape
+            .and_then(|shape| self.document.get_face_name(shape.face_name_ids[0] as usize))
+            .map(|face| face.font_name.clone())
+            .unwrap_or_else(|| "함초롬바탕".to_owned());
 
         Some(RenderElement::Text {
             x: self.hwp_to_px(run.x),
             y: self.hwp_to_px(baseline_y),
             text: run.text.clone(),
-            font_family: font_face.font_name.clone(),
+            font_family,
             font_size: self.hwp_to_pt(run.font_size),
-            color: char_shape.text_color,
-            bold: char_shape.is_bold(),
-            italic: char_shape.is_italic(),
-            underline: char_shape.is_underline(),
+            color: char_shape.map(|shape| shape.text_color).unwrap_or(0),
+            bold: char_shape.is_some_and(|shape| shape.is_bold()),
+            italic: char_shape.is_some_and(|shape| shape.is_italic()),
+            underline: char_shape.is_some_and(|shape| shape.is_underline()),
         })
     }
 

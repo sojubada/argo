@@ -31,12 +31,35 @@ pub struct RenderedParagraph {
     pub para_shape_id: u16,       // Paragraph shape ID
 }
 
+/// 자리와 크기가 정해진 표 한 칸.
+#[derive(Debug, Clone)]
+pub struct RenderedCell {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    /// 칸 안의 글. 바깥 문단과 똑같이 배치된다.
+    pub paragraphs: Vec<RenderedParagraph>,
+}
+
+/// 자리가 정해진 표 하나.
+#[derive(Debug, Clone)]
+pub struct RenderedTable {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub cells: Vec<RenderedCell>,
+}
+
 /// Represents a rendered page
 #[derive(Debug, Clone)]
 pub struct RenderedPage {
     pub width: u32,                         // Page width
     pub height: u32,                        // Page height
     pub paragraphs: Vec<RenderedParagraph>, // Rendered paragraphs
+    /// 이 쪽에 놓인 표들.
+    pub tables: Vec<RenderedTable>,
     pub page_number: u32,                   // Page number
 }
 
@@ -92,6 +115,7 @@ impl<'a> LayoutEngine<'a> {
             width: page_def.width,
             height: page_def.height,
             paragraphs: Vec::new(),
+            tables: Vec::new(),
             page_number: *page_num,
         };
 
@@ -105,6 +129,29 @@ impl<'a> LayoutEngine<'a> {
 
         // Layout each paragraph
         for paragraph in &section.paragraphs {
+            if let Some(table) = paragraph.table_data.as_ref() {
+                let rendered = self.layout_table(table, content_x, current_y, content_width);
+                if current_y + rendered.height > content_y + content_height
+                    && current_y > content_y
+                {
+                    pages.push(current_page);
+                    *page_num += 1;
+                    current_page = RenderedPage {
+                        width: page_def.width,
+                        height: page_def.height,
+                        paragraphs: Vec::new(),
+                        tables: Vec::new(),
+                        page_number: *page_num,
+                    };
+                    current_y = content_y;
+                }
+                let shift = current_y - rendered.y;
+                let mut rendered = rendered;
+                shift_table(&mut rendered, shift);
+                current_y += rendered.height;
+                current_page.tables.push(rendered);
+                continue;
+            }
             if let Some(rendered_para) =
                 self.layout_paragraph(paragraph, content_x, current_y, content_width)
             {
@@ -118,6 +165,7 @@ impl<'a> LayoutEngine<'a> {
                         width: page_def.width,
                         height: page_def.height,
                         paragraphs: Vec::new(),
+                        tables: Vec::new(),
                         page_number: *page_num,
                     };
 
@@ -129,12 +177,118 @@ impl<'a> LayoutEngine<'a> {
             }
         }
 
-        if !current_page.paragraphs.is_empty() {
+        if !current_page.paragraphs.is_empty() || !current_page.tables.is_empty() {
             pages.push(current_page);
             *page_num += 1;
         }
 
         pages
+    }
+
+    /// 표 하나를 격자로 놓는다.
+    ///
+    /// 칸 크기는 문서가 이미 계산해 둔 값을 쓴다 — 한글이 정한 폭과 높이를
+    /// 그대로 따르는 쪽이 우리가 다시 재는 것보다 원본에 가깝다. 표가
+    /// 본문 폭보다 넓으면 전체를 같은 비율로 줄인다.
+    fn layout_table(
+        &self,
+        table: &crate::model::control::Table,
+        x: i32,
+        y: i32,
+        available_width: i32,
+    ) -> RenderedTable {
+        let cols = table.cols.max(1) as usize;
+        let rows = table.rows.max(1) as usize;
+
+        let mut col_widths = vec![0i32; cols];
+        let mut row_heights = vec![0i32; rows];
+        for cell in &table.cells {
+            let (row, col) = (cell.cell_address.0 as usize, cell.cell_address.1 as usize);
+            if cell.col_span <= 1 && col < cols {
+                col_widths[col] = col_widths[col].max(cell.width as i32);
+            }
+            if cell.row_span <= 1 && row < rows {
+                row_heights[row] = row_heights[row].max(cell.height as i32);
+            }
+        }
+        // 병합 때문에 한 번도 안 잡힌 열과 행을 메운다.
+        let known: Vec<i32> = col_widths.iter().copied().filter(|w| *w > 0).collect();
+        let spare = if known.is_empty() {
+            available_width / cols as i32
+        } else {
+            known.iter().sum::<i32>() / known.len() as i32
+        };
+        for width in col_widths.iter_mut().filter(|w| **w <= 0) {
+            *width = spare;
+        }
+        let default_row = row_heights.iter().copied().max().unwrap_or(2000).max(600);
+        for height in row_heights.iter_mut().filter(|h| **h <= 0) {
+            *height = default_row;
+        }
+
+        let total_width: i32 = col_widths.iter().sum();
+        if total_width > available_width && total_width > 0 {
+            for width in col_widths.iter_mut() {
+                *width = *width * available_width / total_width;
+            }
+        }
+
+        let col_x: Vec<i32> = col_widths
+            .iter()
+            .scan(x, |acc, w| {
+                let here = *acc;
+                *acc += w;
+                Some(here)
+            })
+            .collect();
+        let row_y: Vec<i32> = row_heights
+            .iter()
+            .scan(y, |acc, h| {
+                let here = *acc;
+                *acc += h;
+                Some(here)
+            })
+            .collect();
+
+        let mut cells = Vec::with_capacity(table.cells.len());
+        for cell in &table.cells {
+            let (row, col) = (cell.cell_address.0 as usize, cell.cell_address.1 as usize);
+            if row >= rows || col >= cols {
+                continue;
+            }
+            let span_cols = (cell.col_span.max(1) as usize).min(cols - col);
+            let span_rows = (cell.row_span.max(1) as usize).min(rows - row);
+            let width: i32 = col_widths[col..col + span_cols].iter().sum();
+            let height: i32 = row_heights[row..row + span_rows].iter().sum();
+
+            let inner_x = col_x[col] + cell.left_margin as i32;
+            let inner_width = (width - cell.left_margin as i32 - cell.right_margin as i32).max(1);
+            let mut inner_y = row_y[row] + cell.top_margin as i32;
+
+            let mut paragraphs = Vec::new();
+            for para in &cell.paragraphs {
+                if let Some(laid) = self.layout_paragraph(para, inner_x, inner_y, inner_width) {
+                    inner_y += laid.height;
+                    paragraphs.push(laid);
+                }
+            }
+
+            cells.push(RenderedCell {
+                x: col_x[col],
+                y: row_y[row],
+                width,
+                height,
+                paragraphs,
+            });
+        }
+
+        RenderedTable {
+            x,
+            y,
+            width: col_widths.iter().sum(),
+            height: row_heights.iter().sum(),
+            cells,
+        }
     }
 
     /// Layout a single paragraph
@@ -151,9 +305,11 @@ impl<'a> LayoutEngine<'a> {
         }
 
         // Get paragraph shape
+        let fallback_shape = ParaShape::fallback();
         let para_shape = self
             .document
-            .get_para_shape(paragraph.para_shape_id as usize)?;
+            .get_para_shape(paragraph.para_shape_id as usize)
+            .unwrap_or(&fallback_shape);
 
         // Calculate paragraph margins
         let para_x = x + para_shape.left_margin;
@@ -200,37 +356,37 @@ impl<'a> LayoutEngine<'a> {
         x: i32,
         y: i32,
     ) -> Vec<RenderedLine> {
+        // 글자 위치는 UTF-16 단위다. 한글은 바이트로 자르면 글자 가운데가
+        // 잘려 나가므로 미리 UTF-16 으로 펼쳐 놓고 센다.
+        let units: Vec<u16> = text.encode_utf16().collect();
         let mut lines = Vec::new();
-        let mut current_y = y;
 
-        for (idx, line_seg) in line_segs.line_segments.iter().enumerate() {
-            // Get text range for this line
-            let start = if idx == 0 {
-                0
-            } else {
-                line_segs.line_segments[idx - 1].text_start_position as usize
-            };
-            let end = line_seg.text_start_position as usize;
+        for (idx, segment) in line_segs.line_segments.iter().enumerate() {
+            // 이 줄은 자기 시작 위치에서 다음 줄의 시작 위치까지다.
+            //
+            // 예전에는 앞 줄의 시작부터 이 줄의 시작까지로 잡았다. 그래서
+            // 한 줄짜리 문단은 늘 0..0, 곧 빈 줄이 되어 글이 한 자도
+            // 나오지 않았다.
+            let start = (segment.text_start_position as usize).min(units.len());
+            let end = line_segs
+                .line_segments
+                .get(idx + 1)
+                .map(|next| next.text_start_position as usize)
+                .unwrap_or(units.len())
+                .clamp(start, units.len());
 
-            if end > text.len() {
-                break;
-            }
-
-            let line_text = &text[start..end];
-
-            // Create text runs for this line
+            let line_text = String::from_utf16_lossy(&units[start..end]);
+            let line_text = line_text.trim_end_matches(['\r', '\n', '\u{0}']);
             let runs = self.create_text_runs_for_line(line_text, paragraph, x, start as u32);
 
             lines.push(RenderedLine {
-                y: current_y + line_seg.line_vertical_position,
-                height: line_seg.line_height,
-                baseline_y: current_y
-                    + line_seg.line_vertical_position
-                    + line_seg.distance_baseline_to_line_vertical_position,
+                y: y + segment.line_vertical_position,
+                height: segment.line_height,
+                baseline_y: y
+                    + segment.line_vertical_position
+                    + segment.distance_baseline_to_line_vertical_position,
                 runs,
             });
-
-            current_y += line_seg.line_height;
         }
 
         lines
@@ -379,5 +535,23 @@ impl<'a> LayoutEngine<'a> {
         let avg_char_width = font_size / 2; // Rough approximation
 
         char_count * avg_char_width
+    }
+}
+
+/// 표와 그 안의 글을 세로로 통째로 옮긴다.
+fn shift_table(table: &mut RenderedTable, dy: i32) {
+    if dy == 0 {
+        return;
+    }
+    table.y += dy;
+    for cell in &mut table.cells {
+        cell.y += dy;
+        for para in &mut cell.paragraphs {
+            para.y += dy;
+            for line in &mut para.lines {
+                line.y += dy;
+                line.baseline_y += dy;
+            }
+        }
     }
 }

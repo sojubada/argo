@@ -127,9 +127,19 @@ enum ArgoOfficeConverter {
         let dest = NSTemporaryDirectory() + "/argo-\(name).pdf"
         try pdf.write(to: URL(fileURLWithPath: dest), options: .atomic)
 
+        // 변환기가 무엇을 봤는지도 같이 적습니다. 표가 안 보일 때 못 읽은
+        // 것인지 못 그린 것인지 이 한 줄로 갈립니다.
+        var scratch = [UInt8](repeating: 0, count: 512)
+        let noted = scratch.withUnsafeMutableBufferPointer { raw -> Int in
+            guard let base = raw.baseAddress else { return 0 }
+            return argoconv_last_note(base, raw.count)
+        }
+        let note = noted > 0 ? " — " + (String(bytes: scratch[0..<noted], encoding: .utf8) ?? "") : ""
+
         ArgoDiag.log("convert", "\((path as NSString).lastPathComponent) "
                                + "\(input.count) → \(outLen)바이트, "
-                               + String(format: "%.2f초", Date().timeIntervalSince(started)))
+                               + String(format: "%.2f초", Date().timeIntervalSince(started))
+                               + note)
         return dest
     }
 }

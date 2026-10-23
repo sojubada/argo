@@ -97,6 +97,9 @@ pub struct Table {
     pub right_margin: i32,
     pub top_margin: i32,
     pub bottom_margin: i32,
+    /// 행마다 들어 있는 셀 개수 (병합된 표는 행마다 다르다).
+    pub row_sizes: Vec<u16>,
+    pub border_fill_id: u16,
     pub cells: Vec<TableCell>,
 }
 
@@ -118,6 +121,8 @@ pub struct TableCell {
     pub paragraph_list_id: Option<u32>,
     /// Cell address for easier reference (row, col)
     pub cell_address: (u16, u16),
+    /// 이 셀 안의 문단들.
+    pub paragraphs: Vec<crate::model::Paragraph>,
 }
 
 impl Table {
@@ -131,6 +136,8 @@ impl Table {
             right_margin: 567,  // 2mm right margin
             top_margin: 567,    // 2mm top margin
             bottom_margin: 567, // 2mm bottom margin
+            row_sizes: vec![cols; rows as usize],
+            border_fill_id: 0,
             cells: Vec::new(),
         }
     }
@@ -173,6 +180,7 @@ impl Table {
             field_name: format!("cell_{}_{}", row, col),
             paragraph_list_id: None,
             cell_address: (row, col),
+            paragraphs: Vec::new(),
         };
 
         self.add_cell(row, col, cell);
@@ -254,15 +262,21 @@ impl TableCell {
             field_name: format!("Cell{}x{}", width / 100, height / 100),
             paragraph_list_id: None,
             cell_address: (0, 0),
+            paragraphs: Vec::new(),
         }
     }
 }
 
 impl Table {
+    /// HWPTAG_TABLE 레코드를 읽는다.
+    ///
+    /// 셀은 이 레코드에 없다. 표 레코드 뒤에 셀마다 LIST_HEADER 가 하나씩
+    /// 오고, 그 뒤에 그 셀의 문단들이 따라온다. 여기서는 격자 크기와
+    /// 행별 셀 개수까지만 읽고, 셀은 파서가 채운다.
     pub fn from_record(record: &crate::parser::record::Record) -> crate::error::Result<Self> {
         let mut reader = record.data_reader();
 
-        if reader.remaining() < 20 {
+        if reader.remaining() < 18 {
             return Err(crate::error::HwpError::ParseError(format!(
                 "Table record too small: {} bytes",
                 reader.remaining()
@@ -273,52 +287,24 @@ impl Table {
         let rows = reader.read_u16()?;
         let cols = reader.read_u16()?;
         let cell_spacing = reader.read_u16()?;
-        let left_margin = reader.read_i32()?;
-        let right_margin = reader.read_i32()?;
-        let top_margin = reader.read_i32()?;
-        let bottom_margin = reader.read_i32()?;
+        let left_margin = reader.read_u16()? as i32;
+        let right_margin = reader.read_u16()? as i32;
+        let top_margin = reader.read_u16()? as i32;
+        let bottom_margin = reader.read_u16()? as i32;
 
-        // Read cells if available
-        let mut cells = Vec::new();
-        let total_cells = (rows * cols) as usize;
-
-        for i in 0..total_cells {
-            if reader.remaining() < 34 {
-                break; // Not enough data for a complete cell
+        // 행마다 셀이 몇 개인지. 병합된 표는 행마다 다르다.
+        let mut row_sizes = Vec::with_capacity(rows as usize);
+        for _ in 0..rows {
+            if reader.remaining() < 2 {
+                break;
             }
-
-            let row = (i / cols as usize) as u16;
-            let col = (i % cols as usize) as u16;
-
-            let cell = TableCell {
-                list_header_id: reader.read_u32()?,
-                col_span: reader.read_u16()?,
-                row_span: reader.read_u16()?,
-                width: reader.read_u32()?,
-                height: reader.read_u32()?,
-                left_margin: reader.read_u16()?,
-                right_margin: reader.read_u16()?,
-                top_margin: reader.read_u16()?,
-                bottom_margin: reader.read_u16()?,
-                border_fill_id: reader.read_u16()?,
-                text_width: reader.read_u32()?,
-                field_name: {
-                    if reader.remaining() >= 2 {
-                        let name_len = reader.read_u16()? as usize;
-                        if reader.remaining() >= name_len * 2 {
-                            reader.read_string(name_len * 2)?
-                        } else {
-                            format!("Cell_{}", i)
-                        }
-                    } else {
-                        format!("Cell_{}", i)
-                    }
-                },
-                paragraph_list_id: None,
-                cell_address: (row, col),
-            };
-            cells.push(cell);
+            row_sizes.push(reader.read_u16()?);
         }
+        let border_fill_id = if reader.remaining() >= 2 {
+            reader.read_u16()?
+        } else {
+            0
+        };
 
         Ok(Self {
             properties,
@@ -329,7 +315,77 @@ impl Table {
             right_margin,
             top_margin,
             bottom_margin,
-            cells,
+            row_sizes,
+            border_fill_id,
+            cells: Vec::new(),
         })
+    }
+
+    /// 이 표가 담은 셀 개수. 병합이 있으면 rows × cols 와 다르다.
+    pub fn expected_cell_count(&self) -> usize {
+        if self.row_sizes.is_empty() {
+            self.rows as usize * self.cols as usize
+        } else {
+            self.row_sizes.iter().map(|n| *n as usize).sum()
+        }
+    }
+}
+
+impl TableCell {
+    /// 셀 몫의 LIST_HEADER 레코드를 읽는다.
+    pub fn from_list_header_record(
+        record: &crate::parser::record::Record,
+    ) -> crate::error::Result<Self> {
+        let mut reader = record.data_reader();
+
+        // 문단 수(2) + 속성(4) + 셀 정보(26) = 32
+        if reader.remaining() < 32 {
+            return Err(crate::error::HwpError::ParseError(format!(
+                "Table cell list header too small: {} bytes",
+                reader.remaining()
+            )));
+        }
+
+        let paragraph_count = reader.read_u16()? as u32;
+        let _properties = reader.read_u32()?;
+        let col = reader.read_u16()?;
+        let row = reader.read_u16()?;
+        let col_span = reader.read_u16()?;
+        let row_span = reader.read_u16()?;
+        let width = reader.read_u32()?;
+        let height = reader.read_u32()?;
+        let left_margin = reader.read_u16()?;
+        let right_margin = reader.read_u16()?;
+        let top_margin = reader.read_u16()?;
+        let bottom_margin = reader.read_u16()?;
+        let border_fill_id = reader.read_u16()?;
+        let text_width = if reader.remaining() >= 4 {
+            reader.read_u32()?
+        } else {
+            width
+        };
+
+        Ok(Self {
+            list_header_id: paragraph_count,
+            col_span: col_span.max(1),
+            row_span: row_span.max(1),
+            width,
+            height,
+            left_margin,
+            right_margin,
+            top_margin,
+            bottom_margin,
+            border_fill_id,
+            text_width,
+            field_name: String::new(),
+            paragraph_list_id: None,
+            cell_address: (row, col),
+            paragraphs: Vec::new(),
+        })
+    }
+
+    /// LIST_HEADER 가 알려 준 이 셀의 문단 수.
+    pub fn declared_paragraph_count(&self) -> usize {
+        self.list_header_id as usize
     }
 }
