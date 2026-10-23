@@ -1,0 +1,81 @@
+name: Rust tvOS probe
+
+# minipdf 를 애플TV 에서 돌릴 수 있는가.
+#
+# aarch64-apple-tvos 는 Rust Tier 3 다 — 표준 라이브러리가 미리 빌드되어
+# 있지 않아 nightly 로 std 까지 같이 빌드해야 한다. 그 방식이 동작한다는
+# 것은 rust-lang/rust#121640 에서 메인테이너가 확인했지만, minipdf 와 그
+# 의존성이 tvOS std 의 빈 곳을 건드리는지는 아무도 해본 적이 없다.
+#
+# 이 작업은 앱을 건드리지 않는다. 빌드가 되는지만 본다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: "시험할 크레이트"
+        type: string
+        default: "minipdf"
+
+jobs:
+  probe:
+    runs-on: macos-14
+    steps:
+      - name: Xcode 15 선택
+        run: |
+          for c in /Applications/Xcode_15.4.app /Applications/Xcode_15.3.app; do
+            [ -d "$c" ] && sudo xcode-select -s "$c" && break
+          done
+          xcodebuild -version
+          xcrun --sdk appletvos --show-sdk-version
+
+      - name: nightly 와 rust-src 설치
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustc +nightly --version
+          echo "--- 타깃 목록에 tvOS 가 있는가 ---"
+          rustc +nightly --print target-list | grep -i tvos || echo "(없음)"
+
+      - name: 시험용 크레이트 만들기
+        run: |
+          cargo new --lib /tmp/probe
+          cd /tmp/probe
+          cat >> Cargo.toml <<EOF
+          ${{ inputs.crate }} = "*"
+          EOF
+          cat Cargo.toml
+
+      - name: aarch64-apple-tvos 로 빌드
+        id: build
+        continue-on-error: true
+        run: |
+          cd /tmp/probe
+          export SDKROOT=$(xcrun --sdk appletvos --show-sdk-path)
+          export TVOS_DEPLOYMENT_TARGET=16.0
+          set -o pipefail
+          cargo +nightly build --release \
+            -Z build-std=std,panic_abort \
+            --target aarch64-apple-tvos 2>&1 | tee /tmp/build.log
+
+      - name: 판정
+        run: |
+          echo "=============================================="
+          if [ -f /tmp/probe/target/aarch64-apple-tvos/release/libprobe.rlib ]; then
+            echo "성공 — minipdf 가 애플TV 용으로 빌드된다."
+            ls -l /tmp/probe/target/aarch64-apple-tvos/release/*.rlib | head
+          else
+            echo "실패 — 아래가 막힌 지점이다."
+            echo ""
+            grep -E "^error|^error\[" /tmp/build.log | head -30 || true
+            echo ""
+            echo "--- 어느 크레이트에서 멈췄나 ---"
+            grep -E "Compiling|error: could not compile" /tmp/build.log | tail -10 || true
+          fi
+          echo "=============================================="
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-tvos-probe
+          path: /tmp/build.log
