@@ -1,0 +1,40 @@
+[package]
+name = "hwpers"
+version = "0.5.0"
+edition = "2021"
+authors = ["HWP Parser Contributors"]
+description = "A Rust library for parsing Korean Hangul Word Processor (HWP) files with full layout rendering support"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Indosaram/hwpers"
+documentation = "https://docs.rs/hwpers"
+homepage = "https://github.com/Indosaram/hwpers"
+readme = "README.md"
+keywords = ["hwp", "parser", "hangul", "document", "korean"]
+categories = ["parser-implementations", "text-processing", "rendering"]
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-*",
+]
+
+[dependencies]
+cfb = "0.11.0"
+flate2 = "1.0"
+encoding_rs = "0.8"
+byteorder = "1.5"
+thiserror = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+zip = "2.2"
+quick-xml = { version = "0.37", features = ["serialize"] }
+aes = "0.8"
+ecb = "0.1"
+block-padding = "0.3"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+tempfile = "3.8"
+
+[features]
+default = []

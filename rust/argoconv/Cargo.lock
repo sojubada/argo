@@ -549,8 +549,6 @@ dependencies = [
 [[package]]
 name = "hwpers"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7acacc71337258b3759d7d27598a93576422faced277e1bfc94a70e61d34ef23"
 dependencies = [
  "aes",
  "block-padding",

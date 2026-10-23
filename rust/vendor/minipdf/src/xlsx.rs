@@ -339,7 +339,7 @@ enum SheetImageData {
 pub(crate) fn convert_xlsx_bytes(input: &[u8], options: &ConversionOptions) -> Result<Vec<u8>> {
     let sheets = read_xlsx_sheets(input)?;
     let mut doc = PdfDocument::new();
-    render_xlsx(&mut doc, &sheets, options.page_size);
+    render_xlsx(&mut doc, &sheets, options.page_size, options.fit_sheet_width);
     Ok(doc.to_bytes())
 }
 
@@ -3688,7 +3688,12 @@ fn column_index_from_ref(cell_ref: &str) -> Option<usize> {
     seen_letter.then_some(col.saturating_sub(1))
 }
 
-fn render_xlsx(doc: &mut PdfDocument, sheets: &[SheetData], page_size_override: Option<PageSize>) {
+fn render_xlsx(
+    doc: &mut PdfDocument,
+    sheets: &[SheetData],
+    page_size_override: Option<PageSize>,
+    fit_sheet_width: bool,
+) {
     let mut footer_ranges = Vec::new();
     for sheet in sheets {
         let first_page = doc.pages().len();
@@ -3709,6 +3714,7 @@ fn render_xlsx(doc: &mut PdfDocument, sheets: &[SheetData], page_size_override: 
             sheet,
             &image_ids,
             page_size_override.unwrap_or(sheet.page_setup.page_size),
+            fit_sheet_width,
         );
         if sheet.footer.is_some() && doc.pages().len() > first_page {
             footer_ranges.push((first_page, doc.pages().len(), sheet));
@@ -3857,12 +3863,25 @@ fn render_sheet(
     sheet: &SheetData,
     image_ids: &[usize],
     mut page_size: PageSize,
+    fit_sheet_width: bool,
 ) {
     let column_count = rendered_column_count(sheet);
     let mut widths = sheet.column_widths.clone();
     widths.resize(column_count, COL_WIDTH);
     widths.truncate(column_count);
     let unscaled_width = widths.iter().sum::<f32>();
+
+    // 쪽을 시트만큼 넓힌다.
+    //
+    // 이렇게 하면 열이 한 번도 안 잘리고 행만 아래로 넘어간다. 글자를
+    // 줄이지 않는 것이 fit_to_width 보다 나은 점이다 — 화면에서는 뷰어가
+    // 다시 맞춰 주므로 여기서 작게 만들 이유가 없다.
+    if fit_sheet_width && unscaled_width > 0.0 {
+        let wanted = unscaled_width * sheet.page_setup.print_scale
+            + sheet.page_setup.margin_left
+            + sheet.page_setup.margin_right;
+        page_size.width = page_size.width.max(wanted);
+    }
     if sheet.page_setup.page_size_from_printer
         && sheet.page_setup.fit_to_width
         && sheet.page_setup.fit_to_height
@@ -3900,7 +3919,9 @@ fn render_sheet(
         sheet.page_setup.print_scale,
         sheet.page_setup.fit_to_width,
     );
-    if sheet.page_setup.fit_to_height {
+    // 폭을 시트에 맞춘 경우에는 높이로 줄이지 않는다. 한 쪽에 세로로
+    // 다 밀어 넣으면 글자가 읽을 수 없게 작아진다 — 행은 넘기면 된다.
+    if sheet.page_setup.fit_to_height && !fit_sheet_width {
         let last_row = sheet.rows.last().map(|row| row.index).unwrap_or(0);
         let unscaled_height = (0..=last_row)
             .map(|row_index| {

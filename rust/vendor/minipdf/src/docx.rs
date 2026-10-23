@@ -108,6 +108,8 @@ struct DocxStyle {
     based_on: Option<String>,
     paragraph: ParagraphProperties,
     run: RunProperties,
+    /// 표 스타일이 주는 테두리. Table Grid 가 선을 긋는 방식이다.
+    table_borders: DocxCellBorders,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -412,6 +414,10 @@ fn read_styles(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<DocxStyles> {
                     run: child(node, "rPr")
                         .map(read_run_properties)
                         .unwrap_or_default(),
+                    table_borders: child(node, "tblPr")
+                        .and_then(|node| child(node, "tblBorders"))
+                        .map(read_table_borders)
+                        .unwrap_or_default(),
                 },
             ))
         })
@@ -566,16 +572,6 @@ fn read_border(border: roxmltree::Node<'_, '_>) -> Option<DocxBorder> {
             _ => BorderPattern::Solid,
         },
     })
-}
-
-fn default_table_border() -> DocxBorder {
-    DocxBorder {
-        color: PdfColor::BLACK,
-        width: TABLE_BORDER_WIDTH,
-        space: 0.0,
-        is_double: false,
-        pattern: BorderPattern::Solid,
-    }
 }
 
 fn parse_alignment(value: &str) -> TextAlignment {
@@ -1100,6 +1096,20 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(u16, u16)> {
     None
 }
 
+/// 표 스타일의 테두리를 찾는다. 없으면 상속 사슬을 따라 올라간다.
+fn style_table_borders(styles: &DocxStyles, style_id: &str) -> Option<DocxCellBorders> {
+    let mut current = Some(style_id.to_owned());
+    // 사슬이 자기를 가리키는 문서가 있어 횟수를 묶는다.
+    for _ in 0..8 {
+        let style = styles.styles.get(current.as_deref()?)?;
+        if style.table_borders != DocxCellBorders::default() {
+            return Some(style.table_borders.clone());
+        }
+        current = style.based_on.clone();
+    }
+    None
+}
+
 fn read_table(
     table: roxmltree::Node<'_, '_>,
     styles: &DocxStyles,
@@ -1112,11 +1122,16 @@ fn read_table(
     let style_id = properties
         .and_then(|node| child(node, "tblStyle"))
         .and_then(|node| attribute_by_local_name(node, "val"));
-    let style_has_grid = style_id == Some("af2");
-    let use_style_borders = style_has_grid
-        && properties
-            .and_then(|node| child(node, "tblBorders"))
-            .is_none();
+    // 표가 직접 적은 테두리가 먼저고, 없으면 표 스타일이 주는 것을 쓴다.
+    //
+    // 전에는 `style_id == Some("af2")` 였다 — 개발자가 시험한 어느 문서의
+    // 스타일 ID 가 박혀 있어서, 보통 문서의 Table Grid 는 걸리지 않았다.
+    // tblBorders 도 읽기만 하고 값은 버렸다. 그래서 선이 하나도 안 나왔다.
+    let inherited_borders = properties
+        .and_then(|node| child(node, "tblBorders"))
+        .map(read_table_borders)
+        .or_else(|| style_id.and_then(|id| style_table_borders(styles, id)))
+        .unwrap_or_default();
     let column_widths = child(table, "tblGrid")
         .map(|grid| {
             grid.children()
@@ -1137,7 +1152,7 @@ fn read_table(
                 styles,
                 relationships,
                 archive,
-                use_style_borders,
+                &inherited_borders,
             )?);
         }
         rows.push(DocxTableRow { cells, height });
@@ -1170,7 +1185,7 @@ fn read_table_cell(
     styles: &DocxStyles,
     relationships: &HashMap<String, String>,
     archive: &mut ZipArchive<Cursor<&[u8]>>,
-    use_style_borders: bool,
+    inherited_borders: &DocxCellBorders,
 ) -> Result<DocxTableCell> {
     let properties = child(cell, "tcPr");
     let paragraphs: Vec<_> = cell
@@ -1249,10 +1264,10 @@ fn read_table_cell(
             })
             .unwrap_or(VerticalMerge::None),
         borders: DocxCellBorders {
-            top: read_cell_border(properties, "top", use_style_borders),
-            right: read_cell_border(properties, "right", use_style_borders),
-            bottom: read_cell_border(properties, "bottom", use_style_borders),
-            left: read_cell_border(properties, "left", use_style_borders),
+            top: read_cell_border(properties, "top", inherited_borders.top),
+            right: read_cell_border(properties, "right", inherited_borders.right),
+            bottom: read_cell_border(properties, "bottom", inherited_borders.bottom),
+            left: read_cell_border(properties, "left", inherited_borders.left),
         },
     })
 }
@@ -1290,19 +1305,33 @@ fn read_table_cell_runs(paragraph: roxmltree::Node<'_, '_>, styles: &DocxStyles)
         .collect()
 }
 
+/// 표 수준 테두리를 셀에 적용할 모양으로 읽는다.
+///
+/// 바깥 네 변과 안쪽 두 선이 따로 적혀 있다. 셀 하나하나의 위치를 여기서는
+/// 모르므로, 안쪽 선이 있으면 그것을 네 변에 쓴다 — 격자가 되고, 그것이
+/// Table Grid 가 눈에 보이는 모양이다.
+fn read_table_borders(node: roxmltree::Node<'_, '_>) -> DocxCellBorders {
+    let side = |name: &str| child(node, name).and_then(read_border);
+    let inside_h = side("insideH");
+    let inside_v = side("insideV");
+    DocxCellBorders {
+        top: inside_h.or_else(|| side("top")),
+        bottom: inside_h.or_else(|| side("bottom")),
+        left: inside_v.or_else(|| side("left")),
+        right: inside_v.or_else(|| side("right")),
+    }
+}
+
 fn read_cell_border(
     properties: Option<roxmltree::Node<'_, '_>>,
     side: &str,
-    use_style_border: bool,
+    inherited: Option<DocxBorder>,
 ) -> Option<DocxBorder> {
-    let border = properties
+    properties
         .and_then(|node| child(node, "tcBorders"))
-        .and_then(|node| child(node, side));
-    match border {
-        Some(border) => read_border(border),
-        None if use_style_border => Some(default_table_border()),
-        None => None,
-    }
+        .and_then(|node| child(node, side))
+        .and_then(read_border)
+        .or(inherited)
 }
 
 fn paragraph_text(paragraph: roxmltree::Node<'_, '_>) -> String {

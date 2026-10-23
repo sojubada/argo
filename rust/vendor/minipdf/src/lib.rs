@@ -60,6 +60,12 @@ impl PageSize {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConversionOptions {
     pub page_size: Option<PageSize>,
+    /// 시트 한 장을 한 쪽에 통째로 넣는다. 열을 자르지 않는다.
+    ///
+    /// 기본값(false)은 엑셀이 인쇄하듯 넓은 시트를 열 단위로 쪼개 여러
+    /// 쪽에 흩뿌린다. 종이에는 맞지만 화면으로는 따라 읽을 수가 없다.
+    /// 켜면 쪽 폭을 시트 폭에 맞춰 늘리고, 행만 아래로 넘긴다.
+    pub fit_sheet_width: bool,
 }
 
 #[derive(Debug, Clone)]

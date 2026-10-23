@@ -109,7 +109,13 @@ pub unsafe extern "C" fn argoconv_to_pdf(
     let bytes = slice::from_raw_parts(input, len);
     let (out_ptr, out_size) = (out, out_len);
     guard(move || {
-        let Ok(pdf) = minipdf::convert_bytes_to_pdf(bytes) else {
+        // 시트는 한 쪽에 통째로 넣는다. 인쇄가 아니라 화면이므로 열이
+        // 여러 쪽으로 쪼개지면 따라 읽을 수가 없다.
+        let options = minipdf::ConversionOptions {
+            fit_sheet_width: true,
+            ..Default::default()
+        };
+        let Ok(pdf) = minipdf::convert_bytes_to_pdf_with_options(bytes, &options) else {
             return ARGOCONV_CONVERT_FAILED;
         };
         let mut boxed = pdf.into_boxed_slice();
