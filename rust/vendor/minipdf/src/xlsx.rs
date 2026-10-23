@@ -40,6 +40,11 @@ const SVG_FALLBACK_HORIZONTAL_SCALE: f32 = 0.972;
 const GROUP_DRAWING_TOP_OFFSET: f32 = 0.96;
 const CALIBRI_FITTING_SCALE: f32 = 0.85;
 const ROW_HEIGHT: f32 = 15.0;
+/// 시트 한 장을 한 쪽에 넣을 때 허용하는 최대 쪽 폭 (포인트).
+///
+/// 200인치. PDF 가 한 변에 안전하게 쓸 수 있는 14,400 단위와 같다.
+const MAX_FIT_SHEET_WIDTH: f32 = 14_400.0;
+
 const COL_WIDTH: f32 = 47.4;
 
 #[derive(Debug, Clone, Default)]
@@ -3876,11 +3881,18 @@ fn render_sheet(
     // 이렇게 하면 열이 한 번도 안 잘리고 행만 아래로 넘어간다. 글자를
     // 줄이지 않는 것이 fit_to_width 보다 나은 점이다 — 화면에서는 뷰어가
     // 다시 맞춰 주므로 여기서 작게 만들 이유가 없다.
+    //
+    // 다만 끝까지 넓히지는 않는다. 엑셀은 열이 16,384개까지 가고, 서식만
+    // 흩뿌려진 시트 하나가 폭 수십만 포인트짜리 쪽을 만들어 기기 메모리를
+    // 가져갈 수 있다. 상한을 넘으면 포기하고 원래대로 열을 나눠 여러 쪽에
+    // 싣는다 — 읽기는 불편해도 앱은 산다.
     if fit_sheet_width && unscaled_width > 0.0 {
         let wanted = unscaled_width * sheet.page_setup.print_scale
             + sheet.page_setup.margin_left
             + sheet.page_setup.margin_right;
-        page_size.width = page_size.width.max(wanted);
+        if wanted <= MAX_FIT_SHEET_WIDTH {
+            page_size.width = page_size.width.max(wanted);
+        }
     }
     if sheet.page_setup.page_size_from_printer
         && sheet.page_setup.fit_to_width

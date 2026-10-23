@@ -10,6 +10,12 @@ use crate::utils::compression::decompress_stream;
 
 pub struct BodyTextParser;
 
+/// 표 안의 표를 몇 겹까지 따라갈지.
+///
+/// 사람이 쓰는 문서는 두세 겹을 넘지 않는다. 이 위는 깨진 파일이거나
+/// 일부러 깊게 만든 파일이다.
+const MAX_TABLE_DEPTH: usize = 8;
+
 /// 여는 중인 표 하나.
 ///
 /// HWP 는 표를 문단 안쪽에 접어 넣는다. CTRL_HEADER('tbl ') 가 열고, 그
@@ -93,10 +99,15 @@ impl BodyTextParser {
                     if let (Some(header), Some(para)) = (header.as_ref(), current.as_mut()) {
                         para.ctrl_header = Some(header.clone());
                     }
+                    // 표 안의 표는 받아들이되 끝없이 받지는 않는다. 수십
+                    // 겹 중첩된 파일이 들어와도 여기서 멈추고, 그 안의
+                    // 글은 바깥 칸의 문단으로 들어간다 — 모양은 잃어도
+                    // 글은 남고 파서는 살아 있다.
                     if header
                         .as_ref()
                         .map(|h| h.get_control_type() == ControlType::Table)
                         .unwrap_or(false)
+                        && open_tables.len() < MAX_TABLE_DEPTH
                     {
                         open_tables.push(OpenTable {
                             ctrl_level: level,

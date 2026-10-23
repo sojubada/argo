@@ -2030,8 +2030,11 @@ fn render_shape(
 
     if let Some(fill) = shape.fill {
         match (&outline_points, ellipse) {
-            (Some(points), _) => {
-                let mut commands = vec![crate::pdf::PdfPathCommand::MoveTo(points[0].0, points[0].1)];
+            // 점이 하나도 없는 모양이 올 수 있다. 빈 목록으로 칠하려
+            // 들지 말고 네모로 돌아간다.
+            (Some(points), _) if !points.is_empty() => {
+                let mut commands =
+                    vec![crate::pdf::PdfPathCommand::MoveTo(points[0].0, points[0].1)];
                 commands.extend(
                     points[1..]
                         .iter()
@@ -2040,8 +2043,8 @@ fn render_shape(
                 commands.push(crate::pdf::PdfPathCommand::Close);
                 page.add_path(commands, fill);
             }
-            (None, true) => page.add_ellipse(bounds.x, bottom, bounds.width, bounds.height, fill),
-            (None, false) => page.add_rect(bounds.x, bottom, bounds.width, bounds.height, fill),
+            (_, true) => page.add_ellipse(bounds.x, bottom, bounds.width, bounds.height, fill),
+            (_, false) => page.add_rect(bounds.x, bottom, bounds.width, bounds.height, fill),
         }
     }
 
