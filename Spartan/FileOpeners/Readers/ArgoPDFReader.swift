@@ -29,28 +29,40 @@ enum PDFFitMode: Int, CaseIterable {
     /// 세로 쪽 둘을 옆에 놓으면 가로세로비가 1.4 안팎이 되어 16:9 화면을
     /// 거의 채운다. 세로 꽉 참으로 한 쪽만 보면 화면의 3분의 2가 빈다.
     case twoPage
+    /// 두 쪽을 위아래로. PPT 를 PDF 로 바꾼 16:9 문서에 맞다.
+    ///
+    /// 가로로 둘을 놓으면 32:9 가 되어 16:9 화면에서 위아래가 크게 남는다.
+    /// 위아래로 쌓으면 남는 자리가 좌우로 가는데, 슬라이드는 읽는 순서가
+    /// 위에서 아래라 그쪽이 눈에 자연스럽다.
+    case twoPageStacked
+
+    /// 두 쪽을 함께 보는 방식인가.
+    var isSpread: Bool { self == .twoPage || self == .twoPageStacked }
 
     var label: String {
         switch self {
-        case .fitWidth:  return "가로 꽉 참"
-        case .fitHeight: return "세로 꽉 참"
-        case .twoPage:   return "두 쪽"
+        case .fitWidth:       return "가로 꽉 참"
+        case .fitHeight:      return "세로 꽉 참"
+        case .twoPage:        return "두 쪽 좌우"
+        case .twoPageStacked: return "두 쪽 상하"
         }
     }
 
     var symbol: String {
         switch self {
-        case .fitWidth:  return "arrow.left.and.right"
-        case .fitHeight: return "arrow.up.and.down"
-        case .twoPage:   return "book"
+        case .fitWidth:       return "arrow.left.and.right"
+        case .fitHeight:      return "arrow.up.and.down"
+        case .twoPage:        return "book"
+        case .twoPageStacked: return "rectangle.grid.1x2"
         }
     }
 
     var next: PDFFitMode {
         switch self {
-        case .fitWidth:  return .fitHeight
-        case .fitHeight: return .twoPage
-        case .twoPage:   return .fitWidth
+        case .fitWidth:       return .fitHeight
+        case .fitHeight:      return .twoPage
+        case .twoPage:        return .twoPageStacked
+        case .twoPageStacked: return .fitWidth
         }
     }
 }
@@ -265,7 +277,7 @@ final class ArgoPDFReaderController: UIViewController {
     /// 표지는 혼자 선다 — (1), (2,3), (4,5) … 실제 책이 그렇게 펼쳐지고,
     /// 스캔한 만화·그림책은 1쪽이 표지인 경우가 대부분이다.
     private func pagesForCurrentView() -> [Int] {
-        guard fitMode == .twoPage else { return [currentPage] }
+        guard fitMode.isSpread else { return [currentPage] }
         // 1-2, 3-4 로 묶는다. 표지를 혼자 두는 방식도 있지만, 그러면 첫 쪽에서
         // 세로 맞춤과 똑같이 보여서 두 쪽으로 바꾼 것이 티가 나지 않는다.
         let left = currentPage % 2 == 1 ? currentPage : currentPage - 1
@@ -318,7 +330,12 @@ final class ArgoPDFReaderController: UIViewController {
         }
 
         // 쪽들을 같은 높이로 맞춰 옆으로 늘어놓았을 때의 전체 가로세로비.
-        let aspect = pages.reduce(0) { $0 + $1.box.width / $1.box.height }
+        // 가로로 늘어놓을 때는 높이를 맞추고 너비를 더한다. 세로로 쌓을 때는
+        // 너비를 맞추고 높이를 더하므로 비가 뒤집힌다.
+        let stacked = fitMode == .twoPageStacked
+        let aspect: CGFloat = stacked
+            ? 1 / pages.reduce(0) { $0 + $1.box.height / $1.box.width }
+            : pages.reduce(0) { $0 + $1.box.width / $1.box.height }
         let available = view.bounds.size
 
         // 점(point) 기준의 최종 크기.
@@ -330,7 +347,7 @@ final class ArgoPDFReaderController: UIViewController {
         case .fitHeight:
             let h = available.height
             size = CGSize(width: (h * aspect).rounded(), height: h)
-        case .twoPage:
+        case .twoPage, .twoPageStacked:
             // 펼침면은 가로·세로 둘 다 넘지 않게 맞춘다.
             let h = min(available.height, available.width / aspect)
             size = CGSize(width: (h * aspect).rounded(), height: h.rounded())
@@ -351,10 +368,18 @@ final class ArgoPDFReaderController: UIViewController {
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
 
-            var x: CGFloat = 0
+            var along: CGFloat = 0
             for item in pages {
-                let w = (item.box.width / item.box.height) * size.height
-                let slot = CGRect(x: x, y: 0, width: w, height: size.height)
+                let slot: CGRect
+                if stacked {
+                    let hh = (item.box.height / item.box.width) * size.width
+                    slot = CGRect(x: 0, y: along, width: size.width, height: hh)
+                    along += hh
+                } else {
+                    let ww = (item.box.width / item.box.height) * size.height
+                    slot = CGRect(x: along, y: 0, width: ww, height: size.height)
+                    along += ww
+                }
                 ctx.saveGState()
                 ctx.clip(to: slot)
                 // 이 쪽의 자리로 원점을 옮긴 뒤, 그 안에서 뒤집는다.
@@ -383,7 +408,6 @@ final class ArgoPDFReaderController: UIViewController {
                 ctx.translateBy(x: -item.raw.midX, y: -item.raw.midY)
                 ctx.drawPDFPage(item.page)
                 ctx.restoreGState()
-                x += w
             }
         }
 
@@ -485,7 +509,7 @@ final class ArgoPDFReaderController: UIViewController {
         case .fitWidth:
             w = available.width
             h = renderedPageHeight
-        case .fitHeight, .twoPage:
+        case .fitHeight, .twoPage, .twoPageStacked:
             h = min(available.height, renderedPageHeight)
             w = imageAspect * h
         }
@@ -569,7 +593,7 @@ final class ArgoPDFReaderController: UIViewController {
         fitMode = fitMode.next
         scrollOffset = 0
         // 두 쪽으로 들어가면 지금 쪽이 든 펼침면의 왼쪽으로 맞춘다.
-        if fitMode == .twoPage, currentPage > 1, currentPage % 2 == 1 {
+        if fitMode.isSpread, currentPage > 1, currentPage % 2 == 1 {
             currentPage -= 1
         }
         UserDefaults.settings.set(fitMode.rawValue, forKey: "pdfFitMode")
@@ -616,13 +640,13 @@ final class ArgoPDFReaderController: UIViewController {
 
     /// 다음으로 보여 줄 묶음의 첫 쪽. 두 쪽 모드면 한 번에 두 장씩 간다.
     private func nextViewStart() -> Int {
-        guard fitMode == .twoPage else { return currentPage + 1 }
+        guard fitMode.isSpread else { return currentPage + 1 }
         let shown = pagesForCurrentView()
         return (shown.last ?? currentPage) + 1
     }
 
     private func previousViewStart() -> Int {
-        guard fitMode == .twoPage else { return currentPage - 1 }
+        guard fitMode.isSpread else { return currentPage - 1 }
         let first = pagesForCurrentView().first ?? currentPage
         if first <= 1 { return 0 }          // 범위 밖 — goToPage 가 막는다
         if first == 2 { return 1 }          // 표지로
