@@ -115,5 +115,8 @@ enum ArgoDiag {
 @objc(ArgoDiagLog)
 final class ArgoDiagLog: NSObject {
     @objc static func begin(_ what: String) { ArgoDiag.begin(what) }
-    @objc static func log(_ tag: String, _ message: String) { ArgoDiag.log(tag, message) }
+    // 이름 없는 매개변수는 ObjC 쪽에서 쓸 수 없는 선택자가 됩니다.
+    // 선택자를 못 박습니다 — 전에 Swift 이름을 짐작하다 빌드를 두 번 버렸습니다.
+    @objc(log:message:)
+    static func log(tag: String, message: String) { ArgoDiag.log(tag, message) }
 }
