@@ -202,6 +202,11 @@
     [self.fitButton setTitle:title forState:UIControlStateNormal];
     [ArgoDiagLog log:@"fit" message:title];
     [self js:js then:^(id label) { [self showStatus:label]; }];
+    // 배율이 실제로 먹었는지는 재 봐야 압니다. 사진으로는 글자가 커진
+    // 것인지 단만 좁아진 것인지 가릴 수 없었습니다.
+    [self js:@"argoNav.probe()" then:^(id m) {
+        [ArgoDiagLog log:@"measure" message:[m description] ?: @"-"];
+    }];
     [self setToolbarVisible:YES interactive:YES animated:YES];
 }
 

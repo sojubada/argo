@@ -235,6 +235,16 @@
     "   +'min-height:0 !important;box-sizing:border-box !important;'"
     "   +'padding:32px !important;margin:0 auto 20px !important;}';"
     "  C.style.zoom=s;report();},"
+    // 재서 알려 줍니다. 배율이 실제로 먹었는지, 글자가 커진 것인지
+    // 단만 좁아진 것인지는 숫자로만 가릅니다.
+    " probe:function(){"
+    "  var p=C.querySelector('p')||C.querySelector('span')||C;"
+    "  var cs=window.getComputedStyle(p);"
+    "  return 'vw='+document.documentElement.clientWidth"
+    "   +' zoom='+(C.style.zoom||'1')"
+    "   +' font='+cs.fontSize"
+    "   +' lineW='+Math.round(p.getBoundingClientRect().width)"
+    "   +' colW='+Math.round(C.getBoundingClientRect().width);},"
     " paint:function(){}};"
     "window.argoNav=nav;"
     "function report(){window.__argoInfo=nav.label();}"
