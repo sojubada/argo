@@ -1422,8 +1422,36 @@ struct ContentView: View {
     }
 
     private func presentOfficeReader() {
+        let path = readerPath()
+
+        // 변환기가 맡는 형식이면 기기 안에서 PDF 로 바꿔 PDF 뷰어로 엽니다.
+        // 그 뷰어는 쪽 넘김·두 쪽·맞춤이 이미 제대로 돌아, 웹뷰에서 CSS 로
+        // 수습하던 일들이 통째로 없어집니다.
+        guard ArgoOfficeConverter.handles(path) else {
+            presentWebOfficeReader(path)
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let converted = try? ArgoOfficeConverter.convertToPDF(at: path)
+            DispatchQueue.main.async {
+                guard let pdf = converted else {
+                    // 변환이 안 되면 조용히 기존 뷰어로 돌아갑니다 —
+                    // 못 여는 것보다 덜 예쁘게라도 보이는 편이 낫습니다.
+                    presentWebOfficeReader(path)
+                    return
+                }
+                let vc = ArgoPDFReaderController()
+                vc.documentPath = pdf
+                vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+                presentReader(vc)
+            }
+        }
+    }
+
+    private func presentWebOfficeReader(_ path: String) {
         let vc = ArgoWebDocumentViewController()
-        vc.documentPath = readerPath()
+        vc.documentPath = path
         vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
         presentReader(vc)
     }

@@ -39,6 +39,7 @@
 		DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */; };
 		A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */; };
 		D1A90001C0DE4A0099110001 /* ArgoDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A90002C0DE4A0099110002 /* ArgoDiag.swift */; };
+		D1A90003C0DE4A0099110003 /* ArgoOfficeConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A90004C0DE4A0099110004 /* ArgoOfficeConverter.swift */; };
 		17F6A368634645CBB74213DE /* ArgoTextReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */; };
 		0FCDBED9E88946C698FE7331 /* AirDropBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = F193AB4B4D65481DA47D1474 /* AirDropBridge.m */; };
 		824076D6CD59403AABEAC85E /* AirDropState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A07E270887FE401A955F6758 /* AirDropState.swift */; };
@@ -152,6 +153,7 @@
 		9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoClipboard.swift; sourceTree = "<group>"; };
 		7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoPDFReader.swift; sourceTree = "<group>"; };
 		D1A90002C0DE4A0099110002 /* ArgoDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoDiag.swift; sourceTree = "<group>"; };
+		D1A90004C0DE4A0099110004 /* ArgoOfficeConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoOfficeConverter.swift; sourceTree = "<group>"; };
 		A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoTextReader.swift; sourceTree = "<group>"; };
 		F193AB4B4D65481DA47D1474 /* AirDropBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AirDropBridge.m; sourceTree = "<group>"; };
 		D1A897F946C64304A153E65C /* AirDropBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AirDropBridge.h; sourceTree = "<group>"; };
@@ -258,6 +260,7 @@
 			children = (
 				DA24D0B6A893E1F874B5B457 /* OfficeDocReaderView.swift */,
 				7542162C47234211AA1410E6 /* WebDocumentSwiftView.swift */,
+				D1A90004C0DE4A0099110004 /* ArgoOfficeConverter.swift */,
 				0650DA66DE4F48458B36A4B8 /* WebDocumentShell.h */,
 				2B24EFA729574E97AEE91629 /* WebDocumentShell.m */,
 				AB3B2E5E54F74BC98FCB924F /* WebDocumentView.h */,
@@ -704,6 +707,7 @@
 				DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */,
 				A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */,
 				D1A90001C0DE4A0099110001 /* ArgoDiag.swift in Sources */,
+				D1A90003C0DE4A0099110003 /* ArgoOfficeConverter.swift in Sources */,
 				17F6A368634645CBB74213DE /* ArgoTextReader.swift in Sources */,
 				0FCDBED9E88946C698FE7331 /* AirDropBridge.m in Sources */,
 				824076D6CD59403AABEAC85E /* AirDropState.swift in Sources */,
@@ -1038,7 +1042,12 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACH_O_TYPE = mh_execute;
 				MARKETING_VERSION = 1.0;
-				OTHER_LDFLAGS = "-ObjC";
+				OTHER_LDFLAGS = (
+					"-ObjC",
+					"-largoconv",
+				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/rust/lib";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/rust/argoconv";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
@@ -1066,7 +1075,12 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACH_O_TYPE = mh_execute;
 				MARKETING_VERSION = 1.0;
-				OTHER_LDFLAGS = "-ObjC";
+				OTHER_LDFLAGS = (
+					"-ObjC",
+					"-largoconv",
+				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/rust/lib";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/rust/argoconv";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
