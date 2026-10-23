@@ -419,13 +419,16 @@ final class ArgoPDFReaderController: UIViewController {
         let available = view.bounds.size
         let w: CGFloat
         let h: CGFloat
+        // 그린 그림의 가로세로비를 그대로 쓴다. 두 쪽이면 펼침면 전체의 비율이다.
+        let imageAspect = (pageImage.image?.size.width ?? 1)
+                        / max(1, pageImage.image?.size.height ?? 1)
         switch fitMode {
         case .fitWidth:
             w = available.width
             h = renderedPageHeight
-        case .fitHeight:
-            h = available.height
-            w = (pageImage.image?.size.width ?? 1) / (pageImage.image?.size.height ?? 1) * h
+        case .fitHeight, .twoPage:
+            h = min(available.height, renderedPageHeight)
+            w = imageAspect * h
         }
 
         let maxOffset = max(0, h - available.height)
