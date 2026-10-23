@@ -176,3 +176,28 @@
 7. H (WebDAV)
 8. I (두 칸 탐색기) — 파일 목록 뷰를 떼어내는 수술이 선행
 9. J (키보드) — I 와 같이 하면 좋음. 단축키가 두 칸을 전제하므로
+
+## 대기 중인 탐침
+
+### WASM — dlopen 한 WebKit 안에서 WebAssembly 가 도는가
+
+- **왜 묻는가**: rhwp(MIT, Rust→WASM)가 HWP 와 HWPX 를 둘 다 읽고, 표 셀 병합·다단·머리말·쪽 나눔까지 한다.
+  지금 쓰는 hwp.js 는 HWP 5.0 만, 그것도 불완전하게 읽는다 — 한글 문서가 엉성한 이유다.
+  rhwp 는 JS 라이브러리라 `webdoc/hwp.min.js` 를 바꿔 끼우는 일로 끝난다. 새 앱도 URL 스킴도 필요 없다.
+- **무엇이 걸리는가**: rhwp 는 순수 JS 빌드가 없다. 런타임에 WASM 을 쓴다.
+  JS 는 지금 돌지만 WASM 은 JIT 권한에 걸려 막힐 수 있다.
+- **어떻게 재는가**: 셸에 작은 모듈 하나를 인스턴스화해 보고 결과를 로그로 돌려받는다.
+  `typeof WebAssembly`, `WebAssembly.validate(...)`, 그리고 실제 `instantiate` 까지.
+  검증만 되고 인스턴스화가 막히는 경우가 있으므로 셋 다 본다.
+- **결과에 따라**:
+  - 된다 → rhwp 로 교체. 작은 일이고 한글 품질이 크게 오른다.
+  - 안 된다 → rhwp 의 네이티브 Rust CLI 를 `aarch64-apple-tvos` 로 크로스 컴파일해
+    hwp → PDF 로 바꾸고, 이미 잘 도는 CoreGraphics PDF 뷰어로 흘려보낸다. 일은 크지만 WASM 과 무관하다.
+- **주의**: rhwp 는 v0.8.7, 1.0 이전이다. 이미지 등 일부는 경고를 내고 넘어간다.
+
+### docx 폭 — `ignoreWidth: true` / `inWrapper: false`
+
+- 지금 `renderAsync` 에 `ignoreWidth` 가 없어, docx-preview 가 인쇄 폭(595pt)을 박아 넣는다.
+  그 위에 CSS 로 폭을 덮어쓰느라 zoom 과 단 폭이 계속 어긋났다.
+- 파서가 폭을 포기하면 글자 크기만 키우면 된다. "글자가 안 커진다" 의 정답일 수 있다.
+- 측정 로그(`[measure]`)로 바로 가린다.
