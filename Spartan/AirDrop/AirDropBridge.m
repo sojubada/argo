@@ -142,7 +142,7 @@ static NSString *sLastInboxFingerprint = nil;
     [self attachReceiver];
 
     sDeadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    sLastInboxFingerprint = [self inboxFingerprint];
+    sLastInboxFingerprint = nil;   // 첫 값은 뒷줄에서 채운다
     [self startTimer];
     [self notifyChanged];
 
@@ -231,9 +231,30 @@ static NSString *sLastInboxFingerprint = nil;
 }
 
 + (void)tick {
+    // 디스크를 훑는 일은 뒷줄에서 한다.
+    //
+    // 전에는 여기서 바로 inboxFingerprint 를 불렀다. 타이머가 메인 런루프에
+    // 붙어 있고 그 함수는 enumeratorAtPath 로 동기 디스크 I/O 를 하므로,
+    // 2초마다 메인 스레드가 받은 함을 통째로 훑었다 — 받은 것이 쌓일수록
+    // 화면이 끊긴다. 개수를 4,000개로 끊어 둔 것은 양을 줄였을 뿐
+    // 위치가 틀린 것은 고치지 못한다.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSString *now = [self inboxFingerprint];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self applyFingerprint:now];
+        });
+    });
+}
+
+/// 뒷줄에서 읽어 온 결과를 메인에서 적용한다. 상태는 전부 여기서만 바꾼다.
++ (void)applyFingerprint:(NSString *)now {
     // 받은 것이 늘었으면 전송 중이다. 시간을 다시 채운다 —
     // 한창 받는 중에 꺼지면 파일이 반쪽으로 남는다.
-    NSString *now = [self inboxFingerprint];
+    //
+    // 다만 이 신호는 약하다. 받는 쪽은 보통 완성될 때까지 임시 자리에 쓰고
+    // 끝난 뒤에야 받은 함으로 옮기므로, 큰 파일을 받는 내내 여기는
+    // 아무 변화가 없을 수 있다. 수신 화면이 떠 있는 동안 열어 두는 쪽으로
+    // 바꿔야 한다 — 그때까지의 임시 장치다.
     if (now && sLastInboxFingerprint && ![now isEqualToString:sLastInboxFingerprint]) {
         sDeadline = [NSDate dateWithTimeIntervalSinceNow:kTransferExtension];
         NSLog(@"[AirDrop] 받는 중 — 시간을 연장합니다");

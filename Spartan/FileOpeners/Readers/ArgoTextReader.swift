@@ -185,6 +185,9 @@ final class ArgoTextReaderController: UIViewController {
         }
         lineCount = body.reduce(into: 1) { n, c in if c == "\n" { n += 1 } }
         textView.attributedText = styled(body)
+        // 글자를 넣은 직후에는 아직 레이아웃이 안 끝나 contentSize 가 0 이다.
+        // 그대로 상태줄을 그리면 0% 가 아니라 '모르는 값'이 찍힌다.
+        textView.layoutIfNeeded()
         updateStatus()
     }
 

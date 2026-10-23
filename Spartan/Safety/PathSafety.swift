@@ -57,8 +57,11 @@ enum PathSafety {
     /// 자기 파일도 못 지운다. 벽돌을 막는 것은 위의 금지 목록이지
     /// 집 안을 좁히는 것이 아니다.
     private static let safePrefixes = [
-        "/var/mobile",
-        (NSTemporaryDirectory() as NSString).standardizingPath
+        "/var/mobile"
+        // NSTemporaryDirectory() 를 넣어 두었다가 뺐다. 컨테이너가 없는
+        // (no-container) 앱에서 무엇을 돌려주는지 확인한 적이 없고,
+        // 컨테이너 tmp 라면 /var/mobile 규칙으로 이미 통과한다.
+        // 확인하지 않은 값을 안전 목록에 넣는 것은 그 자체로 구멍이다.
     ].map { canonical($0) }
 
     /// 경로를 비교할 수 있는 한 가지 모양으로 만든다.
