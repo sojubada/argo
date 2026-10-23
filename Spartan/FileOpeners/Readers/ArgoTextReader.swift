@@ -113,40 +113,12 @@ final class ArgoTextReaderController: UIViewController {
         menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
         view.addGestureRecognizer(menu)
 
-        // PDF 뷰어와 같은 이유다 — 포커스를 못 받으면 pressesBegan 이 안 온다.
-        pressGestures = [
-            makePressGesture(.upArrow,    #selector(gUp)),
-            makePressGesture(.downArrow,  #selector(gDown)),
-            makePressGesture(.leftArrow,  #selector(gLeft)),
-            makePressGesture(.rightArrow, #selector(gRight)),
-        ]
-        _ = makePressGesture(.select, #selector(gSelect))
-
         ArgoDiag.begin("텍스트 뷰어: \((filePath as NSString).lastPathComponent)")
         ArgoDiag.log("load", "bounds=\(view.bounds)")
 
         loadFile()
         setToolbar(visible: true, interactive: false, animated: false)
     }
-
-    private var pressGestures: [UIGestureRecognizer] = []
-
-    private func makePressGesture(_ type: UIPress.PressType, _ action: Selector) -> UITapGestureRecognizer {
-        let g = UITapGestureRecognizer(target: self, action: action)
-        g.allowedPressTypes = [NSNumber(value: type.rawValue)]
-        view.addGestureRecognizer(g)
-        return g
-    }
-
-    @objc private func gSelect() {
-        ArgoDiag.log("gesture", "select interactive=\(toolbarInteractive)")
-        guard !toolbarInteractive else { return }
-        toggleToolbar()
-    }
-    @objc private func gUp()    { ArgoDiag.log("gesture", "up");    _ = handlePress(.upArrow) }
-    @objc private func gDown()  { ArgoDiag.log("gesture", "down");  _ = handlePress(.downArrow) }
-    @objc private func gLeft()  { ArgoDiag.log("gesture", "left");  _ = handlePress(.leftArrow) }
-    @objc private func gRight() { ArgoDiag.log("gesture", "right"); _ = handlePress(.rightArrow) }
 
     override func didUpdateFocus(in context: UIFocusUpdateContext,
                                  with coordinator: UIFocusAnimationCoordinator) {
@@ -351,7 +323,6 @@ final class ArgoTextReaderController: UIViewController {
         for sub in toolbar.arrangedSubviews {
             (sub as? UIControl)?.isEnabled = toolbarInteractive
         }
-        for g in pressGestures { g.isEnabled = !toolbarInteractive }
         ArgoDiag.log("toolbar", "visible=\(visible) interactive=\(toolbarInteractive)")
         setNeedsFocusUpdate()
         updateFocusIfNeeded()

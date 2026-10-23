@@ -201,49 +201,11 @@ final class ArgoPDFReaderController: UIViewController {
         menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
         view.addGestureRecognizer(menu)
 
-        // 리모컨을 제스처로도 받는다.
-        //
-        // pressesBegan 은 **포커스를 가진 뷰**에만 온다. 캔버스가 포커스를
-        // 못 받으면 입력이 아예 도착하지 않는데, 겉으로는 '페이지가 안 넘어간다'
-        // 로만 보인다. 제스처는 포커스와 무관하게 온다 — menu 키가 이 길로
-        // 혼자 살아 있었던 것이 증거다.
-        pressGestures = [
-            makePressGesture(.upArrow,    #selector(gUp)),
-            makePressGesture(.downArrow,  #selector(gDown)),
-            makePressGesture(.leftArrow,  #selector(gLeft)),
-            makePressGesture(.rightArrow, #selector(gRight)),
-            makePressGesture(.playPause,  #selector(gPlayPause)),
-        ]
-        // 선택은 따로 둔다 — 도구 모음이 살아 있을 때도 꺼지면 안 된다.
-        _ = makePressGesture(.select, #selector(gSelect))
-
         ArgoDiag.begin("PDF 뷰어: \((documentPath as NSString).lastPathComponent)")
         ArgoDiag.log("load", "bounds=\(view.bounds) safeArea=\(view.safeAreaInsets)")
 
         openDocument()
     }
-
-    // MARK: 제스처로 받는 리모컨
-
-    private var pressGestures: [UIGestureRecognizer] = []
-
-    private func makePressGesture(_ type: UIPress.PressType, _ action: Selector) -> UITapGestureRecognizer {
-        let g = UITapGestureRecognizer(target: self, action: action)
-        g.allowedPressTypes = [NSNumber(value: type.rawValue)]
-        view.addGestureRecognizer(g)
-        return g
-    }
-
-    @objc private func gSelect() {
-        ArgoDiag.log("gesture", "select interactive=\(toolbarInteractive)")
-        guard !toolbarInteractive else { return }
-        toggleToolbar()
-    }
-    @objc private func gUp()        { ArgoDiag.log("gesture", "up");    _ = handlePress(.upArrow) }
-    @objc private func gDown()      { ArgoDiag.log("gesture", "down");  _ = handlePress(.downArrow) }
-    @objc private func gLeft()      { ArgoDiag.log("gesture", "left");  _ = handlePress(.leftArrow) }
-    @objc private func gRight()     { ArgoDiag.log("gesture", "right"); _ = handlePress(.rightArrow) }
-    @objc private func gPlayPause() { ArgoDiag.log("gesture", "playPause"); _ = handlePress(.playPause) }
 
     override func didUpdateFocus(in context: UIFocusUpdateContext,
                                  with coordinator: UIFocusAnimationCoordinator) {
@@ -304,8 +266,9 @@ final class ArgoPDFReaderController: UIViewController {
     /// 스캔한 만화·그림책은 1쪽이 표지인 경우가 대부분이다.
     private func pagesForCurrentView() -> [Int] {
         guard fitMode == .twoPage else { return [currentPage] }
-        if currentPage <= 1 { return [1] }
-        let left = currentPage % 2 == 0 ? currentPage : currentPage - 1
+        // 1-2, 3-4 로 묶는다. 표지를 혼자 두는 방식도 있지만, 그러면 첫 쪽에서
+        // 세로 맞춤과 똑같이 보여서 두 쪽으로 바꾼 것이 티가 나지 않는다.
+        let left = currentPage % 2 == 1 ? currentPage : currentPage - 1
         let right = left + 1
         return right <= pageCount ? [left, right] : [left]
     }
@@ -317,8 +280,19 @@ final class ArgoPDFReaderController: UIViewController {
     ///
     /// /Rotate 가 걸린 쪽이 있으므로 변환은 getDrawingTransform 에서 받아온다 —
     /// 직접 계산하면 90도 돌아간 스캔 문서가 눕는다.
+    /// 마지막으로 그린 조건. 이게 그대로면 다시 그릴 이유가 없다.
+    private var lastRenderKey: String = ""
+
     private func renderCurrentPage() {
         guard let doc = document, view.bounds.width > 0 else { return }
+
+        // 포커스가 도구 모음 버튼 사이를 옮길 때마다 레이아웃이 다시 돌고,
+        // 그때마다 수천만 화소를 다시 그리고 있었다. 조건이 같으면 건너뛴다.
+        let key = "\(view.bounds.size)|\(currentPage)|\(fitMode.rawValue)"
+        if key == lastRenderKey, pageImage.image != nil {
+            layoutPage()
+            return
+        }
 
         let numbers = pagesForCurrentView()
         var pages: [(page: CGPDFPage, box: CGRect, boxKind: CGPDFBox, rotation: Int)] = []
@@ -398,6 +372,7 @@ final class ArgoPDFReaderController: UIViewController {
         }
 
         pageImage.image = image
+        lastRenderKey = key
         renderedPageHeight = size.height
         layoutPage()
         updateStatus()
@@ -669,8 +644,6 @@ final class ArgoPDFReaderController: UIViewController {
         for sub in toolbar.arrangedSubviews {
             (sub as? UIControl)?.isEnabled = toolbarInteractive
         }
-        // 방향키 제스처가 도구 모음의 포커스 이동을 가로채지 않게 한다.
-        for g in pressGestures { g.isEnabled = !toolbarInteractive }
         ArgoDiag.log("toolbar", "visible=\(visible) interactive=\(toolbarInteractive)")
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
