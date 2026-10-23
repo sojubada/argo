@@ -21,10 +21,12 @@ enum ArgoOfficeConverter {
 
     /// 변환기에 맡길 확장자.
     ///
-    /// pptx 는 아직 뺍니다 — 슬라이드 제목이 통째로 빠집니다. 자리표시자를
-    /// 건너뛰는 분기에 걸리는 것으로 보이고, 고쳐지기 전까지는 기존
-    /// WebKit 뷰어가 더 낫습니다.
-    static let handled: Set<String> = ["docx", "xlsx", "xls"]
+    /// pptx 도 들어왔습니다 — 슬라이드 제목이 사라지던 것은 레이아웃이
+    /// 마스터의 위치를 덮어쓰던 문제였고, 벤더링한 사본에서 고쳤습니다.
+    ///
+    /// xlsx 는 당분간 뺍니다. 변환 자체는 되지만 엑셀의 인쇄 방식 그대로
+    /// 넓은 시트를 열 묶음별로 쪼개서, 화면으로 따라 읽기가 어렵습니다.
+    static let handled: Set<String> = ["docx", "pptx"]
 
     static func handles(_ path: String) -> Bool {
         handled.contains((path as NSString).pathExtension.lowercased())

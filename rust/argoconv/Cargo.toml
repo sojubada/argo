@@ -10,7 +10,8 @@ name = "argoconv"
 crate-type = ["staticlib"]
 
 [dependencies]
-minipdf = "0.7"
+# 벤더링한 사본을 쓴다. 슬라이드 제목이 사라지던 문제를 고쳤다.
+minipdf = { path = "../vendor/minipdf" }
 
 [profile.release]
 opt-level = "z"     # 크기 우선. 변환은 이미 0.1 초 안쪽이라 속도를 더 살 이유가 없다.

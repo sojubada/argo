@@ -327,8 +327,6 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "minipdf"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1264950890c761f739983f27ed809b14936b655e785fca5266dae01675c3b8d"
 dependencies = [
  "chrono",
  "flate2",

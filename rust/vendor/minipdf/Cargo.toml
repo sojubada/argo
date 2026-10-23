@@ -1,0 +1,29 @@
+[package]
+name = "minipdf"
+version = "0.7.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/mini-software/MiniPdf"
+homepage = "https://github.com/mini-software/MiniPdf"
+documentation = "https://docs.rs/minipdf"
+rust-version = "1.82"
+description = "Experimental Rust implementation of MiniPdf Office-to-PDF conversion."
+readme = "README.md"
+keywords = ["pdf", "xlsx", "docx", "pptx", "converter"]
+categories = ["encoding", "parser-implementations"]
+exclude = ["target/"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+roxmltree = "0.20"
+rustybuzz = "0.20"
+subsetter = "=0.2.3"
+ttf-parser = "0.25"
+thiserror = "2"
+unicode-bidi = "0.3"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Graphics_Gdi"] }
