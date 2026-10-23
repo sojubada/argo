@@ -44,6 +44,10 @@ struct PptxShape {
     outline: Option<PptxOutline>,
     paragraphs: Vec<PptxParagraph>,
     text_body: PptxTextBody,
+    /// 모양을 직접 적은 점 목록 (슬라이드 좌표, y 아래쪽이 큼).
+    ///
+    /// 차트의 부채꼴처럼 기본 도형 이름으로는 못 적는 모양에 쓴다.
+    polygon: Option<Vec<(f32, f32)>>,
 }
 
 #[derive(Debug)]
@@ -641,6 +645,7 @@ fn read_shape(
             outline,
             paragraphs,
             text_body,
+            polygon: None,
         }));
     }
 }
@@ -763,6 +768,11 @@ fn read_graphic_frame(
         read_diagram(archive, relationships, theme, transform, bounds, elements)?;
         return Ok(());
     }
+    if let Some(graphic_data) = graphic_data {
+        if read_chart(archive, graphic_data, relationships, theme, bounds, elements)? {
+            return Ok(());
+        }
+    }
     let Some(table) = frame.descendants().find(|node| is_element(*node, "tbl")) else {
         return Ok(());
     };
@@ -825,6 +835,7 @@ fn read_graphic_frame(
                 outline: None,
                 paragraphs,
                 text_body: PptxTextBody::default(),
+                polygon: None,
             }));
             add_table_borders(properties, cell_bounds, theme, elements);
             left += cell_width;
@@ -1997,7 +2008,14 @@ fn render_shape(
 
     // 기본 도형의 모양을 점으로 받는다. 못 받으면 네모로 돌아간다 —
     // 모르는 도형을 안 그리는 것보다는 네모라도 자리를 잡는 편이 낫다.
-    let outline_points = if ellipse {
+    let outline_points = if let Some(points) = shape.polygon.as_ref() {
+        Some(
+            points
+                .iter()
+                .map(|(x, y)| (x * scale_x, page_height - y * scale_y))
+                .collect::<Vec<_>>(),
+        )
+    } else if ellipse {
         None
     } else {
         crate::pptx_presets::preset_points(&shape.shape_type, bounds.width, bounds.height).map(
@@ -2944,4 +2962,717 @@ mod tests {
             .write_all(content.as_bytes())
             .expect("write ZIP entry");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 차트
+//
+// 차트는 슬라이드가 아니라 ppt/charts/chartN.xml 에 따로 들어 있고, 엑셀이
+// 그리는 그림이라 모양 정보가 거의 없다. 숫자와 계열 이름만 있고 막대
+// 하나하나는 없다. 그래서 여기서 직접 그린다 — 안 그리면 슬라이드 한가운데가
+// 통째로 빈다.
+// ---------------------------------------------------------------------------
+
+/// 차트 한 계열.
+struct ChartSeries {
+    name: String,
+    color: Option<PdfColor>,
+    values: Vec<f32>,
+}
+
+/// 그릴 수 있는 차트 종류.
+#[derive(Clone, Copy, PartialEq)]
+enum ChartKind {
+    Column,
+    Bar,
+    Line,
+    Pie,
+}
+
+const CHART_AXIS: PdfColor = PdfColor {
+    r: 0.52,
+    g: 0.52,
+    b: 0.52,
+};
+const CHART_GRID: PdfColor = PdfColor {
+    r: 0.85,
+    g: 0.85,
+    b: 0.85,
+};
+
+fn read_chart(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    graphic_data: Node<'_, '_>,
+    relationships: &HashMap<String, Relationship>,
+    theme: &HashMap<String, PdfColor>,
+    bounds: PptxRect,
+    elements: &mut Vec<PptxElement>,
+) -> Result<bool> {
+    let Some(reference) = graphic_data
+        .descendants()
+        .find(|node| is_element(*node, "chart"))
+    else {
+        return Ok(false);
+    };
+    let Some(id) = reference
+        .attributes()
+        .find(|attribute| attribute.name() == "id")
+        .map(|attribute| attribute.value())
+    else {
+        return Ok(false);
+    };
+    let Some(relationship) = relationships.get(id).filter(|rel| !rel.external) else {
+        return Ok(false);
+    };
+    let chart_path = resolve_part_target(
+        &relationship_source_path(relationship),
+        &relationship.target,
+    );
+    let Some(bytes) = read_zip_bytes(archive, &chart_path)? else {
+        return Ok(false);
+    };
+    let text = String::from_utf8(bytes)
+        .map_err(|_| MiniPdfError::InvalidInput(format!("{chart_path} is not UTF-8")))?;
+    let document = Document::parse(&text)?;
+
+    let Some(plot_area) = document
+        .descendants()
+        .find(|node| is_element(*node, "plotArea"))
+    else {
+        return Ok(false);
+    };
+    let Some(plot) = plot_area.children().filter(Node::is_element).find_map(|node| {
+        let kind = match node.tag_name().name() {
+            "barChart" | "bar3DChart" => {
+                match child(node, "barDir").and_then(|dir| dir.attribute("val")) {
+                    Some("bar") => ChartKind::Bar,
+                    _ => ChartKind::Column,
+                }
+            }
+            "lineChart" | "line3DChart" | "areaChart" | "scatterChart" => ChartKind::Line,
+            "pieChart" | "pie3DChart" | "doughnutChart" => ChartKind::Pie,
+            _ => return None,
+        };
+        Some((kind, node))
+    }) else {
+        return Ok(false);
+    };
+    let (kind, plot_node) = plot;
+
+    let mut categories: Vec<String> = Vec::new();
+    let mut series = Vec::new();
+    for node in plot_node.children().filter(|node| is_element(*node, "ser")) {
+        if categories.is_empty() {
+            categories = child(node, "cat")
+                .map(|cat| read_cache_strings(cat))
+                .unwrap_or_default();
+        }
+        let values = child(node, "val")
+            .map(|val| read_cache_numbers(val))
+            .unwrap_or_default();
+        if values.is_empty() {
+            continue;
+        }
+        let name = child(node, "tx")
+            .map(|tx| read_cache_strings(tx))
+            .and_then(|names| names.into_iter().next())
+            .unwrap_or_default();
+        series.push(ChartSeries {
+            name,
+            color: child(node, "spPr").and_then(|node| read_fill(node, theme)),
+            values,
+        });
+    }
+    if series.is_empty() {
+        return Ok(false);
+    }
+    if categories.is_empty() {
+        categories = (1..=series[0].values.len())
+            .map(|index| index.to_string())
+            .collect();
+    }
+
+    let title = if document
+        .descendants()
+        .any(|node| is_element(node, "autoTitleDeleted") && node.attribute("val") == Some("1"))
+    {
+        None
+    } else {
+        document
+            .descendants()
+            .find(|node| is_element(*node, "title"))
+            .map(collect_text)
+            .filter(|text| !text.is_empty())
+    };
+    let has_legend = document
+        .descendants()
+        .any(|node| is_element(node, "legend"));
+
+    draw_chart(
+        kind,
+        bounds,
+        title.as_deref(),
+        has_legend,
+        &categories,
+        &series,
+        theme,
+        elements,
+    );
+    Ok(true)
+}
+
+/// c:strCache 나 c:numCache 안의 값들을 idx 순서대로.
+fn read_cache_strings(node: Node<'_, '_>) -> Vec<String> {
+    let mut points: Vec<(usize, String)> = node
+        .descendants()
+        .filter(|node| is_element(*node, "pt"))
+        .map(|point| {
+            let index = point
+                .attribute("idx")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            (index, collect_text(point))
+        })
+        .collect();
+    if points.is_empty() {
+        let direct = collect_text(node);
+        return if direct.is_empty() {
+            Vec::new()
+        } else {
+            vec![direct]
+        };
+    }
+    points.sort_by_key(|(index, _)| *index);
+    points.into_iter().map(|(_, value)| value).collect()
+}
+
+fn read_cache_numbers(node: Node<'_, '_>) -> Vec<f32> {
+    let mut points: Vec<(usize, f32)> = node
+        .descendants()
+        .filter(|node| is_element(*node, "pt"))
+        .filter_map(|point| {
+            let index = point
+                .attribute("idx")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            collect_text(point).trim().parse().ok().map(|v| (index, v))
+        })
+        .collect();
+    points.sort_by_key(|(index, _)| *index);
+    points.into_iter().map(|(_, value)| value).collect()
+}
+
+fn collect_text(node: Node<'_, '_>) -> String {
+    node.descendants()
+        .filter(|node| node.is_text())
+        .filter(|node| {
+            node.parent()
+                .is_some_and(|parent| matches!(parent.tag_name().name(), "v" | "t"))
+        })
+        .filter_map(|node| node.text())
+        .collect::<Vec<_>>()
+        .join("")
+        .trim()
+        .to_owned()
+}
+
+/// 계열 색. 문서가 안 정했으면 테마의 강조색을 차례로 쓴다.
+fn series_color(
+    series: &ChartSeries,
+    index: usize,
+    theme: &HashMap<String, PdfColor>,
+) -> PdfColor {
+    if let Some(color) = series.color {
+        return color;
+    }
+    let name = format!("accent{}", index % 6 + 1);
+    theme.get(&name).copied().unwrap_or(PdfColor {
+        r: 0.25,
+        g: 0.45,
+        b: 0.70,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_chart(
+    kind: ChartKind,
+    bounds: PptxRect,
+    title: Option<&str>,
+    has_legend: bool,
+    categories: &[String],
+    series: &[ChartSeries],
+    theme: &HashMap<String, PdfColor>,
+    elements: &mut Vec<PptxElement>,
+) {
+    let mut top = bounds.y;
+    let mut bottom = bounds.y + bounds.height;
+
+    if let Some(title) = title {
+        push_label(
+            PptxRect {
+                x: bounds.x,
+                y: top,
+                width: bounds.width,
+                height: 22.0,
+            },
+            title,
+            13.0,
+            true,
+            TextAlignment::Center,
+            PdfColor::BLACK,
+            elements,
+        );
+        top += 26.0;
+    }
+    if has_legend && !series.is_empty() {
+        bottom -= 18.0;
+        // 원 그래프는 계열이 하나뿐이라 계열 이름으로는 범례가 되지
+        // 않는다. 파워포인트처럼 조각 이름을 늘어놓는다.
+        let entries: Vec<(String, PdfColor)> = if kind == ChartKind::Pie {
+            categories
+                .iter()
+                .enumerate()
+                .map(|(index, name)| {
+                    let color = theme
+                        .get(&format!("accent{}", index % 6 + 1))
+                        .copied()
+                        .unwrap_or(PdfColor::BLACK);
+                    (name.clone(), color)
+                })
+                .collect()
+        } else {
+            series
+                .iter()
+                .enumerate()
+                .map(|(index, one)| (one.name.clone(), series_color(one, index, theme)))
+                .collect()
+        };
+        draw_legend(
+            PptxRect {
+                x: bounds.x,
+                y: bottom,
+                width: bounds.width,
+                height: 16.0,
+            },
+            &entries,
+            elements,
+        );
+    }
+
+    if kind == ChartKind::Pie {
+        draw_pie(
+            PptxRect {
+                x: bounds.x,
+                y: top,
+                width: bounds.width,
+                height: (bottom - top).max(1.0),
+            },
+            categories,
+            &series[0],
+            theme,
+            elements,
+        );
+        return;
+    }
+
+    // 값 축에 자리를 내준다. 범주 이름은 가로 막대일 때 왼쪽으로 간다.
+    let gutter = 44.0_f32.min(bounds.width * 0.3);
+    let category_band = 16.0_f32.min((bottom - top) * 0.25);
+    let plot = PptxRect {
+        x: bounds.x + gutter,
+        y: top,
+        width: (bounds.width - gutter - 8.0).max(1.0),
+        height: (bottom - top - category_band).max(1.0),
+    };
+
+    let (low, high) = value_range(series);
+    let ticks = 4;
+
+    // 눈금선과 값.
+    for step in 0..=ticks {
+        let value = low + (high - low) * step as f32 / ticks as f32;
+        if kind == ChartKind::Bar {
+            let x = plot.x + plot.width * step as f32 / ticks as f32;
+            push_line(x, plot.y, x, plot.y + plot.height, CHART_GRID, elements);
+            push_label(
+                PptxRect {
+                    x: x - 24.0,
+                    y: plot.y + plot.height + 2.0,
+                    width: 48.0,
+                    height: category_band,
+                },
+                &format_tick(value),
+                8.0,
+                false,
+                TextAlignment::Center,
+                CHART_AXIS,
+                elements,
+            );
+        } else {
+            let y = plot.y + plot.height * (1.0 - step as f32 / ticks as f32);
+            push_line(plot.x, y, plot.x + plot.width, y, CHART_GRID, elements);
+            push_label(
+                PptxRect {
+                    x: bounds.x,
+                    y: y - 6.0,
+                    width: gutter - 4.0,
+                    height: 12.0,
+                },
+                &format_tick(value),
+                8.0,
+                false,
+                TextAlignment::Right,
+                CHART_AXIS,
+                elements,
+            );
+        }
+    }
+
+    let span = (high - low).max(f32::EPSILON);
+    let zero_offset = ((0.0 - low) / span).clamp(0.0, 1.0);
+    let count = categories.len().max(series.iter().map(|s| s.values.len()).max().unwrap_or(1));
+    let slot = if kind == ChartKind::Bar {
+        plot.height / count as f32
+    } else {
+        plot.width / count as f32
+    };
+    let thickness = (slot * 0.72 / series.len() as f32).max(1.0);
+
+    for (series_index, one) in series.iter().enumerate() {
+        let color = series_color(one, series_index, theme);
+        let mut previous: Option<(f32, f32)> = None;
+        for (category_index, value) in one.values.iter().enumerate() {
+            let fraction = ((value - low) / span).clamp(0.0, 1.0);
+            match kind {
+                ChartKind::Line => {
+                    let x = plot.x + slot * (category_index as f32 + 0.5);
+                    let y = plot.y + plot.height * (1.0 - fraction);
+                    if let Some((px, py)) = previous {
+                        push_line_wide(px, py, x, y, color, 1.8, elements);
+                    }
+                    previous = Some((x, y));
+                }
+                ChartKind::Bar => {
+                    let start = plot.x + plot.width * zero_offset;
+                    let end = plot.x + plot.width * fraction;
+                    let y = plot.y
+                        + slot * category_index as f32
+                        + slot * 0.14
+                        + thickness * series_index as f32;
+                    push_block(
+                        start.min(end),
+                        y,
+                        (end - start).abs().max(0.5),
+                        thickness,
+                        color,
+                        elements,
+                    );
+                }
+                _ => {
+                    let base = plot.y + plot.height * (1.0 - zero_offset);
+                    let tip = plot.y + plot.height * (1.0 - fraction);
+                    let x = plot.x
+                        + slot * category_index as f32
+                        + slot * 0.14
+                        + thickness * series_index as f32;
+                    push_block(
+                        x,
+                        base.min(tip),
+                        thickness,
+                        (base - tip).abs().max(0.5),
+                        color,
+                        elements,
+                    );
+                }
+            }
+        }
+    }
+
+    // 축선.
+    push_line(
+        plot.x,
+        plot.y + plot.height,
+        plot.x + plot.width,
+        plot.y + plot.height,
+        CHART_AXIS,
+        elements,
+    );
+    push_line(plot.x, plot.y, plot.x, plot.y + plot.height, CHART_AXIS, elements);
+
+    // 범주 이름.
+    for (index, name) in categories.iter().enumerate() {
+        if kind == ChartKind::Bar {
+            push_label(
+                PptxRect {
+                    x: bounds.x,
+                    y: plot.y + slot * (index as f32 + 0.5) - 6.0,
+                    width: gutter - 4.0,
+                    height: 12.0,
+                },
+                name,
+                8.0,
+                false,
+                TextAlignment::Right,
+                CHART_AXIS,
+                elements,
+            );
+        } else {
+            push_label(
+                PptxRect {
+                    x: plot.x + slot * index as f32,
+                    y: plot.y + plot.height + 2.0,
+                    width: slot,
+                    height: category_band,
+                },
+                name,
+                8.0,
+                false,
+                TextAlignment::Center,
+                CHART_AXIS,
+                elements,
+            );
+        }
+    }
+}
+
+/// 0 을 포함하는 보기 좋은 값 범위.
+fn value_range(series: &[ChartSeries]) -> (f32, f32) {
+    let mut low = 0.0_f32;
+    let mut high = 0.0_f32;
+    for one in series {
+        for value in &one.values {
+            low = low.min(*value);
+            high = high.max(*value);
+        }
+    }
+    if (high - low).abs() < f32::EPSILON {
+        high = low + 1.0;
+    }
+    // 위쪽을 한 자리 올려 막대가 천장에 닿지 않게 한다.
+    let step = nice_step((high - low) / 4.0);
+    let high = (high / step).ceil() * step;
+    let low = if low < 0.0 {
+        (low / step).floor() * step
+    } else {
+        0.0
+    };
+    (low, high.max(low + step))
+}
+
+fn nice_step(rough: f32) -> f32 {
+    if rough <= 0.0 {
+        return 1.0;
+    }
+    let magnitude = 10.0_f32.powf(rough.log10().floor());
+    let normalized = rough / magnitude;
+    let step = if normalized <= 1.0 {
+        1.0
+    } else if normalized <= 2.0 {
+        2.0
+    } else if normalized <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    step * magnitude
+}
+
+fn format_tick(value: f32) -> String {
+    if (value - value.round()).abs() < 0.001 {
+        format!("{}", value.round() as i64)
+    } else {
+        format!("{value:.1}")
+    }
+}
+
+fn draw_legend(
+    bounds: PptxRect,
+    entries: &[(String, PdfColor)],
+    elements: &mut Vec<PptxElement>,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    let slot = bounds.width / entries.len() as f32;
+    for (index, (name, color)) in entries.iter().enumerate() {
+        let left = bounds.x + slot * index as f32;
+        push_block(left + 4.0, bounds.y + 4.0, 8.0, 8.0, *color, elements);
+        push_label(
+            PptxRect {
+                x: left + 16.0,
+                y: bounds.y,
+                width: (slot - 18.0).max(1.0),
+                height: bounds.height,
+            },
+            name,
+            8.0,
+            false,
+            TextAlignment::Left,
+            PdfColor::BLACK,
+            elements,
+        );
+    }
+}
+
+fn draw_pie(
+    bounds: PptxRect,
+    categories: &[String],
+    series: &ChartSeries,
+    theme: &HashMap<String, PdfColor>,
+    elements: &mut Vec<PptxElement>,
+) {
+    let total: f32 = series.values.iter().map(|value| value.abs()).sum();
+    if total <= 0.0 {
+        return;
+    }
+    let radius = (bounds.width.min(bounds.height) / 2.0 - 6.0).max(1.0);
+    let center = (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
+    let mut start = -std::f32::consts::FRAC_PI_2;
+
+    for (index, value) in series.values.iter().enumerate() {
+        let sweep = std::f32::consts::TAU * value.abs() / total;
+        let steps = ((sweep / 0.2).ceil() as usize).max(2);
+        let mut points = vec![center];
+        for step in 0..=steps {
+            let angle = start + sweep * step as f32 / steps as f32;
+            points.push((
+                center.0 + radius * angle.cos(),
+                center.1 + radius * angle.sin(),
+            ));
+        }
+        let color = theme
+            .get(&format!("accent{}", index % 6 + 1))
+            .copied()
+            .unwrap_or(PdfColor::BLACK);
+        elements.push(PptxElement::Shape(PptxShape {
+            shape_type: "rect".to_owned(),
+            bounds: PptxRect {
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+            },
+            fill: Some(color),
+            outline: None,
+            paragraphs: Vec::new(),
+            text_body: PptxTextBody::default(),
+            polygon: Some(points),
+        }));
+
+        // 조각 이름은 바깥쪽에 적는다.
+        if let Some(name) = categories.get(index) {
+            let middle = start + sweep / 2.0;
+            let label_radius = radius * 0.72;
+            push_label(
+                PptxRect {
+                    x: center.0 + label_radius * middle.cos() - 30.0,
+                    y: center.1 + label_radius * middle.sin() - 6.0,
+                    width: 60.0,
+                    height: 12.0,
+                },
+                name,
+                8.0,
+                false,
+                TextAlignment::Center,
+                PdfColor::WHITE,
+                elements,
+            );
+        }
+        start += sweep;
+    }
+}
+
+fn push_block(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: PdfColor,
+    elements: &mut Vec<PptxElement>,
+) {
+    elements.push(PptxElement::Shape(PptxShape {
+        shape_type: "rect".to_owned(),
+        bounds: PptxRect {
+            x,
+            y,
+            width,
+            height,
+        },
+        fill: Some(color),
+        outline: None,
+        paragraphs: Vec::new(),
+        text_body: PptxTextBody::default(),
+        polygon: None,
+    }));
+}
+
+fn push_line(x1: f32, y1: f32, x2: f32, y2: f32, color: PdfColor, elements: &mut Vec<PptxElement>) {
+    push_line_wide(x1, y1, x2, y2, color, 0.75, elements);
+}
+
+fn push_line_wide(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    color: PdfColor,
+    width: f32,
+    elements: &mut Vec<PptxElement>,
+) {
+    elements.push(PptxElement::Line(PptxLine {
+        x1,
+        y1,
+        x2,
+        y2,
+        outline: PptxOutline {
+            color,
+            width,
+            dash_pattern: Vec::new(),
+        },
+    }));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_label(
+    bounds: PptxRect,
+    text: &str,
+    size: f32,
+    bold: bool,
+    alignment: TextAlignment,
+    color: PdfColor,
+    elements: &mut Vec<PptxElement>,
+) {
+    if text.is_empty() {
+        return;
+    }
+    elements.push(PptxElement::Shape(PptxShape {
+        shape_type: "rect".to_owned(),
+        bounds,
+        fill: None,
+        outline: None,
+        paragraphs: vec![PptxParagraph {
+            runs: vec![PptxRun {
+                text: text.to_owned(),
+                font_size: size,
+                color,
+                bold,
+                italic: false,
+                underline: false,
+                font_name: None,
+            }],
+            alignment,
+            margin_left: 0.0,
+            indent: 0.0,
+            space_before: 0.0,
+            line_spacing: 1.0,
+        }],
+        text_body: PptxTextBody {
+            left_inset: 0.0,
+            top_inset: 0.0,
+            right_inset: 0.0,
+            bottom_inset: 0.0,
+            anchor: VerticalAnchor::Middle,
+        },
+        polygon: None,
+    }));
 }
