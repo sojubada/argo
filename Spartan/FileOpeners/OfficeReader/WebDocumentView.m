@@ -18,7 +18,7 @@
 /// 덮으므로 그 판이 문서를 통째로 가립니다 — PDF 뷰어가 흰 화면으로 나오던
 /// 원인이고, 여기도 같은 구조라 같은 병을 갖고 있었습니다.
 /// 포커스가 툴바에 있을 때만 문서가 보였던 것입니다.
-@interface ArgoCanvasButton : UIView
+@interface ArgoCanvasButton : UIControl
 @property (nonatomic, copy) BOOL (^onPress)(UIPressType type);
 @property (nonatomic, copy) void (^onSelect)(void);
 @end
@@ -264,6 +264,7 @@
 - (void)setToolbarVisible:(BOOL)visible
               interactive:(BOOL)interactive
                  animated:(BOOL)animated {
+    BOOL wasInteractive = self.toolbarInteractive;
     self.toolbarVisible = visible;
     self.toolbarInteractive = visible && interactive;
     [self.hideTimer invalidate];
@@ -275,16 +276,26 @@
             ((UIControl *)sub).enabled = self.toolbarInteractive;
         }
     }
-    [self setNeedsFocusUpdate];
-    [self updateFocusIfNeeded];
-
     void (^apply)(void) = ^{
         // 보이기만 할 때는 옅게 — 지금 눌리지 않는다는 뜻입니다.
         CGFloat a = visible ? (self.toolbarInteractive ? 1.0 : 0.55) : 0.0;
         self.toolbar.alpha = a;
         self.toolbarSurface.alpha = a;
     };
-    if (animated) { [UIView animateWithDuration:0.2 animations:apply]; } else { apply(); }
+    // alpha 0 인 뷰는 포커스 후보에서 빠집니다. 들어갈 때는 투명도를
+    // 먼저 맞춘 뒤 포커스를 요청해야 첫 select 가 도구 모음에 닿습니다.
+    if (animated && !self.toolbarInteractive) {
+        [UIView animateWithDuration:0.2 animations:apply];
+    } else {
+        apply();
+    }
+
+    // 이미 도구 모음 안에 있는데 또 요청하면 엔진이
+    // preferredFocusEnvironments 를 다시 읽어 첫 버튼으로 되돌립니다.
+    if (self.toolbarInteractive != wasInteractive) {
+        [self setNeedsFocusUpdate];
+        [self updateFocusIfNeeded];
+    }
 
     if (visible) {
         NSTimeInterval wait = self.toolbarInteractive ? 12.0 : 5.0;

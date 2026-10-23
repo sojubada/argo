@@ -1421,6 +1421,13 @@ struct ContentView: View {
         presentReader(vc)
     }
 
+    private func presentOfficeReader() {
+        let vc = ArgoWebDocumentViewController()
+        vc.documentPath = readerPath()
+        vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+        presentReader(vc)
+    }
+
     private func presentTextReader() {
         let vc = ArgoTextReaderController()
         vc.filePath = readerPath()
@@ -1545,7 +1552,7 @@ struct ContentView: View {
 			case 15:
 				presentPDFReader()
 			case 16:
-				showSubView[38] = true
+				presentOfficeReader()
             default:
                 masterFiles[index].isLoadingFile = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
