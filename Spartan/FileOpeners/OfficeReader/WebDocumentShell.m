@@ -217,17 +217,23 @@
     "  if(!st){st=document.createElement('style');st.id=id;"
     "   document.head.appendChild(st);}"
     "  s=s||1;"
-    // 단 폭은 어느 단계에서나 같습니다. 전에는 '보통'에서만 폭 제한을
-    // 걸지 않아, 보통(794px) → 125%(1500px) 에서 폭이 두 배로 튀고
-    // 그 뒤로는 거의 변하지 않았습니다 — 단계가 고르지 않던 이유입니다.
-    "  var col=Math.round(1460/s);"
-    "  st.textContent='#c{width:'+col+'px !important;'"
-    "   +'margin:0 auto !important;}'"
-    // 렌더러마다 쪽을 담는 요소가 달라, 바깥 그릇을 묶고 안쪽은 꽉 채웁니다.
-    "   +'section.docx,[class*=page]{width:100% !important;'"
-    "   +'min-width:0 !important;max-width:100% !important;'"
-    "   +'box-sizing:border-box !important;padding:36px !important;'"
-    "   +'margin:0 auto 20px !important;}';"
+    // 배율을 풀고 재야 합니다. zoom 이 걸린 채로 재면 이미 나눠진 값입니다.
+    "  C.style.zoom=1;"
+    "  var vw=document.documentElement.clientWidth||1920;"
+    "  var col=Math.min(1460,vw-80);"
+    // zoom 은 **여백에도 배율을 먹입니다.** margin:auto 로 가운데를 맞춘 뒤
+    // 2배를 걸면 왼쪽 여백까지 2배가 되어 단이 오른쪽으로 밀려납니다.
+    // 그래서 그릇의 폭 자체를 배율로 나눠 둡니다 — 배율을 건 뒤에 화면
+    // 폭과 정확히 맞아떨어지고, 그 안에서의 가운데 맞춤도 어긋나지 않습니다.
+    "  st.textContent='html,body{width:'+Math.round(vw/s)+'px !important;}'"
+    "   +'#c{width:'+Math.round(vw/s)+'px !important;'"
+    // min-height:100% 가 남아 있으면 글이 짧아도 흰 쪽이 화면 끝까지 옵니다.
+    "   +'min-height:0 !important;}'"
+    "   +'section.docx,[class*=page]{width:auto !important;'"
+    "   +'max-width:'+Math.round(col/s)+'px !important;'"
+    "   +'min-width:0 !important;height:auto !important;'"
+    "   +'min-height:0 !important;box-sizing:border-box !important;'"
+    "   +'padding:32px !important;margin:0 auto 20px !important;}';"
     "  C.style.zoom=s;report();},"
     " paint:function(){}};"
     "window.argoNav=nav;"
