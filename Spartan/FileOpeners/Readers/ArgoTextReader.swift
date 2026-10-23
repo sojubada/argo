@@ -314,6 +314,7 @@ final class ArgoTextReaderController: UIViewController {
     }
 
     private func setToolbar(visible: Bool, interactive: Bool, animated: Bool) {
+        let wasInteractive = toolbarInteractive
         toolbarVisible = visible
         toolbarInteractive = visible && interactive
         hideTimer?.invalidate()
@@ -340,8 +341,13 @@ final class ArgoTextReaderController: UIViewController {
             apply()
         }
 
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
+        // 이미 도구 모음 안에 있는데 또 포커스를 요청하면, 엔진이
+        // preferredFocusEnvironments 를 다시 읽어 **첫 버튼**으로 되돌린다.
+        // 글자 크기를 누를 때마다 커서가 맨 앞으로 튀던 이유다.
+        if toolbarInteractive != wasInteractive {
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
+        }
 
         if visible {
             let wait: TimeInterval = toolbarInteractive ? 12 : 5

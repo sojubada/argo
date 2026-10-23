@@ -295,7 +295,7 @@ final class ArgoPDFReaderController: UIViewController {
         }
 
         let numbers = pagesForCurrentView()
-        var pages: [(page: CGPDFPage, box: CGRect, boxKind: CGPDFBox, rotation: Int)] = []
+        var pages: [(page: CGPDFPage, box: CGRect, raw: CGRect, boxKind: CGPDFBox, rotation: Int)] = []
         for n in numbers {
             guard let page = doc.page(at: n) else { continue }
             // cropBox 가 비어 있는 PDF 가 있다. 그때는 mediaBox 로 물러선다.
@@ -310,7 +310,7 @@ final class ArgoPDFReaderController: UIViewController {
             let rotation = Int(page.rotationAngle)
             let turned = (rotation / 90) % 2 != 0
             let shown = turned ? CGRect(x: 0, y: 0, width: box.height, height: box.width) : box
-            pages.append((page, shown, kind, rotation))
+            pages.append((page, shown, box, kind, rotation))
         }
         guard !pages.isEmpty else {
             showPageProblem("이 쪽의 크기를 읽을 수 없습니다.")
@@ -360,11 +360,27 @@ final class ArgoPDFReaderController: UIViewController {
                 // 이 쪽의 자리로 원점을 옮긴 뒤, 그 안에서 뒤집는다.
                 ctx.translateBy(x: slot.minX, y: slot.maxY)
                 ctx.scaleBy(x: 1, y: -1)
-                ctx.concatenate(item.page.getDrawingTransform(
-                    item.boxKind,
-                    rect: CGRect(origin: .zero, size: slot.size),
-                    rotate: 0,
-                    preserveAspectRatio: true))
+
+                // 배율은 직접 구한다.
+                //
+                // getDrawingTransform 은 쪽이 rect 보다 **크면 줄이지만 작으면
+                // 키우지 않는다.** 슬라이드 PDF 는 보통 960×540 pt 라서,
+                // 1920×1080 에 그리면 원래 크기 그대로 가운데 놓이고 둘레가
+                // 흰 종이로 남는다 — '화면에 안 꽉 찬다'의 정체다.
+                // 두 쪽 모드에서는 칸이 960×540 이라 우연히 맞아떨어져
+                // 그때만 꽉 차 보였다.
+                let fit = min(slot.width / item.box.width,
+                              slot.height / item.box.height)
+                ctx.translateBy(x: slot.width / 2, y: slot.height / 2)
+                ctx.scaleBy(x: fit, y: fit)
+                // /Rotate 가 걸린 쪽은 여기서 돌린다. 가운데를 축으로 돌려야
+                // 돌린 뒤에도 칸 가운데에 남는다.
+                if item.rotation != 0 {
+                    ctx.rotate(by: -CGFloat(item.rotation) * .pi / 180)
+                }
+                // 원본 박스의 가운데를 원점에 맞춘다. cropBox 는 원점이
+                // (0,0) 이 아닐 수 있다.
+                ctx.translateBy(x: -item.raw.midX, y: -item.raw.midY)
                 ctx.drawPDFPage(item.page)
                 ctx.restoreGState()
                 x += w
@@ -477,8 +493,11 @@ final class ArgoPDFReaderController: UIViewController {
         let maxOffset = max(0, h - available.height)
         scrollOffset = min(max(0, scrollOffset), maxOffset)
 
+        // 쪽이 화면보다 짧으면 가운데로. 두 쪽 펼침면은 32:9 라 16:9 화면에서
+        // 위아래가 남을 수밖에 없는데, 위에 붙여 두면 아래만 텅 비어 보인다.
+        let y = h < available.height ? (available.height - h) / 2 : -scrollOffset
         pageImage.frame = CGRect(x: (available.width - w) / 2,
-                                 y: -scrollOffset,
+                                 y: y,
                                  width: w, height: h)
         ArgoDiag.log("layoutPage", "available=\(available) image=\(pageImage.image?.size ?? .zero) "
                                  + "renderedH=\(renderedPageHeight) offset=\(scrollOffset) "
@@ -635,6 +654,7 @@ final class ArgoPDFReaderController: UIViewController {
     }
 
     private func setToolbar(visible: Bool, interactive: Bool, animated: Bool) {
+        let wasInteractive = toolbarInteractive
         toolbarVisible = visible
         toolbarInteractive = visible && interactive
         hideTimer?.invalidate()
@@ -662,8 +682,13 @@ final class ArgoPDFReaderController: UIViewController {
             apply()
         }
 
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
+        // 이미 도구 모음 안에 있는데 또 포커스를 요청하면, 엔진이
+        // preferredFocusEnvironments 를 다시 읽어 **첫 버튼**으로 되돌린다.
+        // 글자 크기를 누를 때마다 커서가 맨 앞으로 튀던 이유다.
+        if toolbarInteractive != wasInteractive {
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
+        }
 
         if visible {
             let wait: TimeInterval = toolbarInteractive ? 12 : 5
