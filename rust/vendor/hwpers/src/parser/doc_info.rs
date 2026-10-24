@@ -30,37 +30,58 @@ impl DocInfoParser {
             };
 
             match HwpTag::from_u16(record.tag_id()) {
+                // 레코드 하나가 깨졌다고 그때까지 읽은 것을 버리지 않는다.
+                //
+                // 전에는 물음표 하나가 글꼴·글자모양·스타일을 통째로
+                // 날렸다. 모양표가 아예 없으면 기본 모양으로 떨어지는데,
+                // 절반이라도 살리는 쪽이 글씨체가 덜 어긋난다.
                 Some(HwpTag::DocumentProperties) => {
-                    doc_info.properties = Some(DocumentProperties::from_record(&record)?);
+                    doc_info.properties = DocumentProperties::from_record(&record).ok();
                 }
                 Some(HwpTag::FaceName) => {
-                    doc_info.face_names.push(FaceName::from_record(&record)?);
+                    if let Ok(value) = FaceName::from_record(&record) {
+                        doc_info.face_names.push(value);
+                    }
                 }
                 Some(HwpTag::CharShape) => {
-                    doc_info.char_shapes.push(CharShape::from_record(&record)?);
+                    if let Ok(value) = CharShape::from_record(&record) {
+                        doc_info.char_shapes.push(value);
+                    }
                 }
                 Some(HwpTag::ParaShape) => {
-                    doc_info.para_shapes.push(ParaShape::from_record(&record)?);
+                    if let Ok(value) = ParaShape::from_record(&record) {
+                        doc_info.para_shapes.push(value);
+                    }
                 }
                 Some(HwpTag::Style) => {
-                    doc_info.styles.push(Style::from_record(&record)?);
+                    if let Ok(value) = Style::from_record(&record) {
+                        doc_info.styles.push(value);
+                    }
                 }
                 Some(HwpTag::BorderFill) => {
-                    doc_info
-                        .border_fills
-                        .push(BorderFill::from_record(&record)?);
+                    if let Ok(value) = BorderFill::from_record(&record) {
+                        doc_info.border_fills.push(value);
+                    }
                 }
                 Some(HwpTag::TabDef) => {
-                    doc_info.tab_defs.push(TabDef::from_record(&record)?);
+                    if let Ok(value) = TabDef::from_record(&record) {
+                        doc_info.tab_defs.push(value);
+                    }
                 }
                 Some(HwpTag::Numbering) => {
-                    doc_info.numberings.push(Numbering::from_record(&record)?);
+                    if let Ok(value) = Numbering::from_record(&record) {
+                        doc_info.numberings.push(value);
+                    }
                 }
                 Some(HwpTag::Bullet) => {
-                    doc_info.bullets.push(Bullet::from_record(&record)?);
+                    if let Ok(value) = Bullet::from_record(&record) {
+                        doc_info.bullets.push(value);
+                    }
                 }
                 Some(HwpTag::BinData) => {
-                    doc_info.bin_data.push(BinData::from_record(&record)?);
+                    if let Ok(value) = BinData::from_record(&record) {
+                        doc_info.bin_data.push(value);
+                    }
                 }
                 _ => {
                     // Skip unknown or unimplemented tags

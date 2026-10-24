@@ -490,6 +490,7 @@ fn read_shape_tree(
         elements,
         include_placeholders,
         placeholder_defaults,
+        None,
     )
 }
 
@@ -503,6 +504,7 @@ fn read_shape_children(
     elements: &mut Vec<PptxElement>,
     include_placeholders: bool,
     placeholder_defaults: Option<&HashMap<PlaceholderKey, PlaceholderStyle>>,
+    group_fill: Option<PdfColor>,
 ) -> Result<()> {
     for child_node in container.children().filter(Node::is_element) {
         let placeholder = child_node.descendants().any(|node| is_element(node, "ph"));
@@ -516,6 +518,7 @@ fn read_shape_children(
                 coordinate_map,
                 elements,
                 placeholder_defaults,
+                group_fill,
             ),
             "cxnSp" => read_connector(child_node, theme, coordinate_map, elements),
             "pic" => read_picture(archive, child_node, relationships, coordinate_map, elements)?,
@@ -528,10 +531,20 @@ fn read_shape_children(
                 elements,
             )?,
             "grpSp" => {
-                let group_map = child(child_node, "grpSpPr")
+                let properties = child(child_node, "grpSpPr");
+                let group_map = properties
                     .and_then(|node| child(node, "xfrm"))
                     .map(|transform| create_group_map(transform, coordinate_map))
                     .unwrap_or(coordinate_map);
+                // grpFill 은 "그룹에서 물려받는다"는 뜻이다. 그 그룹의 색을
+                // 들고 내려가야 물려받을 것이 있다 — 이 덱만 해도 147개
+                // 도형이 grpFill 이고, 그 중 다수의 그룹이 실제 색을 갖는다.
+                let inherited_fill = properties
+                    .filter(|node| has_any_fill(*node))
+                    .and_then(|node| {
+                        read_fill(node, theme).or_else(|| read_complex_fill(node, theme))
+                    })
+                    .or(group_fill);
                 read_shape_children(
                     archive,
                     child_node,
@@ -541,6 +554,7 @@ fn read_shape_children(
                     elements,
                     include_placeholders,
                     placeholder_defaults,
+                    inherited_fill,
                 )?;
             }
             _ => {}
@@ -555,6 +569,7 @@ fn read_shape(
     coordinate_map: CoordinateMap,
     elements: &mut Vec<PptxElement>,
     placeholder_defaults: Option<&HashMap<PlaceholderKey, PlaceholderStyle>>,
+    group_fill: Option<PdfColor>,
 ) {
     let inherited = read_placeholder_key(shape).and_then(|key| {
         placeholder_defaults.and_then(|defaults| {
@@ -615,10 +630,12 @@ fn read_shape(
     }
     let fill = if fill_stated {
         // 적혀 있으니 그대로 따른다. 단색이면 그 색, 그라데이션·무늬면
-        // 대표색, noFill·그림·그룹상속이면 비운다.
-        shape_properties.and_then(|node| {
-            read_fill(node, theme).or_else(|| read_complex_fill(node, theme))
-        })
+        // 대표색, 그룹상속이면 그 그룹의 색, noFill·그림이면 비운다.
+        let inherits_group = shape_properties
+            .is_some_and(|node| child(node, "grpFill").is_some());
+        shape_properties
+            .and_then(|node| read_fill(node, theme).or_else(|| read_complex_fill(node, theme)))
+            .or(if inherits_group { group_fill } else { None })
     } else {
         read_style_fill(shape, theme).or_else(|| inherited.and_then(|style| style.fill))
     };
@@ -658,6 +675,60 @@ fn read_shape(
     if autoshape && !anchor_given {
         text_body.anchor = VerticalAnchor::Middle;
     }
+    // 그림으로 채운 도형은 색 하나로 줄일 수 없다. 그렇다고 아무것도 안
+    // 그리면 자리까지 사라지므로, 테두리만 옅게 그어 거기 무엇이 있었다고
+    // 알린다. 이 덱에서는 두 개뿐이지만 사진 한 장이 슬라이드의 전부인
+    // 자료도 있다.
+    let picture_fill = shape_properties
+        .is_some_and(|node| child(node, "blipFill").is_some())
+        && fill.is_none();
+    if picture_fill && paragraphs.is_empty() {
+        let frame = PptxOutline {
+            color: PdfColor {
+                r: 0.72,
+                g: 0.72,
+                b: 0.72,
+            },
+            width: 1.0,
+            dash_pattern: vec![3.0, 3.0],
+        };
+        elements.push(PptxElement::Shape(PptxShape {
+            shape_type: shape_type.clone(),
+            bounds,
+            fill: None,
+            outline: Some(frame),
+            paragraphs: vec![PptxParagraph {
+                runs: vec![PptxRun {
+                    text: "그림".to_owned(),
+                    font_size: 10.0,
+                    color: PdfColor {
+                        r: 0.55,
+                        g: 0.55,
+                        b: 0.55,
+                    },
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    font_name: None,
+                }],
+                alignment: TextAlignment::Center,
+                margin_left: 0.0,
+                indent: 0.0,
+                space_before: 0.0,
+                line_spacing: 1.0,
+            }],
+            text_body: PptxTextBody {
+                left_inset: 0.0,
+                top_inset: 0.0,
+                right_inset: 0.0,
+                bottom_inset: 0.0,
+                anchor: VerticalAnchor::Middle,
+            },
+            polygon: None,
+        }));
+        return;
+    }
+
     if fill.is_some() || outline.is_some() || !paragraphs.is_empty() {
         elements.push(PptxElement::Shape(PptxShape {
             shape_type,
@@ -958,7 +1029,7 @@ fn read_diagram(
         return Ok(());
     };
     for shape in shape_tree.children().filter(|node| is_element(*node, "sp")) {
-        read_shape(shape, theme, map, elements, None);
+        read_shape(shape, theme, map, elements, None, None);
     }
     Ok(())
 }
@@ -3047,6 +3118,8 @@ enum ChartKind {
     Column,
     Bar,
     Line,
+    /// 면을 칠하는 꺾은선. 누적이면 계열마다 띠가 된다.
+    Area,
     Pie,
     /// 그릴 줄 모르는 종류. 자리만 잡고 왜 비었는지 적는다.
     Unsupported,
@@ -3123,7 +3196,8 @@ fn read_chart(
                     _ => ChartKind::Column,
                 }
             }
-            "lineChart" | "line3DChart" | "areaChart" => ChartKind::Line,
+            "lineChart" | "line3DChart" => ChartKind::Line,
+            "areaChart" | "area3DChart" => ChartKind::Area,
             "pieChart" | "pie3DChart" | "doughnutChart" => ChartKind::Pie,
             // 분산형은 x 도 숫자라 범주 축이 없다. 선으로 그리면 점의 가로
             // 자리가 거짓이 되므로, 그리지 않고 그렇다고 적는다.
@@ -3507,6 +3581,11 @@ fn draw_chart(
     for (series_index, one) in series.iter().enumerate() {
         let color = series_color(one, series_index, theme);
         let mut previous: Option<(f32, f32)> = None;
+        // 영역 차트는 윗변과 밑변을 모아 두었다가 띠 하나로 칠한다.
+        // 선만 그으면 누적의 둘째 계열부터 선의 높이를 그 계열의 값으로
+        // 잘못 읽게 된다 — 실제로는 아래 계열까지 더한 값이다.
+        let mut tops: Vec<(f32, f32)> = Vec::new();
+        let mut bases: Vec<(f32, f32)> = Vec::new();
         for (category_index, raw) in one.values.iter().enumerate() {
             let value = if grouping == ChartGrouping::PercentStacked {
                 match totals.get(category_index) {
@@ -3540,6 +3619,11 @@ fn draw_chart(
                         push_line_wide(px, py, x, y, color, 1.8, elements);
                     }
                     previous = Some((x, y));
+                }
+                ChartKind::Area => {
+                    let x = plot.x + slot * (category_index as f32 + 0.5);
+                    tops.push((x, plot.y + plot.height * (1.0 - fraction)));
+                    bases.push((x, plot.y + plot.height * (1.0 - base_fraction)));
                 }
                 ChartKind::Bar => {
                     let start = plot.x
@@ -3578,6 +3662,24 @@ fn draw_chart(
                         elements,
                     );
                 }
+            }
+        }
+
+        if kind == ChartKind::Area && tops.len() >= 2 {
+            let mut polygon = tops.clone();
+            polygon.extend(bases.iter().rev().copied());
+            elements.push(PptxElement::Shape(PptxShape {
+                shape_type: "rect".to_owned(),
+                bounds: plot,
+                fill: Some(color),
+                outline: None,
+                paragraphs: Vec::new(),
+                text_body: PptxTextBody::default(),
+                polygon: Some(polygon),
+            }));
+            // 윗변을 한 번 더 그어 띠끼리 맞닿는 자리를 분명히 한다.
+            for pair in tops.windows(2) {
+                push_line_wide(pair[0].0, pair[0].1, pair[1].0, pair[1].1, color, 1.2, elements);
             }
         }
     }
