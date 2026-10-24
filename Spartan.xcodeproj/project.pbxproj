@@ -683,8 +683,8 @@
 				166490773A8A4A65B00AC81A /* WebDocumentSwiftView.swift in Sources */,
 				603B7A48642245CFBC4262C2 /* WebDocumentShell.m in Sources */,
 				2E8144A5E07049BB8E563C6B /* WebDocumentView.m in Sources */,
-				73F99E94983D4A238E325EDE /* MediaFolderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BDC0C4490C74D318E64167B /* MediaFolderProbe.swift */; };
-		A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */,
+				73F99E94983D4A238E325EDE /* MediaFolderProbe.swift in Sources */,
+				A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */,
 				FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */,
 				F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */,
 				FB208380C5EE4EBE8D3F154B /* WebDocProbeView.swift in Sources */,
