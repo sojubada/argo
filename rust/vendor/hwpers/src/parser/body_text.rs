@@ -5,6 +5,7 @@ use crate::model::{
     CtrlHeader, ListHeader, PageDef, ParaCharShape, ParaLineSeg, ParaText, Paragraph, Section,
 };
 use crate::parser::record::{HwpTag, Record};
+use std::collections::BTreeMap;
 use crate::reader::StreamReader;
 use crate::utils::compression::decompress_stream;
 
@@ -45,6 +46,9 @@ impl BodyTextParser {
         let mut section = Section::default();
         let mut current: Option<Paragraph> = None;
         let mut open_tables: Vec<OpenTable> = Vec::new();
+        // 그냥 지나친 레코드를 세어 둔다. 표가 안 보일 때 우리가 무엇을
+        // 안 보고 지나쳤는지 로그로 바로 알 수 있어야 한다.
+        let mut skipped: BTreeMap<u16, usize> = BTreeMap::new();
 
         while reader.remaining() >= 4 {
             let record = match Record::parse(&mut reader) {
@@ -138,7 +142,9 @@ impl BodyTextParser {
                         para.list_header = ListHeader::from_record(&record).ok();
                     }
                 }
-                _ => {}
+                _ => {
+                    *skipped.entry(record.tag_id()).or_insert(0) += 1;
+                }
             }
         }
 
@@ -150,6 +156,7 @@ impl BodyTextParser {
 
         Ok(BodyText {
             sections: vec![section],
+            skipped,
         })
     }
 }
@@ -186,6 +193,8 @@ fn close_table(
 #[derive(Debug, Default)]
 pub struct BodyText {
     pub sections: Vec<Section>,
+    /// 다루지 않고 지나친 레코드 태그와 그 개수.
+    pub skipped: BTreeMap<u16, usize>,
 }
 
 impl BodyText {

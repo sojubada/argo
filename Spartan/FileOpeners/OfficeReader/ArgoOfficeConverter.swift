@@ -29,6 +29,23 @@ enum ArgoOfficeConverter {
     /// 쪽을 시트 폭에 맞춰 늘리고 행만 넘깁니다.
     static let handled: Set<String> = ["docx", "pptx", "xlsx", "hwp", "hwpx"]
 
+    /// 직전 변환이 사용자에게 알릴 것을 남겼으면 그 한 줄. 없으면 nil.
+    ///
+    /// 레이아웃이 요청대로 못 간 경우에만 채워집니다 — 넓은 시트를 쪽으로
+    /// 나눴다든지. 조용히 다르게 그리면 문서가 깨진 것으로 보입니다.
+    private(set) static var lastUserNotice: String?
+
+    private static func readUserNotice() -> String? {
+        var scratch = [UInt8](repeating: 0, count: 512)
+        let n = scratch.withUnsafeMutableBufferPointer { raw -> Int in
+            guard let base = raw.baseAddress else { return 0 }
+            return argoconv_last_user_notice(base, raw.count)
+        }
+        guard n > 0, let text = String(bytes: scratch[0..<n], encoding: .utf8),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
     static func handles(_ path: String) -> Bool {
         handled.contains((path as NSString).pathExtension.lowercased())
     }
@@ -124,6 +141,8 @@ enum ArgoOfficeConverter {
             throw Failure.conversionFailed(code)
         }
         defer { argoconv_free(buffer, outLen) }
+
+        lastUserNotice = readUserNotice()
 
         let pdf = Data(bytes: buffer, count: outLen)
         let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension

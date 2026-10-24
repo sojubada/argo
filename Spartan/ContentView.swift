@@ -1443,6 +1443,8 @@ struct ContentView: View {
                 }
                 let vc = ArgoPDFReaderController()
                 vc.documentPath = pdf
+                // 변환기가 요청대로 못 간 것이 있으면 그 줄을 같이 넘깁니다.
+                vc.notice = ArgoOfficeConverter.lastUserNotice
                 vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
                 presentReader(vc)
             }

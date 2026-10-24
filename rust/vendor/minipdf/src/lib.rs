@@ -77,6 +77,37 @@ pub struct RegisteredFont {
 
 static REGISTERED_FONTS: OnceLock<Mutex<Vec<RegisteredFont>>> = OnceLock::new();
 
+/// 변환 중에 사용자에게 알릴 만한 일이 있었으면 여기에 쌓는다.
+///
+/// 레이아웃이 요청대로 못 간 경우가 대상이다. 조용히 다르게 그리면 문서가
+/// 깨진 것으로 보인다.
+static CONVERSION_NOTICES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+pub(crate) fn notice(message: String) {
+    let notices = CONVERSION_NOTICES.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut list) = notices.lock() {
+        if !list.contains(&message) {
+            list.push(message);
+        }
+    }
+}
+
+/// 직전 변환이 남긴 알림들. 변환을 새로 시작하면 비워진다.
+pub fn conversion_notices() -> Vec<String> {
+    CONVERSION_NOTICES
+        .get()
+        .and_then(|notices| notices.lock().ok().map(|list| list.clone()))
+        .unwrap_or_default()
+}
+
+fn clear_notices() {
+    if let Some(notices) = CONVERSION_NOTICES.get() {
+        if let Ok(mut list) = notices.lock() {
+            list.clear();
+        }
+    }
+}
+
 pub fn register_font(name: impl Into<String>, font_data: impl Into<Vec<u8>>) {
     let fonts = REGISTERED_FONTS.get_or_init(|| Mutex::new(Vec::new()));
     let mut fonts = fonts.lock().expect("font registry lock poisoned");
@@ -146,6 +177,7 @@ pub fn convert_bytes_to_pdf_with_options(
     input: &[u8],
     options: &ConversionOptions,
 ) -> Result<Vec<u8>> {
+    clear_notices();
     match detect_office_format(input)? {
         OfficeFormat::Docx => docx::convert_docx_bytes(input, options),
         OfficeFormat::Xlsx => xlsx::convert_xlsx_bytes(input, options),

@@ -31,6 +31,9 @@ size_t argoconv_last_error(uint8_t *buffer, size_t cap);
 /// 마지막 변환이 남긴 한 줄(무엇을 봤는지)을 담는다.
 size_t argoconv_last_note(uint8_t *buffer, size_t cap);
 
+/// 사용자에게 보여 줄 알림을 담는다. 없으면 0.
+size_t argoconv_last_user_notice(uint8_t *buffer, size_t cap);
+
 /// argoconv_to_pdf 가 준 버퍼를 돌려준다.
 void argoconv_free(uint8_t *ptr, size_t len);
 

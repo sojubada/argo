@@ -122,8 +122,31 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
         })
         .unwrap_or_else(|| ", 글자 요소 없음".to_owned());
 
+    // 그냥 지나친 레코드도 적는다. 표가 안 보일 때 우리가 무엇을 못 보고
+    // 지나쳤는지 태그 번호로 바로 짚을 수 있어야 한다.
+    let mut skipped: std::collections::BTreeMap<u16, usize> = Default::default();
+    for body in &document.body_texts {
+        for (tag, count) in &body.skipped {
+            *skipped.entry(*tag).or_insert(0) += count;
+        }
+    }
+    let skipped_text = if skipped.is_empty() {
+        String::new()
+    } else {
+        let mut worst: Vec<_> = skipped.iter().collect();
+        worst.sort_by(|a, b| b.1.cmp(a.1));
+        let list = worst
+            .iter()
+            .take(5)
+            .map(|(tag, count)| format!("0x{tag:02X}×{count}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(", 지나친 레코드 {list}")
+    };
+
     crate::note(format!(
-        "hwp 문단 {paragraphs}개, 표 {tables}개, 칸 {cells}개, 쪽 {}장, 그릴 것 {elements}개{first}",
+        "hwp 문단 {paragraphs}개, 표 {tables}개, 칸 {cells}개, 쪽 {}장, \
+         그릴 것 {elements}개{first}{skipped_text}",
         rendered.pages.len()
     ));
     if rendered.pages.is_empty() {

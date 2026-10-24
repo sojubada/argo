@@ -569,6 +569,7 @@ impl HwpxWriter {
                     section_def: None,
                     page_def: None,
                 }],
+                skipped: Default::default(),
             });
         } else if let Some(body) = self.document.body_texts.first_mut() {
             if let Some(section) = body.sections.first_mut() {

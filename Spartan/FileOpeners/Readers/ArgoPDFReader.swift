@@ -119,6 +119,12 @@ final class ArgoPDFReaderController: UIViewController {
     var documentPath: String = ""
     var onClose: (() -> Void)?
 
+    /// 문서를 여는 순간 위쪽에 잠깐 띄울 한 줄.
+    ///
+    /// 변환기가 요청대로 못 간 경우에만 들어옵니다 — 넓은 시트를 쪽으로
+    /// 나눴다든지. 조용히 다르게 그리면 문서가 깨진 것으로 보입니다.
+    var notice: String?
+
     private var document: CGPDFDocument?
     private var pageCount = 0
     private var currentPage = 1
@@ -152,6 +158,7 @@ final class ArgoPDFReaderController: UIViewController {
 
     private var loadingView: UIView?
     private var pageProblemLabel: UILabel?
+    private var noticeLabel: UILabel?
 
     // MARK: 화면
 
@@ -239,6 +246,7 @@ final class ArgoPDFReaderController: UIViewController {
                              + "focused=\(canvas.isFocused) window=\(view.window != nil)")
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
+        showNoticeIfAny()
     }
 
     override func viewDidLayoutSubviews() {
@@ -467,6 +475,42 @@ final class ArgoPDFReaderController: UIViewController {
     }
 
     /// 쪽이 비었을 때 겹쳐 보여 주는 쪽지. 쪽을 넘기면 사라진다.
+    /// 변환기가 남긴 알림을 위쪽에 잠깐 띄웁니다. 글은 가리지 않습니다.
+    private func showNoticeIfAny() {
+        guard let notice, !notice.isEmpty, noticeLabel == nil else { return }
+        ArgoDiag.log("notice", notice)
+
+        let label = UILabel()
+        label.text = "  " + notice + "  "
+        label.numberOfLines = 2
+        label.textAlignment = .center
+        label.font = ArgoTheme.fontBody()
+        label.textColor = ArgoTheme.textPrimary()
+        label.backgroundColor = ArgoTheme.surface()
+        label.layer.cornerRadius = ArgoTheme.cornerRadius()
+        label.layer.masksToBounds = true
+        label.alpha = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
+                                       constant: 24),
+            label.widthAnchor.constraint(lessThanOrEqualToConstant: 1200),
+            label.heightAnchor.constraint(greaterThanOrEqualToConstant: 64),
+        ])
+        noticeLabel = label
+        view.bringSubviewToFront(label)
+
+        UIView.animate(withDuration: 0.25) { label.alpha = 1 }
+        // 여섯 초면 읽기에 넉넉하고, 그 뒤로는 길을 막지 않습니다.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak label] in
+            UIView.animate(withDuration: 0.4,
+                           animations: { label?.alpha = 0 },
+                           completion: { _ in label?.removeFromSuperview() })
+        }
+    }
+
     private func showPageProblem(_ message: String) {
         if pageProblemLabel == nil {
             let label = UILabel()

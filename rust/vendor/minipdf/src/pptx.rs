@@ -588,13 +588,15 @@ fn read_shape(
     // 둘을 같게 보면 도형 모양표(style/fillRef)의 색으로 되돌아가 버린다.
     // 실제 덱에서 바로 이 일이 났다 — 테두리 없는 투명 바탕에 주황 글씨로
     // 쓴 제목이, 주황으로 꽉 칠한 막대가 되어 글자가 그 안에 묻혔다.
-    let no_fill = shape_properties.is_some_and(|node| child(node, "noFill").is_some());
-    let no_outline = shape_properties
+    let fill_stated = shape_properties.is_some_and(has_any_fill);
+    let outline_stated = shape_properties
         .and_then(|node| child(node, "ln"))
-        .is_some_and(|node| child(node, "noFill").is_some());
+        .is_some_and(has_any_fill);
 
-    let outline = if no_outline {
-        None
+    let outline = if outline_stated {
+        shape_properties
+            .and_then(|node| child(node, "ln"))
+            .and_then(|node| read_outline(node, theme))
     } else {
         shape_properties
             .and_then(|node| child(node, "ln"))
@@ -611,13 +613,14 @@ fn read_shape(
         );
         return;
     }
-    let fill = if no_fill {
-        None
+    let fill = if fill_stated {
+        // 적혀 있으니 그대로 따른다. 단색이면 그 색, 그라데이션·무늬면
+        // 대표색, noFill·그림·그룹상속이면 비운다.
+        shape_properties.and_then(|node| {
+            read_fill(node, theme).or_else(|| read_complex_fill(node, theme))
+        })
     } else {
-        shape_properties
-            .and_then(|node| read_fill(node, theme))
-            .or_else(|| read_style_fill(shape, theme))
-            .or_else(|| inherited.and_then(|style| style.fill))
+        read_style_fill(shape, theme).or_else(|| inherited.and_then(|style| style.fill))
     };
     // 글상자도 자리표시자도 아닌 도형은 파워포인트가 글을 한가운데에
     // 놓는다. 이걸 빼면 네모 왼쪽 위에 글이 붙어 도형 밖으로 삐져나온
@@ -1431,6 +1434,43 @@ fn default_outline() -> PptxOutline {
         width: 1.0,
         dash_pattern: Vec::new(),
     }
+}
+
+/// 채우기가 적혀 있기는 한가 — 종류를 가리지 않는다.
+///
+/// 적혀 있으면 도형 모양표(style/fillRef)로 되돌아가면 안 된다. noFill 에서
+/// 겪은 것과 같은 일이 gradFill·pattFill·blipFill·grpFill 에서도 그대로
+/// 난다: 그라데이션 자리에 엉뚱한 테마 단색이 들어차 글자를 덮는다.
+fn has_any_fill(node: Node<'_, '_>) -> bool {
+    node.children().any(|child_node| {
+        matches!(
+            child_node.tag_name().name(),
+            "noFill" | "solidFill" | "gradFill" | "pattFill" | "blipFill" | "grpFill"
+        )
+    })
+}
+
+/// 단색이 아닌 채우기를 색 하나로 줄인다.
+///
+/// 그라데이션은 첫 정지점, 무늬는 앞 색을 쓴다 — 실제보다 단조롭지만 자리와
+/// 색감은 남는다. 그림 채우기와 그룹 상속은 색을 지어낼 수 없으므로 비운다.
+/// 비우는 쪽이 글자를 덮는 것보다 낫다.
+fn read_complex_fill(
+    node: Node<'_, '_>,
+    theme: &HashMap<String, PdfColor>,
+) -> Option<PdfColor> {
+    if let Some(gradient) = child(node, "gradFill") {
+        return child(gradient, "gsLst")
+            .and_then(|list| list.children().find(|n| is_element(*n, "gs")))
+            .and_then(|stop| stop.children().find(Node::is_element))
+            .and_then(|color| read_color_node(color, theme));
+    }
+    if let Some(pattern) = child(node, "pattFill") {
+        return child(pattern, "fgClr")
+            .and_then(|node| node.children().find(Node::is_element))
+            .and_then(|color| read_color_node(color, theme));
+    }
+    None
 }
 
 fn read_fill(node: Node<'_, '_>, theme: &HashMap<String, PdfColor>) -> Option<PdfColor> {
@@ -3008,6 +3048,19 @@ enum ChartKind {
     Bar,
     Line,
     Pie,
+    /// 그릴 줄 모르는 종류. 자리만 잡고 왜 비었는지 적는다.
+    Unsupported,
+}
+
+/// 막대를 어떻게 쌓는가.
+///
+/// 누적을 묶은 막대로 그리면 숫자의 뜻이 바뀐다 — 합계를 보여 주려고 만든
+/// 그림이 비교 그림이 된다. 이 덱만 해도 막대 57개 중 35개가 누적이다.
+#[derive(Clone, Copy, PartialEq)]
+enum ChartGrouping {
+    Clustered,
+    Stacked,
+    PercentStacked,
 }
 
 const CHART_AXIS: PdfColor = PdfColor {
@@ -3070,8 +3123,12 @@ fn read_chart(
                     _ => ChartKind::Column,
                 }
             }
-            "lineChart" | "line3DChart" | "areaChart" | "scatterChart" => ChartKind::Line,
+            "lineChart" | "line3DChart" | "areaChart" => ChartKind::Line,
             "pieChart" | "pie3DChart" | "doughnutChart" => ChartKind::Pie,
+            // 분산형은 x 도 숫자라 범주 축이 없다. 선으로 그리면 점의 가로
+            // 자리가 거짓이 되므로, 그리지 않고 그렇다고 적는다.
+            "scatterChart" | "bubbleChart" | "radarChart" | "stockChart"
+            | "surfaceChart" | "ofPieChart" => ChartKind::Unsupported,
             _ => return None,
         };
         Some((kind, node))
@@ -3079,6 +3136,36 @@ fn read_chart(
         return Ok(false);
     };
     let (kind, plot_node) = plot;
+    let grouping = match child(plot_node, "grouping").and_then(|node| node.attribute("val")) {
+        Some("stacked") => ChartGrouping::Stacked,
+        Some("percentStacked") => ChartGrouping::PercentStacked,
+        _ => ChartGrouping::Clustered,
+    };
+    let kind_label = plot_node.tag_name().name().to_owned();
+
+    let title = if document
+        .descendants()
+        .any(|node| is_element(node, "autoTitleDeleted") && node.attribute("val") == Some("1"))
+    {
+        None
+    } else {
+        document
+            .descendants()
+            .find(|node| is_element(*node, "title"))
+            .map(collect_text)
+            .filter(|text| !text.is_empty())
+    };
+    let has_legend = document
+        .descendants()
+        .any(|node| is_element(node, "legend"));
+
+    // 미지원 종류는 계열을 읽기 전에 끝낸다. 분산형은 c:val 이 아니라
+    // c:xVal/c:yVal 이라 계열이 비어 보이고, 그대로 두면 아무것도 안 그린 채
+    // 조용히 돌아가 슬라이드 한가운데가 빈다.
+    if kind == ChartKind::Unsupported {
+        draw_unsupported_chart(bounds, title.as_deref(), &kind_label, elements);
+        return Ok(true);
+    }
 
     let mut categories: Vec<String> = Vec::new();
     let mut series = Vec::new();
@@ -3113,24 +3200,10 @@ fn read_chart(
             .collect();
     }
 
-    let title = if document
-        .descendants()
-        .any(|node| is_element(node, "autoTitleDeleted") && node.attribute("val") == Some("1"))
-    {
-        None
-    } else {
-        document
-            .descendants()
-            .find(|node| is_element(*node, "title"))
-            .map(collect_text)
-            .filter(|text| !text.is_empty())
-    };
-    let has_legend = document
-        .descendants()
-        .any(|node| is_element(node, "legend"));
 
     draw_chart(
         kind,
+        grouping,
         bounds,
         title.as_deref(),
         has_legend,
@@ -3215,8 +3288,58 @@ fn series_color(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// 그릴 줄 모르는 차트는 자리만 잡고 왜 비었는지 적는다.
+///
+/// 엉뚱한 모양으로 그리는 것보다 낫다 — 숫자를 잘못 보여 주는 것이 뷰어가
+/// 할 수 있는 가장 나쁜 일이다.
+fn draw_unsupported_chart(
+    bounds: PptxRect,
+    title: Option<&str>,
+    kind: &str,
+    elements: &mut Vec<PptxElement>,
+) {
+    let frame = PdfColor {
+        r: 0.78,
+        g: 0.78,
+        b: 0.78,
+    };
+    for (start, end) in [
+        ((bounds.x, bounds.y), (bounds.x + bounds.width, bounds.y)),
+        (
+            (bounds.x + bounds.width, bounds.y),
+            (bounds.x + bounds.width, bounds.y + bounds.height),
+        ),
+        (
+            (bounds.x + bounds.width, bounds.y + bounds.height),
+            (bounds.x, bounds.y + bounds.height),
+        ),
+        ((bounds.x, bounds.y + bounds.height), (bounds.x, bounds.y)),
+    ] {
+        push_line(start.0, start.1, end.0, end.1, frame, elements);
+    }
+    let label = match title {
+        Some(title) if !title.is_empty() => format!("{title} — 그리지 못하는 차트 ({kind})"),
+        _ => format!("그리지 못하는 차트 ({kind})"),
+    };
+    push_label(
+        PptxRect {
+            x: bounds.x,
+            y: bounds.y + bounds.height / 2.0 - 8.0,
+            width: bounds.width,
+            height: 16.0,
+        },
+        &label,
+        9.0,
+        false,
+        TextAlignment::Center,
+        CHART_AXIS,
+        elements,
+    );
+}
+
 fn draw_chart(
     kind: ChartKind,
+    grouping: ChartGrouping,
     bounds: PptxRect,
     title: Option<&str>,
     has_legend: bool,
@@ -3306,8 +3429,9 @@ fn draw_chart(
         height: (bottom - top - category_band).max(1.0),
     };
 
-    let (low, high) = value_range(series);
+    let (low, high) = value_range(series, grouping);
     let ticks = 4;
+    let tick_step = (high - low) / ticks as f32;
 
     // 눈금선과 값.
     for step in 0..=ticks {
@@ -3322,7 +3446,7 @@ fn draw_chart(
                     width: 48.0,
                     height: category_band,
                 },
-                &format_tick(value),
+                &format_tick(value, tick_step),
                 8.0,
                 false,
                 TextAlignment::Center,
@@ -3339,7 +3463,7 @@ fn draw_chart(
                     width: gutter - 4.0,
                     height: 12.0,
                 },
-                &format_tick(value),
+                &format_tick(value, tick_step),
                 8.0,
                 false,
                 TextAlignment::Right,
@@ -3351,19 +3475,63 @@ fn draw_chart(
 
     let span = (high - low).max(f32::EPSILON);
     let zero_offset = ((0.0 - low) / span).clamp(0.0, 1.0);
-    let count = categories.len().max(series.iter().map(|s| s.values.len()).max().unwrap_or(1));
+    let count = categories
+        .len()
+        .max(series.iter().map(|s| s.values.len()).max().unwrap_or(1))
+        .max(1);
     let slot = if kind == ChartKind::Bar {
         plot.height / count as f32
     } else {
         plot.width / count as f32
     };
-    let thickness = (slot * 0.72 / series.len() as f32).max(1.0);
+    let stacked = grouping != ChartGrouping::Clustered;
+    // 누적이면 계열마다 자리를 나눠 갖지 않고 한 줄에 겹쳐 쌓는다.
+    let lanes = if stacked { 1 } else { series.len().max(1) };
+    let thickness = (slot * 0.72 / lanes as f32).max(1.0);
+
+    // 퍼센트 누적은 범주마다 합이 100이 되도록 고쳐 읽는다.
+    let totals: Vec<f32> = (0..count)
+        .map(|index| {
+            series
+                .iter()
+                .filter_map(|one| one.values.get(index))
+                .map(|value| value.abs())
+                .sum::<f32>()
+        })
+        .collect();
+
+    // 범주마다 지금까지 쌓은 높이 (위로, 아래로 따로).
+    let mut stack_up = vec![0.0_f32; count];
+    let mut stack_down = vec![0.0_f32; count];
 
     for (series_index, one) in series.iter().enumerate() {
         let color = series_color(one, series_index, theme);
         let mut previous: Option<(f32, f32)> = None;
-        for (category_index, value) in one.values.iter().enumerate() {
-            let fraction = ((value - low) / span).clamp(0.0, 1.0);
+        for (category_index, raw) in one.values.iter().enumerate() {
+            let value = if grouping == ChartGrouping::PercentStacked {
+                match totals.get(category_index) {
+                    Some(total) if *total > 0.0 => raw / total * 100.0,
+                    _ => 0.0,
+                }
+            } else {
+                *raw
+            };
+            let value = &value;
+            // 누적이면 이 토막은 앞까지 쌓인 데서 시작해 제 값만큼 더 간다.
+            let (base_value, tip_value) = if stacked {
+                let stack = if *value >= 0.0 {
+                    &mut stack_up[category_index.min(count - 1)]
+                } else {
+                    &mut stack_down[category_index.min(count - 1)]
+                };
+                let base = *stack;
+                *stack += *value;
+                (base, *stack)
+            } else {
+                (0.0_f32.max(low), *value)
+            };
+            let fraction = ((tip_value - low) / span).clamp(0.0, 1.0);
+            let base_fraction = ((base_value - low) / span).clamp(0.0, 1.0);
             match kind {
                 ChartKind::Line => {
                     let x = plot.x + slot * (category_index as f32 + 0.5);
@@ -3374,12 +3542,14 @@ fn draw_chart(
                     previous = Some((x, y));
                 }
                 ChartKind::Bar => {
-                    let start = plot.x + plot.width * zero_offset;
+                    let start = plot.x
+                        + plot.width * if stacked { base_fraction } else { zero_offset };
                     let end = plot.x + plot.width * fraction;
+                    let lane = if stacked { 0 } else { series_index };
                     let y = plot.y
                         + slot * category_index as f32
                         + slot * 0.14
-                        + thickness * series_index as f32;
+                        + thickness * lane as f32;
                     push_block(
                         start.min(end),
                         y,
@@ -3390,12 +3560,15 @@ fn draw_chart(
                     );
                 }
                 _ => {
-                    let base = plot.y + plot.height * (1.0 - zero_offset);
+                    let base = plot.y
+                        + plot.height
+                            * (1.0 - if stacked { base_fraction } else { zero_offset });
                     let tip = plot.y + plot.height * (1.0 - fraction);
+                    let lane = if stacked { 0 } else { series_index };
                     let x = plot.x
                         + slot * category_index as f32
                         + slot * 0.14
-                        + thickness * series_index as f32;
+                        + thickness * lane as f32;
                     push_block(
                         x,
                         base.min(tip),
@@ -3457,13 +3630,36 @@ fn draw_chart(
 }
 
 /// 0 을 포함하는 보기 좋은 값 범위.
-fn value_range(series: &[ChartSeries]) -> (f32, f32) {
+///
+/// 누적 막대는 범주마다 쌓인 합계가 축의 끝이다. 계열 하나의 최대값으로
+/// 잡으면 막대가 그림 밖으로 나간다.
+fn value_range(series: &[ChartSeries], grouping: ChartGrouping) -> (f32, f32) {
     let mut low = 0.0_f32;
     let mut high = 0.0_f32;
-    for one in series {
-        for value in &one.values {
-            low = low.min(*value);
-            high = high.max(*value);
+    match grouping {
+        ChartGrouping::PercentStacked => return (0.0, 100.0),
+        ChartGrouping::Stacked => {
+            let count = series.iter().map(|one| one.values.len()).max().unwrap_or(0);
+            for index in 0..count {
+                let (mut up, mut down) = (0.0_f32, 0.0_f32);
+                for one in series {
+                    match one.values.get(index) {
+                        Some(value) if *value >= 0.0 => up += value,
+                        Some(value) => down += value,
+                        None => {}
+                    }
+                }
+                high = high.max(up);
+                low = low.min(down);
+            }
+        }
+        ChartGrouping::Clustered => {
+            for one in series {
+                for value in &one.values {
+                    low = low.min(*value);
+                    high = high.max(*value);
+                }
+            }
         }
     }
     if (high - low).abs() < f32::EPSILON {
@@ -3498,12 +3694,23 @@ fn nice_step(rough: f32) -> f32 {
     step * magnitude
 }
 
-fn format_tick(value: f32) -> String {
-    if (value - value.round()).abs() < 0.001 {
-        format!("{}", value.round() as i64)
-    } else {
-        format!("{value:.1}")
+/// 눈금 숫자를 그 간격에 맞는 자릿수로 적는다.
+///
+/// 한 자리로 고정하면 0.25 가 0.2 로 적혀 눈금이 고르지 않아 보인다.
+fn format_tick(value: f32, step: f32) -> String {
+    if (value - value.round()).abs() < step.abs() * 0.001 {
+        return format!("{}", value.round() as i64);
     }
+    let digits = if step >= 1.0 {
+        0
+    } else if step >= 0.1 {
+        1
+    } else if step >= 0.01 {
+        2
+    } else {
+        3
+    };
+    format!("{value:.digits$}")
 }
 
 fn draw_legend(

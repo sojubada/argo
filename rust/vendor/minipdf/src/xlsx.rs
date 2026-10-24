@@ -3892,6 +3892,12 @@ fn render_sheet(
             + sheet.page_setup.margin_right;
         if wanted <= MAX_FIT_SHEET_WIDTH {
             page_size.width = page_size.width.max(wanted);
+        } else {
+            // 조용히 다르게 그리지 않는다. 쪽이 갈린 이유를 사용자가 알아야
+            // 문서가 깨진 것으로 오해하지 않는다.
+            crate::notice(
+                "시트가 너무 넓어 인쇄하듯 쪽을 나눠 보여 줍니다.".to_owned(),
+            );
         }
     }
     if sheet.page_setup.page_size_from_printer

@@ -55,6 +55,30 @@ use std::slice;
 /// 변환기가 무엇을 봤는지 한 줄. 기기 로그로 넘겨 눈으로 확인한다.
 pub(crate) static LAST_NOTE: Mutex<String> = Mutex::new(String::new());
 
+/// 사용자에게 보여 줄 알림. 로그용 note 와 달리 화면에 뜬다.
+///
+/// 레이아웃이 요청대로 못 간 경우에만 채운다 — 조용히 다르게 그리면
+/// 문서가 깨진 것으로 보인다.
+pub(crate) static LAST_USER_NOTICE: Mutex<String> = Mutex::new(String::new());
+
+/// 사용자에게 보여 줄 알림을 버퍼에 담는다. 없으면 0.
+///
+/// # Safety
+/// `buffer`/`cap` 은 쓸 수 있는 버퍼여야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_last_user_notice(buffer: *mut u8, cap: usize) -> usize {
+    if buffer.is_null() || cap == 0 {
+        return 0;
+    }
+    let Ok(line) = LAST_USER_NOTICE.lock() else {
+        return 0;
+    };
+    let bytes = line.as_bytes();
+    let n = bytes.len().min(cap);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer, n);
+    n
+}
+
 pub(crate) fn note(line: String) {
     if let Ok(mut slot) = LAST_NOTE.lock() {
         *slot = line;
@@ -65,6 +89,9 @@ pub(crate) fn note(line: String) {
 /// 남긴 줄이 이 문서의 것인 양 로그에 찍힌다.
 pub(crate) fn clear_note() {
     note(String::new());
+    if let Ok(mut slot) = LAST_USER_NOTICE.lock() {
+        slot.clear();
+    }
 }
 
 /// 마지막 변환이 남긴 한 줄을 버퍼에 담는다.
@@ -152,7 +179,22 @@ pub unsafe extern "C" fn argoconv_to_pdf(
         let Ok(pdf) = minipdf::convert_bytes_to_pdf_with_options(bytes, &options) else {
             return ARGOCONV_CONVERT_FAILED;
         };
-        note(format!("office {} 바이트 PDF", pdf.len()));
+        // 변환기가 사용자에게 알릴 일을 남겼으면 그대로 넘긴다.
+        let notices = minipdf::conversion_notices();
+        if !notices.is_empty() {
+            if let Ok(mut slot) = LAST_USER_NOTICE.lock() {
+                *slot = notices.join(" ");
+            }
+        }
+        note(format!(
+            "office {} 바이트 PDF{}",
+            pdf.len(),
+            if notices.is_empty() {
+                String::new()
+            } else {
+                format!(" — 알림: {}", notices.join(" "))
+            }
+        ));
         let mut boxed = pdf.into_boxed_slice();
         *out_size = boxed.len();
         *out_ptr = boxed.as_mut_ptr();
