@@ -1428,7 +1428,17 @@ struct ContentView: View {
         // 그 뷰어는 쪽 넘김·두 쪽·맞춤이 이미 제대로 돌아, 웹뷰에서 CSS 로
         // 수습하던 일들이 통째로 없어집니다.
         guard ArgoOfficeConverter.handles(path) else {
-            presentWebOfficeReader(path)
+            // 변환기가 안 맡는 형식만 아직 웹 뷰어로 갑니다.
+            //
+            // .xls 는 번들된 SheetJS 가 읽습니다 — calamine 이 들어오면
+            // 이 줄도 없어집니다. .doc 와 .ppt 는 웹 뷰어에도 그릴 것이
+            // 없어 빈 화면만 나오므로, 믿을 수 없는 바이트를 스크립트
+            // 엔진에 넘기지 않고 여기서 끝냅니다.
+            if (path as NSString).pathExtension.lowercased() == "xls" {
+                presentWebOfficeReader(path)
+            } else {
+                presentCannotOpen(path, reason: "아직 지원하지 않는 형식입니다.")
+            }
             return
         }
 
@@ -1436,9 +1446,13 @@ struct ContentView: View {
             let converted = try? ArgoOfficeConverter.convertToPDF(at: path)
             DispatchQueue.main.async {
                 guard let pdf = converted else {
-                    // 변환이 안 되면 조용히 기존 뷰어로 돌아갑니다 —
-                    // 못 여는 것보다 덜 예쁘게라도 보이는 편이 낫습니다.
-                    presentWebOfficeReader(path)
+                    // 변환에 실패해도 웹 뷰어로 되돌리지 않습니다.
+                    //
+                    // 되돌림은 공격자가 고를 수 있는 길이었습니다 — 일부러
+                    // 변환을 깨뜨리는 문서를 만들면, 살균하지 않고 DOM 에
+                    // 꽂는 렌더러로 건너갈 수 있었습니다. 이 앱은 샌드박스
+                    // 밖에서 / 를 읽고 씁니다. 못 여는 편이 낫습니다.
+                    presentCannotOpen(path, reason: "문서를 읽지 못했습니다.")
                     return
                 }
                 let vc = ArgoPDFReaderController()
@@ -1449,6 +1463,18 @@ struct ContentView: View {
                 presentReader(vc)
             }
         }
+    }
+
+    /// 열 수 없다고 알립니다. 웹 뷰어로 되돌리지 않습니다.
+    private func presentCannotOpen(_ path: String, reason: String) {
+        let name = (path as NSString).lastPathComponent
+        ArgoDiag.log("open", "거부 \(name) — \(reason)")
+        guard let top = AirDropBridge.topViewController() else { return }
+        let alert = UIAlertController(title: "이 문서는 열 수 없습니다",
+                                      message: "\(name)\n\n\(reason)",
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "확인", style: .default))
+        top.present(alert, animated: true)
     }
 
     private func presentWebOfficeReader(_ path: String) {

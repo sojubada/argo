@@ -92,8 +92,14 @@ features = ["derive"]
 [dependencies.thiserror]
 version = "1.0"
 
+# HWPX 는 ZIP 의 deflate 만 씁니다. 나머지 압축 방식을 켜 두면 bzip2,
+# lzma, zstd 세 개의 C 라이브러리가 딸려 들어오는데, 전부 믿을 수 없는
+# 바이트를 파싱하는 코드이고 이 앱은 샌드박스 밖에서 / 를 읽고 씁니다.
+# 쓰지도 않는 공격면을 지고 갈 이유가 없습니다.
 [dependencies.zip]
 version = "2.2"
+default-features = false
+features = ["deflate"]
 
 [dev-dependencies.pretty_assertions]
 version = "1.4"
