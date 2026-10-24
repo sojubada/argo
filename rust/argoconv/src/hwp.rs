@@ -144,9 +144,46 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
         format!(", 지나친 레코드 {list}")
     };
 
+    // 본 컨트롤 ID. 'tbl ' 이 안 보이면 표가 없는 문서이고, 보이는데
+    // 표가 0개면 우리가 못 연 것이다. 이 한 줄이 그걸 가른다.
+    let mut controls: std::collections::BTreeMap<String, usize> = Default::default();
+    for body in &document.body_texts {
+        for (id, count) in &body.controls {
+            *controls.entry(id.clone()).or_insert(0) += count;
+        }
+    }
+    let controls_text = if controls.is_empty() {
+        ", 컨트롤 없음".to_owned()
+    } else {
+        let mut seen: Vec<_> = controls.iter().collect();
+        seen.sort_by(|a, b| b.1.cmp(a.1));
+        format!(
+            ", 컨트롤 {}",
+            seen.iter()
+                .take(6)
+                .map(|(id, count)| format!("'{id}'×{count}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+
+    // 쪽마다 그린 것의 수. 빈 쪽이 어디인지 바로 보인다.
+    let per_page = rendered
+        .pages
+        .iter()
+        .map(|page| page.elements.len().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let empty_pages = rendered
+        .pages
+        .iter()
+        .filter(|page| page.elements.is_empty())
+        .count();
+
     crate::note(format!(
         "hwp 문단 {paragraphs}개, 표 {tables}개, 칸 {cells}개, 쪽 {}장, \
-         그릴 것 {elements}개{first}{skipped_text}",
+         그릴 것 {elements}개(빈 쪽 {empty_pages}장){first}{controls_text}{skipped_text}, \
+         쪽별 [{per_page}]",
         rendered.pages.len()
     ));
     if rendered.pages.is_empty() {

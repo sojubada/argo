@@ -239,6 +239,7 @@ impl HwpxReader {
                         page_def: None,
                     }],
                     skipped: Default::default(),
+                    controls: Default::default(),
                 }
             })
             .collect()

@@ -236,6 +236,7 @@ enum VerticalMerge {
 
 pub(crate) fn convert_docx_bytes(input: &[u8], options: &ConversionOptions) -> Result<Vec<u8>> {
     let document = read_docx_document(input)?;
+    crate::stat(format!("docx 블록 {}개", document.blocks.len()));
     let mut doc = PdfDocument::new();
     render_docx(&mut doc, &document, options);
     Ok(doc.to_bytes())

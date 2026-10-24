@@ -3871,6 +3871,11 @@ fn render_sheet(
     fit_sheet_width: bool,
 ) {
     let column_count = rendered_column_count(sheet);
+    crate::stat(format!(
+        "xlsx 시트 {}열 {}행",
+        column_count,
+        sheet.rows.last().map(|row| row.index + 1).unwrap_or(0)
+    ));
     let mut widths = sheet.column_widths.clone();
     widths.resize(column_count, COL_WIDTH);
     widths.truncate(column_count);

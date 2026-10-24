@@ -258,6 +258,13 @@ final class ArgoPDFReaderController: UIViewController {
     // MARK: 문서 열기
 
     private func openDocument() {
+        // 파일 크기도 남깁니다. 변환기가 0바이트를 내놓은 것과 뷰어가
+        // 못 읽은 것은 다른 문제인데, 로그만 보면 구분이 안 됐습니다.
+        let size = (try? FileManager.default
+            .attributesOfItem(atPath: documentPath)[.size] as? Int) ?? nil
+        ArgoDiag.log("open", "\((documentPath as NSString).lastPathComponent) "
+                           + "\(size.map { "\($0)바이트" } ?? "크기 모름")")
+
         guard let provider = CGDataProvider(url: URL(fileURLWithPath: documentPath) as CFURL),
               let doc = CGPDFDocument(provider) else {
             showFailure("이 PDF 를 열 수 없습니다. 파일이 손상되었거나 암호가 걸려 있습니다.")
@@ -512,6 +519,9 @@ final class ArgoPDFReaderController: UIViewController {
     }
 
     private func showPageProblem(_ message: String) {
+        // 화면에 뜬 것은 로그에도 남겨야 사진과 로그를 맞춰 볼 수 있습니다.
+        ArgoDiag.log("pageProblem", "쪽 \(currentPage): "
+                                  + message.replacingOccurrences(of: "\n", with: " "))
         if pageProblemLabel == nil {
             let label = UILabel()
             label.numberOfLines = 0
@@ -784,6 +794,7 @@ final class ArgoPDFReaderController: UIViewController {
     // MARK: 실패
 
     private func showFailure(_ message: String) {
+        ArgoDiag.log("openFail", message)
         let box = ArgoSurfaceView.makeSurface()
 
         let head = UILabel()

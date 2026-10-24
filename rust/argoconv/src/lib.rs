@@ -186,9 +186,17 @@ pub unsafe extern "C" fn argoconv_to_pdf(
                 *slot = notices.join(" ");
             }
         }
+        // 변환기가 무엇을 보고 그렸는지도 같이 남긴다. 기기에서 뭔가
+        // 안 보일 때 읽기에서 빠졌는지 그리기에서 빠졌는지 갈린다.
+        let stats = minipdf::conversion_stats();
         note(format!(
-            "office {} 바이트 PDF{}",
+            "office {} 바이트 PDF{}{}",
             pdf.len(),
+            if stats.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", stats.join(" · "))
+            },
             if notices.is_empty() {
                 String::new()
             } else {

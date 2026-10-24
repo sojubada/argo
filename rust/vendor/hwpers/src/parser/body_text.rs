@@ -49,6 +49,9 @@ impl BodyTextParser {
         // 그냥 지나친 레코드를 세어 둔다. 표가 안 보일 때 우리가 무엇을
         // 안 보고 지나쳤는지 로그로 바로 알 수 있어야 한다.
         let mut skipped: BTreeMap<u16, usize> = BTreeMap::new();
+        // 본 컨트롤의 네 글자 ID 도 모은다. 'tbl ' 이 안 보이면 표가 아예
+        // 없는 문서이고, 보이는데 표가 0개면 우리가 못 연 것이다.
+        let mut controls: BTreeMap<String, usize> = BTreeMap::new();
 
         while reader.remaining() >= 4 {
             let record = match Record::parse(&mut reader) {
@@ -100,6 +103,9 @@ impl BodyTextParser {
                 }
                 Some(HwpTag::CtrlHeader) => {
                     let header = CtrlHeader::from_record(&record).ok();
+                    if let Some(header) = header.as_ref() {
+                        *controls.entry(four_char(header.ctrl_id)).or_insert(0) += 1;
+                    }
                     if let (Some(header), Some(para)) = (header.as_ref(), current.as_mut()) {
                         para.ctrl_header = Some(header.clone());
                     }
@@ -157,8 +163,25 @@ impl BodyTextParser {
         Ok(BodyText {
             sections: vec![section],
             skipped,
+            controls,
         })
     }
+}
+
+/// 컨트롤 ID 를 사람이 읽을 네 글자로. 'tbl ' 처럼 보이게 한다.
+fn four_char(id: u32) -> String {
+    let bytes = id.to_be_bytes();
+    let text: String = bytes
+        .iter()
+        .map(|b| {
+            if b.is_ascii_graphic() || *b == b' ' {
+                *b as char
+            } else {
+                '.'
+            }
+        })
+        .collect();
+    text
 }
 
 /// 손에 든 문단을 제 자리에 놓는다 — 열린 셀이 있으면 그 셀, 없으면 구역.
@@ -195,6 +218,8 @@ pub struct BodyText {
     pub sections: Vec<Section>,
     /// 다루지 않고 지나친 레코드 태그와 그 개수.
     pub skipped: BTreeMap<u16, usize>,
+    /// 본 컨트롤의 네 글자 ID 와 그 개수.
+    pub controls: BTreeMap<String, usize>,
 }
 
 impl BodyText {

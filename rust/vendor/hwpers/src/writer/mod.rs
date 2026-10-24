@@ -1079,6 +1079,7 @@ impl HwpWriter {
         BodyText {
             sections: vec![section],
             skipped: Default::default(),
+            controls: Default::default(),
         }
     }
 

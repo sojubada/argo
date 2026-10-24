@@ -261,7 +261,54 @@ struct Relationship {
 
 pub(crate) fn convert_pptx_bytes(input: &[u8], options: &ConversionOptions) -> Result<Vec<u8>> {
     let presentation = read_pptx(input)?;
+
+    // 무엇을 읽었는지 세어 둔다. 슬라이드가 비어 보일 때 읽기에서 빠진
+    // 것인지 그리기에서 빠진 것인지 이 숫자로 갈린다.
+    let mut shapes = 0usize;
+    let mut pictures = 0usize;
+    let mut lines = 0usize;
+    let mut filled = 0usize;
+    let mut with_text = 0usize;
+    for slide in &presentation.slides {
+        for element in &slide.elements {
+            match element {
+                PptxElement::Shape(shape) => {
+                    shapes += 1;
+                    if shape.fill.is_some() {
+                        filled += 1;
+                    }
+                    if !shape.paragraphs.is_empty() {
+                        with_text += 1;
+                    }
+                }
+                PptxElement::Picture(_) => pictures += 1,
+                PptxElement::Line(_) => lines += 1,
+            }
+        }
+    }
+    crate::stat(format!(
+        "pptx 슬라이드 {}장, 도형 {shapes}개(칠한 것 {filled}, 글 있는 것 {with_text}), \
+         그림 {pictures}개, 선 {lines}개{}",
+        presentation.slides.len(),
+        chart_summary()
+    ));
+
     Ok(render_pptx(&presentation, options).to_bytes())
+}
+
+/// 차트를 몇 개 보고 몇 개를 그렸는지.
+static CHARTS_DRAWN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static CHARTS_SKIPPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn chart_summary() -> String {
+    use std::sync::atomic::Ordering;
+    let drawn = CHARTS_DRAWN.swap(0, Ordering::Relaxed);
+    let skipped = CHARTS_SKIPPED.swap(0, Ordering::Relaxed);
+    if drawn == 0 && skipped == 0 {
+        String::new()
+    } else {
+        format!(", 차트 {drawn}개 그림/{skipped}개 못 그림")
+    }
 }
 
 fn read_pptx(input: &[u8]) -> Result<PptxDocument> {
@@ -3237,6 +3284,7 @@ fn read_chart(
     // c:xVal/c:yVal 이라 계열이 비어 보이고, 그대로 두면 아무것도 안 그린 채
     // 조용히 돌아가 슬라이드 한가운데가 빈다.
     if kind == ChartKind::Unsupported {
+        CHARTS_SKIPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         draw_unsupported_chart(bounds, title.as_deref(), &kind_label, elements);
         return Ok(true);
     }
@@ -3275,6 +3323,7 @@ fn read_chart(
     }
 
 
+    CHARTS_DRAWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     draw_chart(
         kind,
         grouping,

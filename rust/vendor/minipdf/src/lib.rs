@@ -92,6 +92,27 @@ pub(crate) fn notice(message: String) {
     }
 }
 
+/// 변환기가 무엇을 보고 무엇을 그렸는지. 기기 로그로 넘긴다.
+///
+/// 알림(notice)과 달리 사용자에게는 안 보이고 로그에만 남는다. 기기에서
+/// 무언가 안 보일 때 못 읽은 것인지 못 그린 것인지 가르는 데 쓴다.
+static CONVERSION_STATS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+pub(crate) fn stat(line: String) {
+    let stats = CONVERSION_STATS.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut list) = stats.lock() {
+        list.push(line);
+    }
+}
+
+/// 직전 변환이 남긴 진단 줄들.
+pub fn conversion_stats() -> Vec<String> {
+    CONVERSION_STATS
+        .get()
+        .and_then(|stats| stats.lock().ok().map(|list| list.clone()))
+        .unwrap_or_default()
+}
+
 /// 직전 변환이 남긴 알림들. 변환을 새로 시작하면 비워진다.
 pub fn conversion_notices() -> Vec<String> {
     CONVERSION_NOTICES
@@ -103,6 +124,11 @@ pub fn conversion_notices() -> Vec<String> {
 fn clear_notices() {
     if let Some(notices) = CONVERSION_NOTICES.get() {
         if let Ok(mut list) = notices.lock() {
+            list.clear();
+        }
+    }
+    if let Some(stats) = CONVERSION_STATS.get() {
+        if let Ok(mut list) = stats.lock() {
             list.clear();
         }
     }
