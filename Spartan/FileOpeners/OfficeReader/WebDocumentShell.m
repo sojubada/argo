@@ -112,8 +112,15 @@
         // what a 55-inch screen at three metres needs, and kept. A long
         // document would be slow drawn all at once, so pages are added
         // a few at a time and the rest follow after the first is up.
+        // isEvalSupported 를 끕니다.
+        //
+        // 번들된 pdf.js 는 3.11.174 이고, CVE-2024-4367 은 4.2.67 에서
+        // 고쳐졌습니다. 글꼴이 심어진 PDF 하나로 임의의 자바스크립트가
+        // 실행될 수 있습니다 — 이 앱은 샌드박스 밖에서 / 를 읽을 수 있으므로
+        // 값이 비쌉니다. 올리기 전까지 Mozilla 가 안내한 임시 조치입니다.
         return @"pdfjsLib.GlobalWorkerOptions.workerSrc='pdf.worker.min.js';"
-                "pdfjsLib.getDocument({data:arr}).promise.then(function(pdf){"
+                "pdfjsLib.getDocument({data:arr,isEvalSupported:false})"
+                ".promise.then(function(pdf){"
                 " var total=pdf.numPages;"
                 " var boxes=[];"
                 " for(var n=1;n<=total;n++){"
