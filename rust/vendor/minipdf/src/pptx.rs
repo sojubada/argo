@@ -583,11 +583,25 @@ fn read_shape(
         .map(str::to_owned)
         .or_else(|| inherited.and_then(|style| style.shape_type.clone()))
         .unwrap_or_else(|| "rect".to_owned());
-    let outline = shape_properties
+    // noFill 은 "안 칠한다"는 말이지 "안 적었다"는 말이 아니다.
+    //
+    // 둘을 같게 보면 도형 모양표(style/fillRef)의 색으로 되돌아가 버린다.
+    // 실제 덱에서 바로 이 일이 났다 — 테두리 없는 투명 바탕에 주황 글씨로
+    // 쓴 제목이, 주황으로 꽉 칠한 막대가 되어 글자가 그 안에 묻혔다.
+    let no_fill = shape_properties.is_some_and(|node| child(node, "noFill").is_some());
+    let no_outline = shape_properties
         .and_then(|node| child(node, "ln"))
-        .and_then(|node| read_outline(node, theme))
-        .or_else(|| read_style_outline(shape, theme))
-        .or_else(|| inherited.and_then(|style| style.outline.clone()));
+        .is_some_and(|node| child(node, "noFill").is_some());
+
+    let outline = if no_outline {
+        None
+    } else {
+        shape_properties
+            .and_then(|node| child(node, "ln"))
+            .and_then(|node| read_outline(node, theme))
+            .or_else(|| read_style_outline(shape, theme))
+            .or_else(|| inherited.and_then(|style| style.outline.clone()))
+    };
     if shape_type.eq_ignore_ascii_case("line") {
         add_line_from_bounds(
             shape_properties.and_then(|node| child(node, "xfrm")),
@@ -597,10 +611,14 @@ fn read_shape(
         );
         return;
     }
-    let fill = shape_properties
-        .and_then(|node| read_fill(node, theme))
-        .or_else(|| read_style_fill(shape, theme))
-        .or_else(|| inherited.and_then(|style| style.fill));
+    let fill = if no_fill {
+        None
+    } else {
+        shape_properties
+            .and_then(|node| read_fill(node, theme))
+            .or_else(|| read_style_fill(shape, theme))
+            .or_else(|| inherited.and_then(|style| style.fill))
+    };
     // 글상자도 자리표시자도 아닌 도형은 파워포인트가 글을 한가운데에
     // 놓는다. 이걸 빼면 네모 왼쪽 위에 글이 붙어 도형 밖으로 삐져나온
     // 것처럼 보인다.
