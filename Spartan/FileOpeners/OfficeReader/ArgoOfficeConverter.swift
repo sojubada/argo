@@ -24,9 +24,10 @@ enum ArgoOfficeConverter {
     /// pptx 도 들어왔습니다 — 슬라이드 제목이 사라지던 것은 레이아웃이
     /// 마스터의 위치를 덮어쓰던 문제였고, 벤더링한 사본에서 고쳤습니다.
     ///
-    /// xlsx 는 당분간 뺍니다. 변환 자체는 되지만 엑셀의 인쇄 방식 그대로
-    /// 넓은 시트를 열 묶음별로 쪼개서, 화면으로 따라 읽기가 어렵습니다.
-    static let handled: Set<String> = ["docx", "pptx", "hwp", "hwpx"]
+    /// xlsx 도 들어왔습니다. 빼 두었던 이유는 넓은 시트를 엑셀 인쇄하듯
+    /// 열 묶음별로 쪼개서 화면으로 따라 읽을 수가 없었기 때문인데, 이제는
+    /// 쪽을 시트 폭에 맞춰 늘리고 행만 넘깁니다.
+    static let handled: Set<String> = ["docx", "pptx", "xlsx", "hwp", "hwpx"]
 
     static func handles(_ path: String) -> Bool {
         handled.contains((path as NSString).pathExtension.lowercased())

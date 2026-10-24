@@ -55,10 +55,16 @@ impl HwpReader {
             None
         };
 
-        let doc_info_data = reader.read_stream("DocInfo")?;
-        let doc_info_decrypted =
-            Self::decrypt_stream(doc_info_data, &header, distribution_record.as_deref())?;
-        let doc_info = DocInfoParser::parse(doc_info_decrypted, header.is_compressed())?;
+        // DocInfo 를 못 읽어도 문서를 포기하지 않는다.
+        //
+        // 여기에는 글꼴과 글자 모양이 들어 있을 뿐, 글 자체는 BodyText 에
+        // 있다. 모양표가 없으면 기본 모양으로 그리면 된다 — 글씨체가 다른
+        // 것과 아무것도 못 보는 것 중에서는 앞쪽이 낫다.
+        let doc_info = reader
+            .read_stream("DocInfo")
+            .and_then(|data| Self::decrypt_stream(data, &header, distribution_record.as_deref()))
+            .and_then(|data| DocInfoParser::parse(data, header.is_compressed()))
+            .unwrap_or_default();
 
         let mut body_texts = Vec::new();
         let mut section_idx = 0;
@@ -75,11 +81,17 @@ impl HwpReader {
                 break;
             }
 
-            let section_data = reader.read_stream(&section_name)?;
-            let section_decrypted =
-                Self::decrypt_stream(section_data, &header, distribution_record.as_deref())?;
-            let body_text = BodyTextParser::parse(section_decrypted, header.is_compressed())?;
-            body_texts.push(body_text);
+            // 구역 하나가 깨졌다고 나머지를 버리지 않는다. 뒤쪽 구역이
+            // 멀쩡하면 거기까지는 보여 준다.
+            let section = reader
+                .read_stream(&section_name)
+                .and_then(|data| {
+                    Self::decrypt_stream(data, &header, distribution_record.as_deref())
+                })
+                .and_then(|data| BodyTextParser::parse(data, header.is_compressed()));
+            if let Ok(body_text) = section {
+                body_texts.push(body_text);
+            }
 
             section_idx += 1;
         }

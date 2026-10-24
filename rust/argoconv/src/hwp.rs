@@ -97,8 +97,33 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
     }
 
     let rendered = HwpRenderer::new(&document, RenderOptions::default()).render();
+
+    // 쪽은 나왔는데 비어 있는 일이 있었다. 그릴 것을 몇 개나 만들었는지,
+    // 첫 글자가 어떤 크기와 색으로 나갔는지까지 적어 둔다 — 레이아웃이
+    // 빈 것인지 그리다 사라진 것인지 이 줄로 갈린다.
+    let elements: usize = rendered.pages.iter().map(|page| page.elements.len()).sum();
+    let first = rendered
+        .pages
+        .iter()
+        .flat_map(|page| page.elements.iter())
+        .find_map(|element| match element {
+            hwpers::render::renderer::RenderElement::Text {
+                text,
+                font_size,
+                color,
+                font_family,
+                ..
+            } => Some(format!(
+                ", 첫 글자 \"{}\" {font_size:.1}크기 #{:06X} {font_family}",
+                text.chars().take(6).collect::<String>(),
+                color & 0xFFFFFF
+            )),
+            _ => None,
+        })
+        .unwrap_or_else(|| ", 글자 요소 없음".to_owned());
+
     crate::note(format!(
-        "hwp 문단 {paragraphs}개, 표 {tables}개, 칸 {cells}개, 쪽 {}장",
+        "hwp 문단 {paragraphs}개, 표 {tables}개, 칸 {cells}개, 쪽 {}장, 그릴 것 {elements}개{first}",
         rendered.pages.len()
     ));
     if rendered.pages.is_empty() {

@@ -476,14 +476,19 @@ impl<'a> LayoutEngine<'a> {
                     units.len() + offset
                 };
 
-                if start < offset || start - offset >= units.len() {
+                // 이 모양이 맡은 구간과 이 줄이 겹치는 만큼만 가져온다.
+                //
+                // 전에는 모양이 이 줄 안에서 "시작"해야만 썼다. 문단에
+                // 모양이 하나뿐이면 그 하나는 첫 줄에서 시작하므로,
+                // 둘째 줄부터는 글자가 한 자도 안 나왔다.
+                let line_end = offset + units.len();
+                let overlap_start = start.max(offset);
+                let overlap_end = end.min(line_end);
+                if overlap_start >= overlap_end {
                     continue;
                 }
-                let run_start = (start - offset).min(units.len());
-                let run_end = end.saturating_sub(offset).clamp(run_start, units.len());
-                if run_start >= run_end {
-                    continue;
-                }
+                let run_start = overlap_start - offset;
+                let run_end = overlap_end - offset;
 
                 let run_text = String::from_utf16_lossy(&units[run_start..run_end]);
                 let char_shape = self
