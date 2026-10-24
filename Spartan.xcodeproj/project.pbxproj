@@ -11,6 +11,7 @@
 		166490773A8A4A65B00AC81A /* WebDocumentSwiftView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7542162C47234211AA1410E6 /* WebDocumentSwiftView.swift */; };
 		603B7A48642245CFBC4262C2 /* WebDocumentShell.m in Sources */ = {isa = PBXBuildFile; fileRef = 2B24EFA729574E97AEE91629 /* WebDocumentShell.m */; };
 		2E8144A5E07049BB8E563C6B /* WebDocumentView.m in Sources */ = {isa = PBXBuildFile; fileRef = 15FA0B8D9C684035B8C6B258 /* WebDocumentView.m */; };
+		73F99E94983D4A238E325EDE /* MediaFolderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BDC0C4490C74D318E64167B /* MediaFolderProbe.swift */; };
 		A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */; };
 		FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */; };
 		F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 5D9355E330EB46BA8E0462D2 /* WebKitProbe.m */; };
@@ -121,6 +122,7 @@
 		2B24EFA729574E97AEE91629 /* WebDocumentShell.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebDocumentShell.m; sourceTree = "<group>"; };
 		AB3B2E5E54F74BC98FCB924F /* WebDocumentView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebDocumentView.h; sourceTree = "<group>"; };
 		15FA0B8D9C684035B8C6B258 /* WebDocumentView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WebDocumentView.m; sourceTree = "<group>"; };
+		6BDC0C4490C74D318E64167B /* MediaFolderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaFolderProbe.swift; sourceTree = "<group>"; };
 		2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocPipelineProbe.swift; sourceTree = "<group>"; };
 		13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebKitProbeView.swift; sourceTree = "<group>"; };
 		6EB20E17101440D182E71F24 /* WebKitProbe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WebKitProbe.h; sourceTree = "<group>"; };
@@ -292,7 +294,8 @@
 			children = (
 				891E5DD5390D449FBBA34DE0 /* PrintProbe.m */,
 				3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */,
-						2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */,
+						6BDC0C4490C74D318E64167B /* MediaFolderProbe.swift */,
+					2D3F69E5C9B145EE981605DB /* DocPipelineProbe.swift */,
 				13C4C9A7CC11477AB65BD0B7 /* WebKitProbeView.swift */,
 				6EB20E17101440D182E71F24 /* WebKitProbe.h */,
 				0088223C4B9D41DAB59EC316 /* webdoc */,
@@ -680,7 +683,8 @@
 				166490773A8A4A65B00AC81A /* WebDocumentSwiftView.swift in Sources */,
 				603B7A48642245CFBC4262C2 /* WebDocumentShell.m in Sources */,
 				2E8144A5E07049BB8E563C6B /* WebDocumentView.m in Sources */,
-				A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */,
+				73F99E94983D4A238E325EDE /* MediaFolderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BDC0C4490C74D318E64167B /* MediaFolderProbe.swift */; };
+		A05E5E979A4B44B78D6B47A9 /* DocPipelineProbe.swift in Sources */,
 				FC68CC004EAB489A9A8D8F4A /* WebKitProbeView.swift in Sources */,
 				F5943FCB5FAE4D70B987020E /* WebKitProbe.m in Sources */,
 				FB208380C5EE4EBE8D3F154B /* WebDocProbeView.swift in Sources */,

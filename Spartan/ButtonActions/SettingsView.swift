@@ -8,8 +8,10 @@
 import SwiftUI
 
 struct SettingsView: View {
-    // showView 배열 크기 5 -> 6 확장 (로그 뷰어 추가)
-    @State private var showView: [Bool] = [Bool](repeating: false, count: 7)
+    // showView 배열 크기 5 -> 6 -> 7 -> 8 확장 (media 폴더 탐침 추가)
+    @State private var showView: [Bool] = [Bool](repeating: false, count: 8)
+    @State private var probeRunning = false
+    @State private var probeStatus = ""
     @State private var descriptiveTitlesPre = UserDefaults.settings.bool(forKey: "descriptiveTitles")
     @State private var descriptiveTimestampsPre = UserDefaults.settings.bool(forKey: "verboseTimestamps")
     @State private var autoCompletePre = UserDefaults.settings.bool(forKey: "autoComplete")
@@ -192,7 +194,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "printer")
 						.frame(width: 50, height: 50)
-					Text("Lab ③ 인쇄 파이프라인 탐침 ← 지금 이것")
+					Text("Lab ③ 인쇄 파이프라인 탐침")
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
@@ -201,6 +203,41 @@ struct SettingsView: View {
 			.fullScreenCover(isPresented: $showView[6]) {
 				PrintProbeView(isPresented: $showView[6])
 					.edgesIgnoringSafeArea(.all)
+			}
+
+			// Lab ④ — /var/mobile/media/ 원본 vs PC PDF 비교 탐침
+			Button(action: {
+				guard !probeRunning else { return }
+				probeRunning = true
+				probeStatus  = "실행 중…"
+				Task {
+					await MediaFolderProbe.run()
+					await MainActor.run {
+						probeRunning = false
+						probeStatus  = "완료 — argo-diag.log 확인"
+					}
+				}
+			}) {
+				HStack {
+					if probeRunning {
+						ProgressView()
+							.frame(width: 50, height: 50)
+					} else {
+						Image(systemName: "arrow.triangle.2.circlepath.doc.on.clipboard")
+							.frame(width: 50, height: 50)
+					}
+					VStack(alignment: .leading) {
+						Text("Lab ④ media 폴더 PDF 비교 탐침 ← 지금 이것")
+							.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
+								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+							}
+						if !probeStatus.isEmpty {
+							Text(probeStatus)
+								.font(.system(size: 24))
+								.foregroundColor(.secondary)
+						}
+					}
+				}
 			}
 
 			Button(action: { //info
