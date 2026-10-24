@@ -164,10 +164,14 @@ impl<'a> HwpRenderer<'a> {
         (inches * self.options.dpi as f32 * self.options.scale) as i32
     }
 
-    /// Convert HWP units to points
+    /// 글자 크기를 좌표와 같은 자로 잰다.
+    ///
+    /// 자리는 hwp_to_px 로 96dpi 픽셀에 찍는데 크기만 포인트로 주면
+    /// 글자가 자기 자리보다 3분의 1쯤 작게 그려진다. 글자 사이가 벌어져
+    /// 보이던 것이 이것이다 — 같은 dpi 로 환산한다.
     fn hwp_to_pt(&self, hwp_units: i32) -> f32 {
-        // Points = (hwp_units / 7200) * 72
-        (hwp_units as f32 / 100.0) * self.options.scale
+        let inches = hwp_units as f32 / 7200.0;
+        inches * self.options.dpi as f32 * self.options.scale
     }
 }
 

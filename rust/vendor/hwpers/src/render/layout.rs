@@ -420,13 +420,21 @@ impl<'a> LayoutEngine<'a> {
         let line_height = self.calculate_line_height(para_shape, char_shape);
 
         // Simple line breaking - split by newlines for now
+        //
+        // 글자 모양 위치는 문단 전체 기준이므로 줄마다 지나온 길이를
+        // 더해 넘긴다. 전에는 줄마다 0 을 넘겨 둘째 줄부터 모양이
+        // 어긋났다.
+        let mut consumed = 0u32;
         for line_text in text.lines() {
+            let line_units = line_text.encode_utf16().count() as u32;
             if line_text.is_empty() {
                 current_y += line_height;
+                consumed += 1; // 줄바꿈 한 칸
                 continue;
             }
 
-            let runs = self.create_text_runs_for_line(line_text, paragraph, x, 0);
+            let runs = self.create_text_runs_for_line(line_text, paragraph, x, consumed);
+            consumed += line_units + 1;
 
             lines.push(RenderedLine {
                 y: current_y,
@@ -452,7 +460,12 @@ impl<'a> LayoutEngine<'a> {
         let mut runs = Vec::new();
 
         if let Some(char_shapes) = &paragraph.char_shapes {
-            // Create runs based on character shape changes
+            // 글자 모양의 위치는 UTF-16 단위다. 바이트로 쓰면 한글 한 자가
+            // 세 바이트라 엉뚱한 데를 가리키고, 글자 가운데를 자르는
+            // 순간 패닉한다 — 기기에서 '검' 가운데가 잘려 변환이 통째로
+            // 실패했다.
+            let units: Vec<u16> = line_text.encode_utf16().collect();
+            let offset = text_offset as usize;
             let mut current_x = x;
 
             for (idx, pos_shape) in char_shapes.char_positions.iter().enumerate() {
@@ -460,33 +473,33 @@ impl<'a> LayoutEngine<'a> {
                 let end = if idx + 1 < char_shapes.char_positions.len() {
                     char_shapes.char_positions[idx + 1].position as usize
                 } else {
-                    line_text.len() + text_offset as usize
+                    units.len() + offset
                 };
 
-                if start >= text_offset as usize && (start - text_offset as usize) < line_text.len()
-                {
-                    let run_start = (start - text_offset as usize).min(line_text.len());
-                    let run_end = (end - text_offset as usize).min(line_text.len());
-
-                    if run_start < run_end {
-                        let run_text = &line_text[run_start..run_end];
-                        let char_shape = self
-                            .document
-                            .get_char_shape(pos_shape.char_shape_id as usize);
-
-                        let width = self.calculate_text_width(run_text, char_shape);
-
-                        runs.push(TextRun {
-                            x: current_x,
-                            width,
-                            text: run_text.to_string(),
-                            char_shape_id: pos_shape.char_shape_id,
-                            font_size: char_shape.map(|cs| cs.base_size).unwrap_or(1000),
-                        });
-
-                        current_x += width;
-                    }
+                if start < offset || start - offset >= units.len() {
+                    continue;
                 }
+                let run_start = (start - offset).min(units.len());
+                let run_end = end.saturating_sub(offset).clamp(run_start, units.len());
+                if run_start >= run_end {
+                    continue;
+                }
+
+                let run_text = String::from_utf16_lossy(&units[run_start..run_end]);
+                let char_shape = self
+                    .document
+                    .get_char_shape(pos_shape.char_shape_id as usize);
+                let width = self.calculate_text_width(&run_text, char_shape);
+
+                runs.push(TextRun {
+                    x: current_x,
+                    width,
+                    text: run_text,
+                    char_shape_id: pos_shape.char_shape_id,
+                    font_size: char_shape.map(|cs| cs.base_size).unwrap_or(1000),
+                });
+
+                current_x += width;
             }
         } else {
             // Single run for entire line
@@ -529,13 +542,37 @@ impl<'a> LayoutEngine<'a> {
     fn calculate_text_width(&self, text: &str, char_shape: Option<&CharShape>) -> i32 {
         let font_size = char_shape.map(|cs| cs.base_size).unwrap_or(1000);
 
-        // Approximate width calculation
-        // In reality, this would use font metrics
-        let char_count = text.chars().count() as i32;
-        let avg_char_width = font_size / 2; // Rough approximation
-
-        char_count * avg_char_width
+        // 글꼴 자료 없이 재는 어림이다. 다만 한글·한자·가나는 영문의 두
+        // 배 폭이다. 전부 반각으로 치면 한글 문단의 글자 위치가 절반씩
+        // 밀려 뒷 토막이 앞 토막 위에 겹쳐 찍힌다.
+        text.chars()
+            .map(|letter| {
+                if is_full_width(letter) {
+                    font_size
+                } else {
+                    font_size / 2
+                }
+            })
+            .sum()
     }
+}
+
+/// 전각으로 봐야 하는 글자인가 — 한글, 한자, 가나, 전각 기호.
+fn is_full_width(letter: char) -> bool {
+    matches!(letter as u32,
+        0x1100..=0x115F      // 한글 자모
+        | 0x2E80..=0x303E    // 부수와 CJK 기호
+        | 0x3041..=0x33FF    // 가나, 한글 호환 자모, 기호
+        | 0x3400..=0x4DBF    // 한자 확장 A
+        | 0x4E00..=0x9FFF    // 한자
+        | 0xA000..=0xA4CF    // 이체자
+        | 0xAC00..=0xD7A3    // 한글 음절
+        | 0xF900..=0xFAFF    // 한자 호환
+        | 0xFE30..=0xFE6F    // 세로쓰기 형태
+        | 0xFF00..=0xFF60    // 전각 영숫자
+        | 0xFFE0..=0xFFE6    // 전각 기호
+        | 0x20000..=0x3FFFD  // 한자 확장 B 이상
+    )
 }
 
 /// 표와 그 안의 글을 세로로 통째로 옮긴다.

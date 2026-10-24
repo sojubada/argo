@@ -59,6 +59,7 @@ pub unsafe extern "C" fn argoconv_hwp_to_pdf(
     *out = std::ptr::null_mut();
     *out_len = 0;
 
+    crate::clear_note();
     let bytes = slice::from_raw_parts(input, len);
     let (out_ptr, out_size) = (out, out_len);
     guard(move || convert(bytes, out_ptr, out_size))
@@ -72,8 +73,12 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
     } else {
         HwpReader::from_bytes(bytes)
     };
-    let Ok(document) = document else {
-        return ARGOCONV_CONVERT_FAILED;
+    let document = match document {
+        Ok(document) => document,
+        Err(error) => {
+            crate::note(format!("hwp 파일을 못 읽었다: {error}"));
+            return ARGOCONV_CONVERT_FAILED;
+        }
     };
 
     // 표를 몇 개나 봤는지 세어 로그로 넘긴다. 기기에서 표가 안 보일 때
@@ -101,6 +106,10 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
     }
 
     let Ok(pdf) = build_pdf(&rendered) else {
+        crate::note(format!(
+            "hwp 쪽 {}장을 PDF 로 못 옮겼다",
+            rendered.pages.len()
+        ));
         return ARGOCONV_CONVERT_FAILED;
     };
 

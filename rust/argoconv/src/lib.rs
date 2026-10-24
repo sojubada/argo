@@ -61,6 +61,12 @@ pub(crate) fn note(line: String) {
     }
 }
 
+/// 변환을 시작할 때 지난 줄을 지운다. 안 그러면 실패했을 때 앞 문서가
+/// 남긴 줄이 이 문서의 것인 양 로그에 찍힌다.
+pub(crate) fn clear_note() {
+    note(String::new());
+}
+
 /// 마지막 변환이 남긴 한 줄을 버퍼에 담는다.
 ///
 /// # Safety
@@ -133,6 +139,7 @@ pub unsafe extern "C" fn argoconv_to_pdf(
     *out = std::ptr::null_mut();
     *out_len = 0;
 
+    clear_note();
     let bytes = slice::from_raw_parts(input, len);
     let (out_ptr, out_size) = (out, out_len);
     guard(move || {
