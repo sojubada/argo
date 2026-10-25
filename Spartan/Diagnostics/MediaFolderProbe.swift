@@ -43,26 +43,58 @@ enum MediaFolderProbe {
 
     // MARK: - 설정
 
-    /// 탐침이 읽을 폴더 후보.
+    /// 탐침이 들여다볼 폴더 후보.
     ///
-    /// tvOS 에서 /var 는 /private/var 로 가는 심링크입니다. 둘 다 같은 자리를
-    /// 가리키지만, 파일 탐색기가 어느 쪽 이름으로 보여 주느냐에 따라 사용자가
-    /// 적는 경로가 갈립니다. 대소문자도 갈립니다 — Media 는 시스템이 쓰는
-    /// 이름이고 media 는 사용자가 새로 만든 폴더일 수 있습니다.
-    /// 먼저 찾아지는 쪽을 씁니다.
-    static let mediaRootCandidates = [
-        "/var/mobile/media",
-        "/private/var/mobile/media",
-        "/var/mobile/Media/media",
-        "/var/mobile/Media/Argo/media",
-    ]
+    /// tvOS 의 데이터 볼륨은 대소문자를 가립니다. 처음에는 /var/mobile/media
+    /// 하나만 찾다가 "폴더 없음" 으로 끝났는데, 정작 기기에 있는 것은
+    /// /var/mobile/Media 였습니다 — 철자를 짐작하면 안 되는 자리입니다.
+    ///
+    /// 그래서 있을 법한 자리를 늘어놓고, 더해서 부모 폴더를 훑어 철자를
+    /// 가리지 않고 media 를 한 번 더 찾습니다.
+    static var rootCandidates: [String] {
+        var list = [
+            "/var/mobile/Media/Argo/media",
+            "/var/mobile/Media/media",
+            "/var/mobile/media",
+            "/private/var/mobile/media",
+            "/var/mobile/Media/Downloads",
+            "/var/mobile/Media",
+        ]
 
-    /// 실제로 쓸 폴더. 후보 중 먼저 존재하는 것.
-    static var mediaRoot: String {
-        for path in mediaRootCandidates where FileManager.default.fileExists(atPath: path) {
-            return path
+        // 철자를 가리지 않고 한 번 더. 사용자가 Media, MEDIA, media 중
+        // 무엇으로 만들었든 걸립니다.
+        for parent in ["/var/mobile", "/var/mobile/Media"] {
+            guard let kids = try? FileManager.default.contentsOfDirectory(atPath: parent)
+            else { continue }
+            for kid in kids where kid.lowercased() == "media" {
+                list.append(parent + "/" + kid)
+            }
         }
-        return mediaRootCandidates[0]
+
+        var seen = Set<String>()
+        return list.filter { seen.insert($0).inserted }
+    }
+
+    /// 후보 중 '변환할 파일이 들어 있는' 첫 폴더를 고릅니다.
+    ///
+    /// 있기만 한 폴더를 고르면 안 됩니다 — /var/mobile/Media 는 늘 있지만
+    /// 문서는 그 아래 어딘가에 있을 수 있고, 그러면 빈 폴더를 잡고 끝납니다.
+    /// 후보를 전부 로그에 적습니다. 못 찾았을 때 어디를 봤는지 보여야 합니다.
+    private static func resolveRoot() -> String? {
+        var chosen: String?
+        for path in rootCandidates {
+            guard let items = try? FileManager.default.contentsOfDirectory(atPath: path) else {
+                ArgoDiag.log("probe", "후보 \(path) — 없음")
+                continue
+            }
+            let n = items.filter {
+                targetExtensions.contains(($0 as NSString).pathExtension.lowercased())
+            }.count
+            ArgoDiag.log("probe", "후보 \(path) — 항목 \(items.count)개, 변환할 것 \(n)개"
+                                  + (n > 0 && chosen == nil ? "  ← 여기" : ""))
+            if n > 0, chosen == nil { chosen = path }
+        }
+        return chosen
     }
 
     /// 변환 대상 확장자 (xlsx 제외)
@@ -101,13 +133,11 @@ enum MediaFolderProbe {
     static func run() async {
         ArgoDiag.log("probe", "MediaFolderProbe 시작")
 
-        // 어느 후보가 실제로 있는지 먼저 정합니다. 한 번만 정하고 아래로
-        // 넘깁니다 — 도중에 바뀔 자리가 아니고, 로그에 어디를 봤는지
-        // 남아야 합니다.
-        let root = mediaRoot
-        guard FileManager.default.fileExists(atPath: root) else {
-            ArgoDiag.log("probe", "폴더 없음 — 찾아본 자리: "
-                                  + mediaRootCandidates.joined(separator: ", "))
+        // 어느 폴더를 볼지 먼저 정합니다. 한 번만 정하고 아래로 넘깁니다 —
+        // 도중에 바뀔 자리가 아니고, 로그에 어디를 봤는지 남아야 합니다.
+        guard let root = resolveRoot() else {
+            ArgoDiag.log("probe", "변환할 파일이 든 폴더를 못 찾았습니다 — "
+                                  + "위 후보 중 한 곳에 hwp·docx·pptx 를 넣어 주세요")
             return
         }
         ArgoDiag.log("probe", "폴더 \(root)")
@@ -125,12 +155,6 @@ enum MediaFolderProbe {
         let originals = items
             .filter { targetExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
             .sorted()
-
-        if originals.isEmpty {
-            ArgoDiag.log("probe", "변환할 파일 없음 — "
-                                  + "hwp·hwpx·docx·pptx 를 이 폴더에 넣어 주세요")
-            return
-        }
 
         ArgoDiag.log("probe", "원본 \(originals.count)개: "
                               + originals.joined(separator: ", "))
