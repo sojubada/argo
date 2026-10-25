@@ -85,21 +85,54 @@ struct ContentView: View {
     }
 
     /// 한쪽 칸 자리에 들어갈 WebDAV 목록.
+    ///
+    /// 받는 곳은 이 칸이 아니라 **반대쪽 칸**의 지금 폴더다. 이 칸은 원격을
+    /// 보여 주고 있으므로 받을 자리가 못 된다. 반대쪽은 눈에 보이는 로컬
+    /// 목록이라, 어디로 받는지 보면서 받고 끝나면 그 자리에 바로 나타난다.
     @ViewBuilder
     func webdavPane(for side: PaneSide) -> some View {
-        let model = side == .left ? leftPane : rightPane
+        let target = side == .left ? rightPane : leftPane
         WebDAVRootView(
-            directory: Binding(get: { model.directory },
-                               set: { model.directory = $0 }),
+            directory: Binding(get: { target.directory },
+                               set: { target.directory = $0 }),
             isPresented: Binding(
                 get: { webdavSide == side },
                 set: { shown in
                     guard !shown else { return }
                     webdavSide = nil
                     // 받은 것이 바로 보여야 한다.
-                    model.updateFiles()
+                    target.updateFiles()
                 }))
         .argoSurface()
+    }
+
+    /// WebDAV 를 띄운다. 한 칸이면 먼저 둘로 나눈다.
+    ///
+    /// 전체를 덮는 창으로 열면 받는 곳이 안 보인다. 그래서 한 칸일 때도
+    /// 창을 띄우지 않고 칸을 나눠, 보던 폴더를 왼쪽에 남긴 채 오른쪽에
+    /// 원격을 올린다 — 받는 곳이 왼쪽에 그대로 보인다.
+    func openWebDAV() {
+        if dualPaneEnabled {
+            webdavSide = (activeSide == .left) ? .right : .left
+        } else {
+            // 나뉘고 나서 오른쪽이 원격을 내리면 보여 줄 곳이 있어야 한다.
+            rightPane.navigate(to: leftPane.directory, recordHistory: false)
+            withAnimation { dualPaneEnabled = true }
+            activeSide = .left
+            webdavSide = .right
+        }
+
+        // 받을 곳에 쓸 수 있는지 미리 본다.
+        //
+        // 막는 대신 알리기만 한다 — isWritableFile 은 틀릴 때가 있어서,
+        // 쓸 수 있는 폴더인데 못 쓴다고 막으면 길이 아예 없어진다.
+        let target = (webdavSide == .right ? leftPane : rightPane).directory
+        if !FileManager.default.isWritableFile(atPath: target) {
+            alertTitle = "받는 곳에 쓰지 못할 수 있습니다"
+            alertMsg = target + "\n\n받기가 실패하면 반대 칸을 쓸 수 있는 폴더로 옮긴 뒤 다시 받으십시오."
+            showAlert = true
+        }
+        ArgoDiag.log("webdav", "칸에 띄움 — 받는 곳 \(target)")
     }
     var multiSelectBinding: Binding<Bool> {
         Binding(get: { pane.multiSelect }, set: { pane.multiSelect = $0 })
@@ -314,23 +347,16 @@ struct ContentView: View {
                     })
 
                     Button(action: { //webdav
-                        // 두 칸이면 반대 칸 자리에 띄운다. 받을 곳을 보면서
-                        // 받을 수 있고, 창이 화면을 덮지 않는다.
-                        // 한 칸이면 내줄 자리가 없으니 예전처럼 창으로 연다.
-                        if dualPaneEnabled {
-                            webdavSide = (activeSide == .left) ? .right : .left
-                        } else {
-                            showSubView[25] = true
-                        }
+                        openWebDAV()
                     }) {
                         Image(systemName: "globe")
                             .frame(width:50, height:50)
                     }
-                    .sheet(isPresented: $showSubView[25], onDismiss: {
-                        updateFiles()
-                    }, content: {
-                        WebDAVRootView(directory: directoryBinding, isPresented: $showSubView[25])
-                    })
+                    // WebDAV 를 덮는 창으로 띄우던 자리였다. 이제 칸에
+                    // 들어가므로 뗀다. 떼면서 같은 showSubView[25] 를
+                    // WebServerView 와 나눠 쓰던 것도 풀린다 — 한 깃발에
+                    // 창이 둘 걸려 있어서, 어느 쪽이 뜨는지는 두 .sheet 중
+                    // 누가 이기느냐에 달려 있었다.
 
                     Button(action: { //trash
                         showSubView[37] = true

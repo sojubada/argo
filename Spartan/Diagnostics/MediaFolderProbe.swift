@@ -117,8 +117,32 @@ enum MediaFolderProbe {
     /// 패널 하나의 세로 한계(점). 긴 쪽은 이 안에 맞춰 줄입니다.
     private static let panelMaxHeight: CGFloat = 860
 
-    /// 이 비율 이상 다르면 [pageDiff] 로 기록 (0~1)
-    private static let diffThreshold: CGFloat = 0.005   // 0.5 %
+    /// 이 비율 이상 다르면 [pageDiff] 로 센다 (0~1).
+    ///
+    /// 0.5% 로 뒀더니 150쪽이 전부 걸렸습니다 — 실제로 잰 값이 1.8·2.6·
+    /// 3.4·4.1% 였으니, 글꼴이 달라 생기는 바탕 차이만으로도 넘는 선이었던
+    /// 것입니다. 전부 걸리는 깃발은 아무것도 가리키지 못합니다. 선을 올리고,
+    /// 선보다 중요한 '실제로 얼마나 다른가'를 로그에 적습니다.
+    private static let diffThreshold: CGFloat = 0.02    // 2 %
+
+    /// 차이가 큰 쪽을 몇 개까지 로그에 적을지. 어디부터 볼지 정하는 데 쓴다.
+    private static let worstPagesLogged = 12
+
+    /// 한글이 나오는 글꼴. 비교본에 제목을 적는 데 쓴다.
+    ///
+    /// UIFont.systemFont 로 적었더니 비교본 머리줄에서 한글만 빠져 나왔습니다
+    /// — 글리프가 없으면 그 글자는 그냥 안 그려집니다. 파일 이름이 한글이면
+    /// 어느 파일의 몇 쪽인지가 통째로 사라져, 비교본만 보고는 쓸 수가
+    /// 없었습니다.
+    private static func koreanFont(_ size: CGFloat, bold: Bool = false) -> UIFont {
+        let names = bold
+            ? ["AppleSDGothicNeo-Bold", "AppleSDGothicNeo-SemiBold"]
+            : ["AppleSDGothicNeo-Regular", "AppleSDGothicNeo-Medium"]
+        for name in names {
+            if let font = UIFont(name: name, size: size) { return font }
+        }
+        return .systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+    }
 
     /// 산출물에 담을 쪽 수 상한. 넘으면 앞에서부터 자르고 로그에 적습니다.
     private static let maxPages = 150
@@ -312,6 +336,9 @@ enum MediaFolderProbe {
         var boxBug:   [Int] = []    // 2 있음 · 3 없음 → 상자/회전 문제
         var blankBug: [Int] = []    // 1 있음 · 2 없음 → 변환기가 못 그림
         var diffPages: [Int] = []
+        // 쪽마다 실제로 잰 값. 어느 쪽부터 열어 볼지는 선을 넘었는지가 아니라
+        // 이 숫자가 정합니다.
+        var measured: [(page: Int, diff: CGFloat)] = []
 
         let renderer = UIGraphicsPDFRenderer(bounds: bounds)
         do {
@@ -350,6 +377,7 @@ enum MediaFolderProbe {
                     var diff: CGFloat = 0
                     if let a = pcImg, let b = viewImg {
                         diff = pixelDiff(a, b)
+                        measured.append((n, diff))
                         if verdict.isEmpty && diff >= diffThreshold {
                             diffPages.append(n)
                             verdict = String(format: "[pageDiff] %.1f%%", diff * 100)
@@ -362,7 +390,7 @@ enum MediaFolderProbe {
                     title.draw(in: CGRect(x: margin, y: margin,
                                           width: pageW - margin * 2, height: header),
                                withAttributes: [
-                                   .font: UIFont.systemFont(ofSize: 30, weight: .medium),
+                                   .font: koreanFont(30, bold: true),
                                    .foregroundColor: UIColor.black,
                                ])
 
@@ -383,6 +411,20 @@ enum MediaFolderProbe {
         } catch {
             ArgoDiag.log("probe", "비교본 쓰기 실패: \(error)")
             return "비교본 쓰기 실패 — \(error.localizedDescription)"
+        }
+
+        // 잰 값을 먼저 적습니다. 선을 넘은 쪽의 '수'보다, 얼마나 다른지와
+        // 어느 쪽이 가장 다른지가 다음에 열어 볼 쪽을 정해 줍니다.
+        if !measured.isEmpty {
+            let values = measured.map(\.diff).sorted()
+            let median = values[values.count / 2]
+            ArgoDiag.log("probe", String(format: "차이 최소 %.1f%% · 중앙 %.1f%% · 최대 %.1f%%",
+                                         (values.first ?? 0) * 100, median * 100,
+                                         (values.last ?? 0) * 100))
+            let worst = measured.sorted { $0.diff > $1.diff }.prefix(worstPagesLogged)
+            ArgoDiag.log("probe", "차이 큰 쪽: "
+                + worst.map { String(format: "%d(%.1f%%)", $0.page, $0.diff * 100) }
+                       .joined(separator: " "))
         }
 
         // 요약 한 줄. 로그만 훑어도 어느 파일이 성한지 보여야 합니다.
@@ -419,7 +461,7 @@ enum MediaFolderProbe {
         (blank ? name + " — 빈 쪽" : name).draw(
             in: label,
             withAttributes: [
-                .font: UIFont.systemFont(ofSize: 24),
+                .font: koreanFont(24),
                 .foregroundColor: blank ? UIColor.red : UIColor.darkGray,
             ])
 
