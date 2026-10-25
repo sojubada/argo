@@ -49,6 +49,16 @@ struct KeyboardHelpView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("스페이스로 고르기")
+                            .font(.headline)
+                            .foregroundColor(.accentColor)
+                        Text("목록에서 스페이스를 누르면 그 줄이 골라지고 동그라미가 켜집니다. "
+                             + "커서를 옮기며 여러 줄을 고를 수 있습니다. 다시 누르면 풀리고, "
+                             + "마지막 하나를 풀면 동그라미가 사라집니다. 파일을 여는 것은 엔터입니다.")
+                            .font(.caption)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("글자 입력 점프")
                             .font(.headline)
                             .foregroundColor(.accentColor)

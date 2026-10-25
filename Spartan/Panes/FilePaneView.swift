@@ -75,6 +75,10 @@ struct FilePaneView: View {
     /// 길게 누른 뜻이 '이 파일로 무언가 하겠다'인데 한 단계가 더 있었다.
     let menu: PaneRowMenu?
 
+    /// 포커스가 올라간 줄. 스페이스로 고를 대상을 알아야 해서 받아 둔다.
+    /// 포커스 엔진이 옮겨 줄 때마다 model 로 옮겨 적는다.
+    @FocusState private var focusedRow: Int?
+
     init(model: FilePaneModel,
          isActive: Bool,
          onOpen: @escaping (Int) -> Void,
@@ -93,6 +97,14 @@ struct FilePaneView: View {
         VStack(spacing: 0) {
             header
             list
+        }
+        // 포커스가 옮겨 갈 때마다 칸에 적어 둔다. 스페이스를 받은 쪽은
+        // 이 값을 보고 어느 줄을 고를지 정한다.
+        .onChange(of: focusedRow) { row in
+            model.focusedIndex = row
+            // 포커스가 들어온 칸이 곧 명령을 받을 칸이다. 두 칸을 쓸 때
+            // 커서만 옮기고 스페이스를 누르면 반대 칸이 골라지던 것을 막는다.
+            if row != nil { onFocus() }
         }
         .argoSurface()
         .overlay(
@@ -177,6 +189,7 @@ struct FilePaneView: View {
             }) {
                 rowContent(index)
             }
+            .focused($focusedRow, equals: index)
             .contextMenu {
                 // 동작을 바로 담는다. 여기서 한 번 더 시트를 거치면
                 // 길게 누른 의미가 없다.
@@ -228,6 +241,7 @@ struct FilePaneView: View {
             }) {
                 rowContent(index)
             }
+            .focused($focusedRow, equals: index)
         }
     }
 

@@ -66,6 +66,12 @@ final class FilePaneModel: ObservableObject {
     @Published var multiSelectFiles: [String] = []
     @Published var allWereSelected = false
 
+    /// 포커스가 올라가 있는 줄. 스페이스로 고를 대상이다.
+    ///
+    /// tvOS 는 포커스를 포커스 엔진이 들고 있어서, 어느 줄이 눌릴 차례인지
+    /// 물어볼 데가 없습니다. 칸이 직접 받아 적어 둡니다.
+    @Published var focusedIndex: Int?
+
     @Published var currentDirRisk: PathRisk = .safe
 
     // 2-D: 정렬·걸러보기·숨김
@@ -379,6 +385,21 @@ final class FilePaneModel: ObservableObject {
         } else {
             multiSelectFiles.removeAll { $0 == name }
         }
+    }
+
+    /// 포커스된 줄을 고르거나 풉니다. 스페이스가 부르는 자리입니다.
+    ///
+    /// 고르기 모드를 따로 켜게 하지 않습니다 — 처음 스페이스를 누르면
+    /// 그것이 곧 '고르겠다'는 뜻이므로 모드를 같이 켜고 동그라미를 띄웁니다.
+    /// 마지막 하나를 풀면 모드도 같이 내려, 쓰지 않는 동그라미가 줄마다
+    /// 남지 않게 합니다.
+    @discardableResult
+    func toggleSelectionAtFocus() -> Bool {
+        guard let index = focusedIndex, masterFiles.indices.contains(index) else { return false }
+        if !multiSelect { multiSelect = true }
+        toggleSelection(at: index)
+        if multiSelectFiles.isEmpty { multiSelect = false }
+        return true
     }
 
     /// 선택된 항목의 전체 경로. 선택이 없으면 빈 배열이다.

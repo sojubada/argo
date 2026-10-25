@@ -73,8 +73,33 @@ struct ContentView: View {
     }
     var currentDirRisk: PathRisk { pane.currentDirRisk }
 
+    /// WebDAV 를 띄우고 있는 칸. 없으면 nil.
+    ///
+    /// 두 칸일 때는 전체를 덮는 창 대신 반대 칸 자리에 그립니다 — 받을 곳을
+    /// 보면서 받아야 어디로 가는지 알 수 있습니다. 한 칸일 때는 내줄 자리가
+    /// 없으므로 예전처럼 창으로 엽니다.
+    @State var webdavSide: PaneSide?
+
     var directoryBinding: Binding<String> {
         Binding(get: { pane.directory }, set: { pane.directory = $0 })
+    }
+
+    /// 한쪽 칸 자리에 들어갈 WebDAV 목록.
+    @ViewBuilder
+    func webdavPane(for side: PaneSide) -> some View {
+        let model = side == .left ? leftPane : rightPane
+        WebDAVRootView(
+            directory: Binding(get: { model.directory },
+                               set: { model.directory = $0 }),
+            isPresented: Binding(
+                get: { webdavSide == side },
+                set: { shown in
+                    guard !shown else { return }
+                    webdavSide = nil
+                    // 받은 것이 바로 보여야 한다.
+                    model.updateFiles()
+                }))
+        .argoSurface()
     }
     var multiSelectBinding: Binding<Bool> {
         Binding(get: { pane.multiSelect }, set: { pane.multiSelect = $0 })
@@ -296,7 +321,14 @@ struct ContentView: View {
                     })
 
                     Button(action: { //webdav
-                        showSubView[25] = true
+                        // 두 칸이면 반대 칸 자리에 띄운다. 받을 곳을 보면서
+                        // 받을 수 있고, 창이 화면을 덮지 않는다.
+                        // 한 칸이면 내줄 자리가 없으니 예전처럼 창으로 연다.
+                        if dualPaneEnabled {
+                            webdavSide = (activeSide == .left) ? .right : .left
+                        } else {
+                            showSubView[25] = true
+                        }
                     }) {
                         Image(systemName: "globe")
                             .frame(width:50, height:50)
@@ -765,18 +797,29 @@ struct ContentView: View {
                     // 칸 사이 좌우 이동은 tvOS 포커스 엔진이 알아서 한다 — 손대면 싸운다.
                     if dualPaneEnabled {
                         HStack(spacing: 12) {
-                            FilePaneView(model: leftPane,
-                                         isActive: activeSide == .left,
-                                         onOpen: { index in openInPane(.left, index: index) },
-                                         onGoUp: { activeSide = .left; leftPane.goUp() },
-                                         onFocus: { activeSide = .left },
-                                         menu: rowMenu(for: .left))
-                            FilePaneView(model: rightPane,
-                                         isActive: activeSide == .right,
-                                         onOpen: { index in openInPane(.right, index: index) },
-                                         onGoUp: { activeSide = .right; rightPane.goUp() },
-                                         onFocus: { activeSide = .right },
-                                         menu: rowMenu(for: .right))
+                            // 한쪽이 WebDAV 를 띄우고 있으면 그 자리에 원격
+                            // 목록을 그린다. 전체를 덮는 창이 아니라 칸이므로,
+                            // 반대쪽 로컬 목록을 보면서 받을 수 있다.
+                            if webdavSide == .left {
+                                webdavPane(for: .left)
+                            } else {
+                                FilePaneView(model: leftPane,
+                                             isActive: activeSide == .left,
+                                             onOpen: { index in openInPane(.left, index: index) },
+                                             onGoUp: { activeSide = .left; leftPane.goUp() },
+                                             onFocus: { if activeSide != .left { activeSide = .left } },
+                                             menu: rowMenu(for: .left))
+                            }
+                            if webdavSide == .right {
+                                webdavPane(for: .right)
+                            } else {
+                                FilePaneView(model: rightPane,
+                                             isActive: activeSide == .right,
+                                             onOpen: { index in openInPane(.right, index: index) },
+                                             onGoUp: { activeSide = .right; rightPane.goUp() },
+                                             onFocus: { if activeSide != .right { activeSide = .right } },
+                                             menu: rowMenu(for: .right))
+                            }
                         }
                     } else {
                         FilePaneView(model: leftPane,
@@ -785,7 +828,7 @@ struct ContentView: View {
                                      isActive: false,
                                      onOpen: { index in openInPane(.left, index: index) },
                                      onGoUp: { activeSide = .left; leftPane.goUp() },
-                                     onFocus: { activeSide = .left },
+                                     onFocus: { if activeSide != .left { activeSide = .left } },
                                      menu: rowMenu(for: .left))
                     }
                 }
@@ -1248,6 +1291,14 @@ struct ContentView: View {
                 if let prefix = note.object as? String {
                     handleTypeAhead(prefix)
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ArgoSelectToggle.notification)) { _ in
+                handleSelectToggle()
+            }
+            // 한 칸으로 돌아가면 WebDAV 가 설 자리가 없다. 남겨 두면
+            // 한 칸뿐인 화면이 통째로 원격 목록이 된다.
+            .onChange(of: dualPaneEnabled) { on in
+                if !on { webdavSide = nil }
             }
             .sheet(isPresented: $showSubView[39], content: {
                 KeyboardHelpView(isPresented: $showSubView[39])
@@ -1749,6 +1800,19 @@ struct ContentView: View {
         guard let index = pane.indexOfFirstMatch(prefix: prefix) else { return }
         newViewFilePath = pane.masterFiles[index].fullPath
         newViewFileName = pane.masterFiles[index].name
+    }
+
+    /// 스페이스. 포커스가 올라간 줄을 고르거나 풉니다.
+    ///
+    /// 커서를 옮기며 여러 줄을 고를 수 있어야 하므로, 고른 뒤에도 포커스는
+    /// 그대로 둡니다 — 고르기가 끝나면 복사든 삭제든 기존 명령이 고른 것을
+    /// 그대로 받습니다.
+    func handleSelectToggle() {
+        guard pane.toggleSelectionAtFocus() else {
+            ArgoDiag.log("select", "스페이스 — 포커스된 줄이 없다")
+            return
+        }
+        ArgoDiag.log("select", "스페이스 — 고른 것 \(pane.multiSelectFiles.count)개")
     }
 
     /// 길게 눌렀을 때의 동작 묶음. 누른 칸을 먼저 활성으로 바꾸고

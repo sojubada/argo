@@ -235,12 +235,21 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         }
 
         var handled = false
+        var toggledSelection = false
         for press in presses {
             guard let key = press.key else { continue }
             let chars = key.charactersIgnoringModifiers
             // 수정키가 걸린 입력은 단축키 쪽이 처리한다.
-            guard key.modifierFlags.isEmpty, chars.count == 1,
-                  let scalar = chars.unicodeScalars.first,
+            guard key.modifierFlags.isEmpty, chars.count == 1 else { continue }
+
+            // 스페이스는 고르기다. 포커스 엔진으로 넘기지 않는다 —
+            // 넘기면 포커스된 줄이 눌려서 파일이 열린다.
+            if chars == " " {
+                toggledSelection = true
+                continue
+            }
+
+            guard let scalar = chars.unicodeScalars.first,
                   CharacterSet.alphanumerics.contains(scalar) else { continue }
 
             typeAheadBuffer += chars
@@ -248,10 +257,14 @@ final class ArgoHostingController: UIHostingController<ContentView> {
             restartTypeAheadTimer()
         }
 
+        if toggledSelection {
+            NotificationCenter.default.post(name: ArgoSelectToggle.notification, object: nil)
+        }
         if handled {
             NotificationCenter.default.post(name: ArgoTypeAhead.notification,
                                             object: typeAheadBuffer)
-        } else {
+        }
+        if !handled && !toggledSelection {
             super.pressesBegan(presses, with: event)
         }
     }
@@ -267,6 +280,16 @@ final class ArgoHostingController: UIHostingController<ContentView> {
 
 enum ArgoTypeAhead {
     static let notification = Notification.Name("ArgoTypeAheadNotification")
+}
+
+/// 스페이스로 고르기.
+///
+/// 수정키가 없는 스페이스라 단축키 표에 둘 수 없습니다 — 포커스 엔진이
+/// 스페이스를 '누름'으로 쓰기 때문에, UIKeyCommand 로 잡으면 목록에서
+/// 파일을 여는 길과 다투게 됩니다. pressesBegan 에서 먼저 받아 처리하고
+/// 엔진으로 넘기지 않습니다. 여는 것은 엔터와 리모컨 선택 버튼이 맡습니다.
+enum ArgoSelectToggle {
+    static let notification = Notification.Name("ArgoSelectToggleNotification")
 }
 
 /// 지금 글자를 받는 칸이 떠 있는가. 제네릭이 아닌 타입에 둔다 —
