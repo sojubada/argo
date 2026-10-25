@@ -130,15 +130,25 @@ enum MediaFolderProbe {
     // MARK: - 진입점
 
     /// 탐침을 실행합니다. 결과는 ArgoDiag 로그와 폴더의 PDF 들로 남습니다.
-    static func run() async {
-        ArgoDiag.log("probe", "MediaFolderProbe 시작")
+    /// 방금 돈 탐침이 무엇을 했는지. 화면에 그대로 띄웁니다.
+    ///
+    /// 로그를 꺼내 봐야만 알 수 있으면, 로그 사본이 묵은 것인지 탐침이 안 돈
+    /// 것인지 구별하느라 한참을 돌게 됩니다. 결과는 기기에서 바로 보여야
+    /// 합니다.
+    private(set) static var lastSummary: String = ""
+
+    /// 탐침을 실행합니다. 돌려주는 글은 화면에 띄울 요약이고,
+    /// 자세한 것은 ArgoDiag 로그와 폴더에 남는 PDF 들입니다.
+    @discardableResult
+    static func run() async -> String {
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        ArgoDiag.log("probe", "MediaFolderProbe 시작 — build \(build)")
 
         // 어느 폴더를 볼지 먼저 정합니다. 한 번만 정하고 아래로 넘깁니다 —
         // 도중에 바뀔 자리가 아니고, 로그에 어디를 봤는지 남아야 합니다.
         guard let root = resolveRoot() else {
-            ArgoDiag.log("probe", "변환할 파일이 든 폴더를 못 찾았습니다 — "
-                                  + "위 후보 중 한 곳에 hwp·docx·pptx 를 넣어 주세요")
-            return
+            return finish("build \(build) · 변환할 파일이 든 폴더를 못 찾았습니다.\n"
+                          + "찾아본 자리: " + rootCandidates.joined(separator: "  "))
         }
         ArgoDiag.log("probe", "폴더 \(root)")
 
@@ -146,8 +156,7 @@ enum MediaFolderProbe {
         do {
             items = try FileManager.default.contentsOfDirectory(atPath: root)
         } catch {
-            ArgoDiag.log("probe", "폴더 읽기 실패: \(error)")
-            return
+            return finish("build \(build) · 폴더를 읽지 못했습니다: \(root)\n\(error)")
         }
 
         // 변환할 원본만 고릅니다. 확장자로 거르므로 .pdf 는 (PC 레퍼런스든
@@ -159,16 +168,26 @@ enum MediaFolderProbe {
         ArgoDiag.log("probe", "원본 \(originals.count)개: "
                               + originals.joined(separator: ", "))
 
+        var lines: [String] = []
         for name in originals {
-            await probeOne(name: name, root: root)
+            lines.append(await probeOne(name: name, root: root))
         }
 
-        ArgoDiag.log("probe", "MediaFolderProbe 완료")
+        return finish("build \(build) · \(root)\n" + lines.joined(separator: "\n"))
+    }
+
+    private static func finish(_ summary: String) -> String {
+        lastSummary = summary
+        ArgoDiag.log("probe", "MediaFolderProbe 완료 — " + summary.replacingOccurrences(
+            of: "\n", with: " / "))
+        return summary
     }
 
     // MARK: - 파일 하나 처리
 
-    private static func probeOne(name: String, root: String) async {
+    /// 한 파일을 처리하고, 화면에 띄울 한 줄을 돌려줍니다.
+    @discardableResult
+    private static func probeOne(name: String, root: String) async -> String {
         let stem       = (name as NSString).deletingPathExtension
         let srcPath    = root + "/" + name
         let pcPDF      = root + "/" + stem + ".pdf"
@@ -192,7 +211,7 @@ enum MediaFolderProbe {
             ArgoDiag.log("probe", "변환 완료 → \(stem)\(argoSuffix).pdf")
         } catch {
             ArgoDiag.log("probe", "변환 실패: \(error)")
-            return
+            return "\(name) — 변환 실패"
         }
 
         // 변환기가 사용자에게 알릴 것을 남겼으면 같이 적어 둡니다 —
@@ -204,7 +223,7 @@ enum MediaFolderProbe {
         guard let argoDoc = CGPDFDocument(URL(fileURLWithPath: argoPDF) as CFURL),
               argoDoc.numberOfPages > 0 else {
             ArgoDiag.log("probe", "Argo PDF 를 열 수 없습니다")
-            return
+            return "\(name) — 변환본을 열 수 없음"
         }
 
         // 2. 화면 렌더본. PC 변환본이 없어도 이것은 남깁니다 —
@@ -215,14 +234,15 @@ enum MediaFolderProbe {
         guard FileManager.default.fileExists(atPath: pcPDF) else {
             ArgoDiag.log("probe", "PC 변환본 없음 — 비교 생략 "
                                   + "(\(stem).pdf 를 같은 폴더에 넣어 주세요)")
-            return
+            return "\(name) — \(argoDoc.numberOfPages)쪽 변환, PC 변환본이 없어 비교 못 함"
         }
         guard let pcDoc = CGPDFDocument(URL(fileURLWithPath: pcPDF) as CFURL) else {
             ArgoDiag.log("probe", "PC 변환본을 열 수 없습니다")
-            return
+            return "\(name) — PC 변환본을 열 수 없음"
         }
 
-        compare(pcDoc: pcDoc, argoDoc: argoDoc, to: comparePDF, label: stem)
+        return "\(name) — "
+             + compare(pcDoc: pcDoc, argoDoc: argoDoc, to: comparePDF, label: stem)
     }
 
     // MARK: - 화면 렌더본
@@ -263,8 +283,9 @@ enum MediaFolderProbe {
 
     // MARK: - 나란히 비교
 
+    @discardableResult
     private static func compare(pcDoc: CGPDFDocument, argoDoc: CGPDFDocument,
-                                to path: String, label: String) {
+                                to path: String, label: String) -> String {
         let pcCount   = pcDoc.numberOfPages
         let argoCount = argoDoc.numberOfPages
         ArgoDiag.log("probe", "PC \(pcCount)쪽 / Argo \(argoCount)쪽")
@@ -275,7 +296,7 @@ enum MediaFolderProbe {
         let compareCount = min(pcCount, argoCount)
         guard compareCount > 0 else {
             ArgoDiag.log("probe", "비교할 쪽이 없습니다")
-            return
+            return "비교할 쪽이 없음"
         }
         let count = min(compareCount, maxPages)
         if count < compareCount {
@@ -361,13 +382,20 @@ enum MediaFolderProbe {
             ArgoDiag.log("probe", "비교본 → \(label)\(compareSuffix).pdf (\(count)쪽, \(size))")
         } catch {
             ArgoDiag.log("probe", "비교본 쓰기 실패: \(error)")
-            return
+            return "비교본 쓰기 실패 — \(error.localizedDescription)"
         }
 
         // 요약 한 줄. 로그만 훑어도 어느 파일이 성한지 보여야 합니다.
+        var summary = "PC \(pcCount)쪽/Argo \(argoCount)쪽, \(count)쪽 비교 → "
         if boxBug.isEmpty && blankBug.isEmpty && diffPages.isEmpty {
+            summary += "이상 없음"
             ArgoDiag.log("probe", "결과 \(label) — 세 판본이 같습니다 (\(count)쪽 비교)")
         } else {
+            var parts: [String] = []
+            if !blankBug.isEmpty  { parts.append("blankBug \(blankBug.count)쪽") }
+            if !boxBug.isEmpty    { parts.append("boxBug \(boxBug.count)쪽") }
+            if !diffPages.isEmpty { parts.append("diff \(diffPages.count)쪽") }
+            summary += parts.joined(separator: ", ")
             if !blankBug.isEmpty {
                 ArgoDiag.log("probe", "결과 \(label) [blankBug] 쪽 "
                                       + blankBug.map(String.init).joined(separator: ", "))
@@ -381,6 +409,7 @@ enum MediaFolderProbe {
                                       + diffPages.map(String.init).joined(separator: ", "))
             }
         }
+        return summary
     }
 
     /// 패널 하나를 테두리·이름표와 함께 그립니다.

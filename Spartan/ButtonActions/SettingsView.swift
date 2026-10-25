@@ -205,20 +205,24 @@ struct SettingsView: View {
 					.edgesIgnoringSafeArea(.all)
 			}
 
-			// Lab ④ — /var/mobile/media/ 원본 vs PC PDF 비교 탐침
+			// Lab ④ — media 폴더 원본 vs PC PDF 비교 탐침
+			//
+			// 결과를 버튼 아래에 그대로 띄웁니다. 로그를 꺼내 봐야만 알 수
+			// 있으면, 받아 본 로그가 묵은 사본인지 탐침이 안 돈 것인지
+			// 구별하느라 한참을 돌게 됩니다.
 			Button(action: {
 				guard !probeRunning else { return }
 				probeRunning = true
 				probeStatus  = "실행 중…"
 				Task {
-					await MediaFolderProbe.run()
+					let summary = await MediaFolderProbe.run()
 					await MainActor.run {
 						probeRunning = false
-						probeStatus  = "완료 — argo-diag.log 확인"
+						probeStatus  = summary
 					}
 				}
 			}) {
-				HStack {
+				HStack(alignment: .top) {
 					if probeRunning {
 						ProgressView()
 							.frame(width: 50, height: 50)
@@ -226,15 +230,17 @@ struct SettingsView: View {
 						Image(systemName: "arrow.triangle.2.circlepath.doc.on.clipboard")
 							.frame(width: 50, height: 50)
 					}
-					VStack(alignment: .leading) {
+					VStack(alignment: .leading, spacing: 8) {
 						Text("Lab ④ media 폴더 PDF 비교 탐침 ← 지금 이것")
 							.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 							}
 						if !probeStatus.isEmpty {
 							Text(probeStatus)
-								.font(.system(size: 24))
+								.font(.system(size: 22))
 								.foregroundColor(.secondary)
+								.multilineTextAlignment(.leading)
+								.fixedSize(horizontal: false, vertical: true)
 						}
 					}
 				}
