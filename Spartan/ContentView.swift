@@ -194,6 +194,8 @@ struct ContentView: View {
     @State var callback = true
     
     @State private var isLoadingView = false
+    /// 오피스 문서를 PDF 로 바꾸는 중인가. 연타로 겹쳐 도는 것을 막는다.
+    @State private var isConvertingOffice = false
     @State var blankString: [String] = [""] 
     @State private var nonexistentFile = "" 
     
@@ -228,16 +230,7 @@ struct ContentView: View {
                         if editing { ArgoTextEntry.begin() }
                         else { ArgoTextEntry.end() }
                     }, onCommit: {
-                        if directory == "" {
-                            directory = "/"
-                        }
-                        directPathTypeCheckNewViewFileVariableSetter()
-                        defaultAction(index: 0, isDirectPath: true)
-                        
-                        let regex = try! NSRegularExpression(pattern: "^[a-zA-Z0-9_\\-\\./]+$")
-                        if regex.firstMatch(in: directory, options: [], range: NSRange(location: 0, length: directory.utf16.count)) == nil {
-                            directory = "/"
-                        }
+                        commitTypedPath()
                     })
                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                         view.scaledFont(name: "BotW Sheikah Regular", size: 40)
@@ -527,11 +520,10 @@ struct ContentView: View {
                             .sheet(isPresented: $showSubView[19], onDismiss: {
                                 if(didSearch) {
                                     if(FileInfo.isDirectory(filePath: newViewFilePath)) {
-                                        directory = newViewFilePath
+                                        pane.navigate(to: newViewFilePath.hasSuffix("/")
+                                                      ? newViewFilePath : newViewFilePath + "/")
                                     } else {
-                                        directory = URL(fileURLWithPath: newViewFilePath).deletingLastPathComponent().path + "/"
-                                        masterFiles.append(SpartanFile(name: URL(fileURLWithPath: newViewFilePath).lastPathComponent, fullPath: newViewFilePath, isSelected: false, fileType: FileInfo.yandereDevFileType(file: newViewFilePath), isLoadingFile: false))
-                                        defaultAction(index: masterFiles.count-1, isDirectPath: false)
+                                        openFileAtFullPath(newViewFilePath)
                                     }
                                     didSearch = false
                                 }
@@ -879,29 +871,44 @@ struct ContentView: View {
                         }
                     })
                     
+                    // 지우는 길은 TrashManager 하나로 모은다.
+                    //
+                    // 전에는 RootHelperActs.rm 을 불렀다. 그것은 루트 도우미
+                    // 바이너리를 띄우는데, TrollStore 로 깔면 그 바이너리가
+                    // 없어 아무 일도 일어나지 않는다. 그런데도 바로 아래에서
+                    // masterFiles 에서 줄을 빼 버려서, 화면에서만 사라지고
+                    // 파일은 디스크에 남았다. 정렬을 한 번 바꾸면 rawFiles
+                    // 에서 다시 읽어 와 지운 파일이 되살아났다.
+                    //
+                    // 화면에서 줄을 빼는 것도 그만둔다. masterFiles 는
+                    // rawFiles 를 걸러 만든 결과라, 결과만 건드리면 원본과
+                    // 어긋난다. 지운 뒤 다시 읽는다.
                     if(directory == "/private/var/mobile/Media/.Trash/"){
                         ContextMenuButtonTV(stringKey: "DELETE", action: {
-                            RootHelperActs.rm(masterFiles[newViewFileIndex].fullPath)
-                            masterFiles.remove(at: newViewFileIndex)
+                            if TrashManager.shared.deletePathDirectly(masterFiles[newViewFileIndex].fullPath) {
+                                updateFiles()
+                            }
                             showSubView[1] = false
                         })
                     } else if(directory == "/private/var/mobile/Media/" && masterFiles[newViewFileIndex].name == ".Trash/"){
                         ContextMenuButtonTV(stringKey: "TRASHYEET", action: {
                             _ = TrashManager.shared.emptyAll()
+                            updateFiles()
                             showSubView[1] = false
                         })
                     } else {
                         ContextMenuButtonTV(stringKey: "GOTOTRASH", action: {
                             if TrashManager.shared.moveToTrash(path: masterFiles[newViewFileIndex].fullPath) {
-                                masterFiles.remove(at: newViewFileIndex)
+                                updateFiles()
                             }
                             showSubView[1] = false
                         })
                     }
                     if(deleteOverride) { //i dont think this can display but it's HERE ANYWAY
                         ContextMenuButtonTV(stringKey: "DELETE", action: {
-                            RootHelperActs.rm(masterFiles[newViewFileIndex].fullPath)
-                            masterFiles.remove(at: newViewFileIndex)
+                            if TrashManager.shared.deletePathDirectly(masterFiles[newViewFileIndex].fullPath) {
+                                updateFiles()
+                            }
                             showSubView[1] = false
                         })
                     }
@@ -1155,13 +1162,15 @@ struct ContentView: View {
                 .onAppear {
                     resetShowSubView()
                     updateFiles()
-                    if(FileInfo.yandereDevFileType(file: directory) != 0) {
-                        directPathTypeCheckNewViewFileVariableSetter()
+                    // 폴더가 아니라 파일을 가리키며 열린 경우. 그 파일이 든
+                    // 폴더를 띄우고 파일을 연다.
+                    //
+                    // 전에는 열고 나서 directory 를 직접 잘라 윗폴더로
+                    // 옮겼는데, components 가 비면 removeLast() 가 그 자리에서
+                    // 죽었다 — "/" 로 열리면 그랬다.
+                    if FileInfo.yandereDevFileType(file: directory) != 0 {
                         multiSelect = false
-                        defaultAction(index: 0, isDirectPath: true)
-                        var components = directory.split(separator: "/")
-                        components.removeLast()
-                        directory = "/" + components.joined(separator: "/") + "/"
+                        openFileAtFullPath(directory, recordHistory: false)
                     }
                 }
                 .sheet(isPresented: $showSubView[3]) { //file info
@@ -1493,9 +1502,25 @@ struct ContentView: View {
             return
         }
 
+        // 변환이 도는 동안 또 부르지 않는다.
+        //
+        // 큰 pptx 는 여섯 초가 넘게 걸리는데 그동안 화면이 멈춘 것처럼
+        // 보여서, 리모컨을 몇 번 더 누르게 된다. 누른 만큼 변환이 겹쳐
+        // 돌고 뷰어도 겹쳐 떴다 — 로그에 같은 파일이 연달아 세 번 변환된
+        // 자국이 남아 있다.
+        guard !isConvertingOffice else {
+            ArgoDiag.log("convert", "이미 변환 중 — 다시 부르지 않는다")
+            return
+        }
+        isConvertingOffice = true
+        // 누른 줄에 도는 표시를 띄운다. 칸이 이미 그릴 줄 안다.
+        setRowLoading(path, true)
+
         DispatchQueue.global(qos: .userInitiated).async {
             let converted = try? ArgoOfficeConverter.convertToPDF(at: path)
             DispatchQueue.main.async {
+                isConvertingOffice = false
+                setRowLoading(path, false)
                 guard let pdf = converted else {
                     // 변환에 실패해도 웹 뷰어로 되돌리지 않습니다.
                     //
@@ -1512,6 +1537,16 @@ struct ContentView: View {
                 vc.notice = ArgoOfficeConverter.lastUserNotice
                 vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
                 presentReader(vc)
+            }
+        }
+    }
+
+    /// 그 경로의 줄에 도는 표시를 켜거나 끕니다. 양쪽 칸을 다 봅니다 —
+    /// 변환이 끝날 즈음 활성 칸이 바뀌어 있을 수 있습니다.
+    private func setRowLoading(_ path: String, _ loading: Bool) {
+        for model in [leftPane, rightPane] {
+            if let i = model.masterFiles.firstIndex(where: { $0.fullPath == path }) {
+                model.masterFiles[i].isLoadingFile = loading
             }
         }
     }
@@ -1579,21 +1614,37 @@ struct ContentView: View {
                 do {
                     try fileManager.contentsOfDirectory(atPath: directory + fileToCheck[index])
                 } catch {
-					let err = error.localizedDescription
-					if err.substring(fromIndex: err.count - 33) == "don’t have permission to view it." { //substrings are horrible parts of swift
-						//switched to using the String extension. so much nicer.
+                    // 오류의 종류는 코드로 가린다.
+                    //
+                    // 전에는 영어 메시지의 끝 33글자가 "don't have permission
+                    // to view it." 인지 비교했다. 기기 말이 한국어면 그 문장이
+                    // 아예 나오지 않아 권한 거부 알림이 한 번도 뜨지 않았고,
+                    // 폴더는 조용히 안 열렸다.
+                    let nsErr = error as NSError
+                    let noPermission = nsErr.domain == NSCocoaErrorDomain
+                        && (nsErr.code == NSFileReadNoPermissionError
+                            || nsErr.code == NSFileReadUnknownError)
+                    if noPermission {
                         alertTitle = NSLocalizedString("SHOW_DENIED", comment: "Here's the graduate.")
                         alertMsg = NSLocalizedString("INFO_DENIED", comment: "You're monsters!")
-                        showAlert = true
-                        denied = true
+                    } else {
+                        alertTitle = NSLocalizedString("SHOW_DENIED", comment: "Here's the graduate.")
+                        alertMsg = error.localizedDescription
                     }
+                    showAlert = true
+                    denied = true
                 }
                 if(!denied){
                     if(isDirectPath) {
                         updateFiles()
                     } else {
-                        directory = directory + fileToCheck[index]
-                        updateFiles()
+                        // directory 에 직접 이어 붙이지 않는다.
+                        //
+                        // navigate 가 되돌아갈 기록을 남기는 유일한 통로인데,
+                        // 여기서 directory 를 덮어쓰면 그 통로를 건너뛴다.
+                        // 폴더를 아무리 타고 들어가도 backStack 이 비어 있어
+                        // ⌘[ 가 듣지 않던 이유다.
+                        pane.enter(fileToCheck[index])
                     }
                 }
             case 1:
@@ -1622,11 +1673,9 @@ struct ContentView: View {
                     let dest = try FileInfo.readSymlinkDestination(path: directory + fileToCheck[index])
                     if directory != dest { //1.74/2gb memory used if you have a symlink that resolves to itself. spartan continually tries to resolve to it and it infinite loops until jetsam kills it due to too much memory usage
                         if FileInfo.isDirectory(filePath: dest) {
-                            directory = dest
-                            updateFiles()
+                            pane.navigate(to: dest.hasSuffix("/") ? dest : dest + "/")
                         } else {
-                            masterFiles.append(SpartanFile(name: URL(fileURLWithPath: dest).lastPathComponent, fullPath: dest, isSelected: false, fileType: FileInfo.yandereDevFileType(file: dest), isLoadingFile: false))
-                            defaultAction(index: masterFiles.count-1, isDirectPath: false)
+                            openFileAtFullPath(dest)
                         }
                     }
                 } catch {
@@ -2064,12 +2113,78 @@ struct ContentView: View {
     }
 
     
-    func directPathTypeCheckNewViewFileVariableSetter() { //this function name is very very silly and im leaving it. I think it's used once and it doesn't even work properly. but it uses a feature that literally no one should be using
-        if(FileInfo.yandereDevFileType(file: directory) != 0){
-            newViewFilePath = String(directory.prefix(through: directory.lastIndex(of: "/")!))
-            let inProgressFileName = directory.split(separator: "/")
-            newViewFileName = String(inProgressFileName.last ?? "")
+    /// 다른 폴더에 있는 파일 하나를 연다.
+    ///
+    /// 그 파일이 든 폴더로 먼저 가고, 목록에서 제 자리를 찾아 연다.
+    ///
+    /// 전에는 지금 폴더의 masterFiles 끝에 그 파일을 끼워 넣고 마지막
+    /// 인덱스로 열었다. 두 가지가 따라왔다. 여는 쪽은 경로를 `directory +
+    /// 이름` 으로 다시 맞추므로, 대상이 다른 폴더에 있으면 있지도 않은
+    /// 경로를 여는 꼴이 됐다. 그리고 끼워 넣은 줄이 목록에 그대로 남아,
+    /// 누르면 엉뚱한 파일을 건드렸다.
+    func openFileAtFullPath(_ path: String, recordHistory: Bool = true) {
+        let parent = (path as NSString).deletingLastPathComponent
+        let name   = (path as NSString).lastPathComponent
+        pane.navigate(to: parent.hasSuffix("/") ? parent : parent + "/",
+                      recordHistory: recordHistory)
+        guard let idx = masterFiles.firstIndex(where: { $0.name == name }) else {
+            // 폴더로는 갔으니 그 자리에서 찾을 수 있다. 조용히 넘어가지 않는다.
+            ArgoDiag.log("open", "목록에서 못 찾음 \(name) — \(parent)")
+            return
         }
+        defaultAction(index: idx, isDirectPath: false)
+    }
+
+    /// 위쪽 칸에 직접 쳐 넣은 경로로 간다.
+    ///
+    /// 전에 있던 것은 세 가지가 틀렸다.
+    ///
+    /// 하나, `^[a-zA-Z0-9_\-./]+$` 로 걸러서 한글이나 띄어쓰기가 든 폴더
+    /// 이름은 통과하지 못했다. 통과 못 하면 루트로 보내 버렸으므로, 한글
+    /// 폴더로 가려고 칠 때마다 / 로 튕겼다.
+    ///
+    /// 둘, 그 검사를 `defaultAction` 을 부른 **뒤에** 했다. 이미 간 다음에
+    /// 길을 확인한 셈이다.
+    ///
+    /// 셋, `directory.lastIndex(of: "/")!` 가 있었다. 슬래시 없이 글자만
+    /// 치면 nil 이 나와 그 자리에서 앱이 죽었다.
+    ///
+    /// 지금은 거르지 않고, 있는 곳이면 가고, 파일이면 그 파일이 든 폴더로
+    /// 가서 연다. 없는 곳이면 있는 윗폴더까지 거슬러 올라간다 — 오타 하나에
+    /// 루트로 내쫓지 않기 위해서다.
+    func commitTypedPath() {
+        var typed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.hasPrefix("/") { typed = "/" + typed }
+        while typed.count > 1 && typed.hasSuffix("/") { typed.removeLast() }
+        if typed.isEmpty { typed = "/" }
+
+        func asFolder(_ p: String) -> String { p.hasSuffix("/") ? p : p + "/" }
+
+        if FileInfo.isDirectory(filePath: typed) {
+            pane.navigate(to: asFolder(typed))
+            return
+        }
+
+        if fileManager.fileExists(atPath: typed) {
+            let parent = (typed as NSString).deletingLastPathComponent
+            let name   = (typed as NSString).lastPathComponent
+            pane.navigate(to: asFolder(parent))
+            if let idx = masterFiles.firstIndex(where: { $0.name == name }) {
+                defaultAction(index: idx, isDirectPath: false)
+            }
+            return
+        }
+
+        // 없는 경로다. 있는 윗폴더까지 올라간다.
+        var probe = (typed as NSString).deletingLastPathComponent
+        while probe.count > 1 && !FileInfo.isDirectory(filePath: probe) {
+            probe = (probe as NSString).deletingLastPathComponent
+        }
+        let landing = FileInfo.isDirectory(filePath: probe) ? probe : "/"
+        pane.navigate(to: asFolder(landing))
+        alertTitle = "그런 경로가 없습니다"
+        alertMsg = typed + "\n\n가장 가까운 폴더로 왔습니다."
+        showAlert = true
     }
     func resetShowSubView() {
         for i in 0..<showSubView.count {
@@ -2099,11 +2214,20 @@ struct ContentView: View {
         let targets = pendingDeletePaths
         guard !targets.isEmpty else { return }
 
-        let inTrash = PathSafety.risk(of: directory) != .forbidden
-            && directory.contains("/.Trash")
+        // 영구 삭제인지는 지울 파일 하나하나를 보고 정한다.
+        //
+        // 전에는 활성 칸의 directory 에 "/.Trash" 가 들어 있는지로 한꺼번에
+        // 정했다. 두 가지가 틀렸다. 이름에 들어 있기만 하면 되므로
+        // .Trash_Backup 같은 멀쩡한 폴더의 파일이 휴지통을 거치지 않고
+        // 그 자리에서 사라졌고, 지울 것은 pendingDeletePaths 에 전체 경로로
+        // 들어 있는데 판정은 '지금 활성인 칸'으로 해서, 미리보기가 떠 있는
+        // 사이 포커스가 반대 칸으로 넘어가면 엉뚱한 기준으로 지웠다.
+        let trashRoot = TrashManager.trashRootPath
 
         for path in targets {
-            if inTrash {
+            let norm = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            let insideTrash = norm == trashRoot || norm.hasPrefix(trashRoot + "/")
+            if insideTrash {
                 TrashManager.shared.deletePathDirectly(path)
             } else {
                 TrashManager.shared.moveToTrash(path: path)
@@ -2111,9 +2235,14 @@ struct ContentView: View {
         }
 
         pendingDeletePaths = []
-        multiSelect = false
-        resetMultiSelectArrays()
-        updateFiles()
+        // 고른 것은 양쪽 칸에 걸쳐 있을 수 있다. 활성 칸만 비우면 반대 칸에
+        // 지워진 파일이 골라진 채로 남는다.
+        leftPane.multiSelect = false
+        leftPane.resetMultiSelectArrays()
+        rightPane.multiSelect = false
+        rightPane.resetMultiSelectArrays()
+        leftPane.updateFiles()
+        rightPane.updateFiles()
     }
 }
 
