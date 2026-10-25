@@ -1917,8 +1917,35 @@ fn render_svg(
                 pdf_bottom + (view_box.height - (y - view_box.y)) * scale_y,
             )
         });
-        page.add_path(commands, fill);
+        page.add_path_with_rule(commands, fill, svg_even_odd(path));
     }
+}
+
+/// 이 경로를 짝홀 규칙으로 칠해야 하는가.
+///
+/// fill-rule 은 물려받는 속성이라 <g> 에 걸어 두고 그 안의 경로들이 따르는
+/// 식으로 쓰는 일이 많다. 그래서 경로에 없으면 위로 거슬러 올라가며 찾는다.
+/// 속성과 style="fill-rule:evenodd" 두 가지 적는 법을 다 본다.
+fn svg_even_odd(path: Node<'_, '_>) -> bool {
+    let mut node = Some(path);
+    while let Some(current) = node {
+        if let Some(value) = current.attribute("fill-rule") {
+            return value.trim().eq_ignore_ascii_case("evenodd");
+        }
+        if let Some(style) = current.attribute("style") {
+            for declaration in style.split(';') {
+                let mut parts = declaration.splitn(2, ':');
+                let (Some(name), Some(value)) = (parts.next(), parts.next()) else {
+                    continue;
+                };
+                if name.trim().eq_ignore_ascii_case("fill-rule") {
+                    return value.trim().eq_ignore_ascii_case("evenodd");
+                }
+            }
+        }
+        node = current.parent_element();
+    }
+    false
 }
 
 fn read_svg_view_box(root: Node<'_, '_>) -> Option<PptxRect> {
@@ -2899,6 +2926,61 @@ mod tests {
             .elements
             .iter()
             .all(|element| !matches!(element, super::PptxElement::Picture(_))));
+    }
+
+    /// 짝홀 규칙으로 그린 아이콘은 구멍이 뚫린 채 나와야 한다.
+    ///
+    /// 바깥 네모와 안쪽 네모를 같은 방향으로 그려 둔 모양이다. nonzero 로
+    /// 칠하면 두 네모가 겹쳐 속이 꽉 찬 사각형이 되고, 그것이 슬라이드에서
+    /// 아이콘 자리마다 검은 덩어리가 나오던 모습이다.
+    #[test]
+    fn fills_svg_icons_with_the_rule_the_file_asks_for() {
+        fn content_of(svg: &str) -> String {
+            let mut document = crate::pdf::PdfDocument::new();
+            {
+                let page = document.add_page(100.0, 100.0);
+                super::render_svg(
+                    page,
+                    svg.as_bytes(),
+                    super::PptxCrop::default(),
+                    super::PptxRect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 },
+                    100.0,
+                    None,
+                );
+            }
+            String::from_utf8_lossy(&document.to_bytes()).into_owned()
+        }
+
+        const HEAD: &str =
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10">"##;
+        // 바깥 네모 하나, 안쪽 네모 하나. 짝홀이면 가운데가 뚫린다.
+        const RING: &str = "M0 0 H10 V10 H0 Z M2 2 H8 V8 H2 Z";
+
+        // 경로에 바로 적은 경우.
+        let direct = format!(
+            r##"{HEAD}<path fill-rule="evenodd" fill="#000000" d="{RING}"/></svg>"##
+        );
+        assert!(content_of(&direct).contains("f*"),
+                "fill-rule=evenodd 인데 짝홀로 칠하지 않았다");
+
+        // <g> 에 걸어 두고 물려받는 경우. 아이콘은 보통 이렇게 생겼다.
+        let inherited = format!(
+            r##"{HEAD}<g fill-rule="evenodd"><path fill="#000000" d="{RING}"/></g></svg>"##
+        );
+        assert!(content_of(&inherited).contains("f*"),
+                "<g> 에서 물려받은 fill-rule 을 못 봤다");
+
+        // style 로 적는 경우.
+        let styled = format!(
+            r##"{HEAD}<path style="fill-rule:evenodd" fill="#000000" d="{RING}"/></svg>"##
+        );
+        assert!(content_of(&styled).contains("f*"), "style 의 fill-rule 을 못 봤다");
+
+        // 아무 말이 없으면 SVG 기본값인 nonzero 그대로여야 한다.
+        let plain = format!(r##"{HEAD}<path fill="#000000" d="{RING}"/></svg>"##);
+        let out = content_of(&plain);
+        assert!(!out.contains("f*"), "말이 없는데 짝홀로 칠했다");
+        assert!(out.contains("f\n"), "칠하기는 해야 한다");
     }
 
     #[test]

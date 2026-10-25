@@ -157,6 +157,12 @@ enum PdfOp {
     Path {
         commands: Vec<PdfPathCommand>,
         color: PdfColor,
+        /// 짝홀 규칙으로 칠할지. SVG 의 fill-rule="evenodd" 가 여기로 온다.
+        ///
+        /// 아이콘은 바깥 테두리와 안쪽 구멍을 같은 방향으로 그려 놓고
+        /// 짝홀 규칙으로 구멍을 뚫는 일이 흔하다. nonzero 로 칠하면 그
+        /// 구멍이 메워져 아이콘이 통째로 검은 덩어리가 된다.
+        even_odd: bool,
     },
     Line {
         x1: f32,
@@ -300,8 +306,21 @@ impl PdfPage {
     }
 
     pub(crate) fn add_path(&mut self, commands: Vec<PdfPathCommand>, color: PdfColor) {
+        self.add_path_with_rule(commands, color, false);
+    }
+
+    pub(crate) fn add_path_with_rule(
+        &mut self,
+        commands: Vec<PdfPathCommand>,
+        color: PdfColor,
+        even_odd: bool,
+    ) {
         if !commands.is_empty() {
-            self.ops.push(PdfOp::Path { commands, color });
+            self.ops.push(PdfOp::Path {
+                commands,
+                color,
+                even_odd,
+            });
         }
     }
 
@@ -1217,7 +1236,11 @@ fn write_content_stream(
                     center_y
                 ));
             }
-            PdfOp::Path { commands, color } => {
+            PdfOp::Path {
+                commands,
+                color,
+                even_odd,
+            } => {
                 content.push_str(&format!(
                     "{:.3} {:.3} {:.3} rg ",
                     clamp_color(color.r),
@@ -1240,7 +1263,7 @@ fn write_content_stream(
                         PdfPathCommand::Close => content.push_str("h "),
                     }
                 }
-                content.push_str("f\n");
+                content.push_str(if *even_odd { "f*\n" } else { "f\n" });
             }
             PdfOp::Line {
                 x1,
