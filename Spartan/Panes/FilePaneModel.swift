@@ -105,12 +105,13 @@ final class FilePaneModel: ObservableObject {
         applySortAndFilter()
         normalizeDirectoryPath()
         evaluateRisk()
-
-        if PathSafety.isWriteAllowed(directory) {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [directory] in
-                cacheFolder(directory)
-            }
-        }
+        // 옛 cacheFolder 를 2초 뒤에 따로 부르던 것을 뗐다.
+        //
+        // 이 모델이 캐시를 이미 직접 쓴다(writeCacheIfWritable·pruneCache).
+        // cacheFolder 는 같은 일을 /var/mobile/Media/temp 라는 **공용 파일
+        // 하나**에 쓴 뒤 옮기는 식이었다. 두 칸이 동시에 새로 읽으면 한 칸의
+        // 목록이 다른 칸 폴더의 캐시로 들어갈 수 있었다. 지금까지는 그 옮기기가
+        // 늘 실패해서 무해했을 뿐이다 — 작업 기록의 'MOVE (root)' 들이 그것이다.
     }
 
     /// 정렬·걸러보기만 다시 적용한다. 디스크를 읽지 않는다.
@@ -176,7 +177,16 @@ final class FilePaneModel: ObservableObject {
             let decodedNames = decoded.map { $0.name }
             for name in names {
                 if let j = decodedNames.firstIndex(of: name) {
-                    out.append(fillMissingAttributes(decoded[j]))
+                    // 전체 경로는 캐시에서 가져오지 않고 지금 폴더로 다시 짓는다.
+                    //
+                    // 캐시 파일은 폴더 안에 있어 폴더와 함께 옮겨지고 이름도 같이
+                    // 바뀐다. 그 안의 fullPath 는 옛 자리를 가리킨 채로 남는다.
+                    // 그대로 쓰면 이름을 바꾼 폴더에서 파일을 열거나 지울 때
+                    // 옛 자리 — 다른 폴더일 수도 있다 — 의 같은 이름 파일을
+                    // 건드리게 된다.
+                    var entry = decoded[j]
+                    entry.fullPath = directory + name
+                    out.append(fillMissingAttributes(entry))
                 } else {
                     out.append(makeFile(name))
                 }

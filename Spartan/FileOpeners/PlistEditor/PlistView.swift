@@ -125,9 +125,17 @@ struct PlistView: View {
 				print("Failed to save file: \(error.localizedDescription)")
 				errorString = "Failed to save file: \(error.localizedDescription)"
 				errorShow = true
+				// 임시 파일도 못 썼다. 여기서 멈춘다.
+				//
+				// 전에는 catch 가 돌아가지 않고 아래로 흘러, 임시 파일을 못
+				// 쓴 채로 원본을 지우고 빈 자리에 아무것도 옮기지 못했다.
+				return
 			}
-			RootHelperActs.rm(fullPath)
-			RootHelperActs.mvtemp(fullPath)
+			// 원본을 먼저 지우지 않는다. mvtemp 가 바꿔 끼운다.
+			if !RootHelperActs.mvtemp(fullPath) {
+				errorString = "저장하지 못했습니다. 원본은 그대로입니다."
+				errorShow = true
+			}
 		} else {
 			do {
 				try nsdict.write(to: URL(fileURLWithPath: fullPath))

@@ -113,8 +113,14 @@ struct TextView: View {
 						}
 						if filePathIsNotMobileWritable(fullPath) {
 							try stringArrayToString(inputArray: fileContents).write(to: URL(fileURLWithPath: tempPath), atomically: true, encoding: encoding)
-							RootHelperActs.rm(fullPath)
-							RootHelperActs.mvtemp(fullPath)
+							// 원본을 먼저 지우지 않는다. mvtemp 가 한 번에 바꿔 끼우므로,
+							// 실패해도 원본이 남는다. 전에는 지운 뒤에 옮기다 실패하면
+							// 편집한 것도 원본도 다 없어졌다.
+							if !RootHelperActs.mvtemp(fullPath) {
+								errorString = "저장하지 못했습니다. 원본은 그대로입니다.\n" + (RootHelperActs.lastError ?? "")
+								errorShow = true
+								return
+							}
 						} else {
 							try stringArrayToString(inputArray: fileContents).write(to: URL(fileURLWithPath: fullPath), atomically: true, encoding: encoding)
 							OperationLog.record(action: "EDIT_TEXT", path: fullPath)

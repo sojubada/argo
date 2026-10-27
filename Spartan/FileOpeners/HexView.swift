@@ -115,7 +115,7 @@ struct HexView: View {
 						}
 						if filePathIsNotMobileWritable(fullPath) {
 							try newData?.write(to: URL(fileURLWithPath: tempPath)) // write data to file
-							RootHelperActs.rm(fullPath)
+							// 원본을 먼저 지우지 않는다 — 실패하면 원본이 남아야 한다.
 							RootHelperActs.mvtemp(fullPath)
 						} else {
 							try newData?.write(to: URL(fileURLWithPath: fullPath)) // write data to file

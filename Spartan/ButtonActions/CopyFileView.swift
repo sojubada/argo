@@ -75,7 +75,12 @@ struct CopyFileView: View {
         }
     }
     
-    func copyFile(path: String, newPath: String) {
-        spawn(command: helperPath, args: ["cp", path, newPath], env: [], root: true)
+    /// 복사. 반드시 RootHelperActs 를 거친다.
+    ///
+    /// 전에는 도우미를 직접 띄웠다. 그러면 FileGuard 를 한 번도 지나지 않아,
+    /// 안전 모드에서 막혀야 할 시스템 폴더로의 복사도 그대로 시도됐다.
+    @discardableResult
+    func copyFile(path: String, newPath: String) -> Bool {
+        RootHelperActs.cp(path, newPath)
     }
 }
