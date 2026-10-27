@@ -1575,10 +1575,46 @@ fn read_bullet_marker(properties: Node<'_, '_>) -> Option<BulletMarker> {
     }
     if let Some(node) = child(properties, "buChar") {
         if let Some(ch) = node.attribute("char") {
-            return Some(BulletMarker::Char(ch.to_owned()));
+            let font = child(properties, "buFont")
+                .and_then(|n| n.attribute("typeface"))
+                .unwrap_or_default();
+            return Some(BulletMarker::Char(bullet_glyph(ch, font)));
         }
     }
     None
+}
+
+/// 글머리 기호로 적어 둔 글자를, 그 글자가 뜻하는 모양으로 바꾼다.
+///
+/// 적어 둔 글자를 그대로 내보내면 안 된다. 기호 글꼴을 쓰는 목록은 글자
+/// 자체가 아니라 그 글꼴에서의 **그림**을 뜻한다 — Wingdings 의 '§' 는
+/// 채운 네모이고, 그대로 내보내면 화면에 '§' 가 찍힌다.
+///
+/// 그 글꼴이 기기에 없으므로 뜻이 같은 유니코드 글자로 옮긴다. 모르는
+/// 글자는 가운뎃점으로 돌아간다 — 틀린 기호보다 낫다.
+fn bullet_glyph(ch: &str, font: &str) -> String {
+    let symbol_font = {
+        let lower = font.to_ascii_lowercase();
+        lower.starts_with("wingdings")
+            || lower.starts_with("webdings")
+            || lower.starts_with("symbol")
+            || lower.starts_with("monotype sorts")
+    };
+    if !symbol_font {
+        return ch.to_owned();
+    }
+    match ch {
+        "\u{a7}" => "\u{25aa}".to_owned(), // § → ▪
+        "n" | "\u{6e}" => "\u{25a0}".to_owned(), // n → ■
+        "l" | "\u{6c}" => "\u{25cf}".to_owned(), // l → ●
+        "u" | "\u{75}" => "\u{25c6}".to_owned(), // u → ◆
+        "p" => "\u{2751}".to_owned(),
+        "\u{fc}" => "\u{2713}".to_owned(), // ü → ✓
+        "\u{fe}" => "\u{2794}".to_owned(), // þ → ➔
+        "\u{d8}" | "\u{e0}" => "\u{2192}".to_owned(),
+        "\u{b7}" => "\u{2022}".to_owned(), // Symbol 의 · → •
+        _ => "\u{2022}".to_owned(),
+    }
 }
 
 /// 번호를 적는 꼴.
@@ -1703,8 +1739,20 @@ fn create_group_map(transform: Node<'_, '_>, parent: CoordinateMap) -> Coordinat
         target_height: parent.map_y(group_y + group_height) - parent.map_y(group_y),
         source_x: integer_attribute(child_offset, "x").unwrap_or(group_x) as f64,
         source_y: integer_attribute(child_offset, "y").unwrap_or(group_y) as f64,
-        source_width: integer_attribute(child_extent, "cx").unwrap_or(group_width) as f64,
-        source_height: integer_attribute(child_extent, "cy").unwrap_or(group_height) as f64,
+        // chExt 가 0 인 그룹이 있다. 없는 것과 같이 다뤄 그룹 제 크기로
+        // 물러선다.
+        //
+        // 전에는 0 이 그대로 들어가, 나누는 쪽의 `.max(1.0)` 이 0 으로
+        // 나누기는 막았지만 대신 1 로 나눴다. 그러면 자식의 좌표가 그대로
+        // 배율이 되어 도형이 슬라이드를 꿰뚫는 크기로 커진다 — 쪽 32 의
+        // 주황 세로 막대 넷이 그것이었다. 자르지 않고 키워 놓으니 화살표를
+        // 고친 뒤에는 그 막대에 촉까지 달렸다.
+        source_width: integer_attribute(child_extent, "cx")
+            .filter(|value| *value > 0)
+            .unwrap_or(group_width) as f64,
+        source_height: integer_attribute(child_extent, "cy")
+            .filter(|value| *value > 0)
+            .unwrap_or(group_height) as f64,
     }
 }
 
@@ -3277,6 +3325,47 @@ mod tests {
         assert_eq!(texts[0], "1. 첫째", "첫 번호가 1 이어야 한다");
         assert_eq!(texts[1], "2. 둘째", "번호가 이어져야 한다");
         assert_eq!(texts[2], "▪ 점", "적어 둔 글자를 써야 한다");
+    }
+
+    /// chExt 가 0 인 그룹의 자식이 제자리에 있어야 한다.
+    ///
+    /// 0 이 그대로 나누는 쪽으로 가면 `.max(1.0)` 때문에 1 로 나뉘고,
+    /// 자식 좌표가 그대로 배율이 되어 도형이 슬라이드를 꿰뚫는다.
+    #[test]
+    fn a_group_with_no_child_extent_does_not_blow_up_its_children() {
+        let xml = r#"<a:xfrm xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:off x="1000000" y="500000"/><a:ext cx="2000000" cy="1000000"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm>"#;
+        let doc = roxmltree::Document::parse(xml).expect("parses");
+        let parent = super::CoordinateMap {
+            target_x: 0.0, target_y: 0.0,
+            target_width: 9906000.0, target_height: 6858000.0,
+            source_x: 0.0, source_y: 0.0,
+            source_width: 9906000.0, source_height: 6858000.0,
+        };
+        let map = super::create_group_map(doc.root_element(), parent);
+        // chExt 가 0 이면 그룹 제 크기로 물러서야 한다.
+        assert_eq!(map.source_width, 2000000.0);
+        assert_eq!(map.source_height, 1000000.0);
+
+        // 그 그룹 안의 도형이 그룹 밖으로 터져 나가지 않아야 한다.
+        let r = map.map_rect(1000000, 500000, 500000, 250000);
+        assert!(r.width <= 2000000.0 && r.height <= 1000000.0,
+                "자식이 그룹보다 커졌다: {r:?}");
+    }
+
+    /// 기호 글꼴의 글머리 기호는 그 글꼴에서의 모양으로 나와야 한다.
+    ///
+    /// 적어 둔 글자를 그대로 내보내면 Wingdings 의 채운 네모가 화면에
+    /// '§' 로 찍힌다.
+    #[test]
+    fn maps_symbol_font_bullets_to_what_they_mean() {
+        assert_eq!(super::bullet_glyph("\u{a7}", "Wingdings"), "\u{25aa}");
+        assert_eq!(super::bullet_glyph("n", "Wingdings"), "\u{25a0}");
+        assert_eq!(super::bullet_glyph("l", "Wingdings"), "\u{25cf}");
+        // 모르는 기호는 가운뎃점으로.
+        assert_eq!(super::bullet_glyph("\u{2b}", "Wingdings"), "\u{2022}");
+        // 보통 글꼴이면 적어 둔 그대로.
+        assert_eq!(super::bullet_glyph("\u{2013}", "Arial"), "\u{2013}");
+        assert_eq!(super::bullet_glyph("\u{25aa}", ""), "\u{25aa}");
     }
 
     /// 꺾인 연결선은 꺾인 채로, 화살표는 촉을 달고 나와야 한다.
