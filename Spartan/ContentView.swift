@@ -1369,22 +1369,27 @@ struct ContentView: View {
                 .zIndex(10)
             }
             
-            // 일괄 삭제 미리보기
-            if showBatchDeletePreview {
-                BatchDeletePreview(
-                    files: pendingDeletePaths.map { ($0 as NSString).lastPathComponent },
-                    cautionCount: cautionCountForBatch,
-                    onConfirm: {
-                        showBatchDeletePreview = false
-                        executeBatchDelete()
-                    },
-                    onCancel: {
-                        showBatchDeletePreview = false
-                    }
-                )
-                .zIndex(20)
-            }
         } // End ZStack
+        // 일괄 삭제 미리보기.
+        //
+        // 겹쳐 그리던 것을 진짜 모달로 바꿨다. ZStack 으로 덮기만 하면
+        // 포커스 엔진은 그것을 가림막으로 보지 않는다 — 뒤의 파일 목록도
+        // 여전히 포커스 대상이라, 한 칸일 때는 목록을 빠져나와 '삭제'
+        // 단추까지 갈 기하적 경로가 없었다. 두 칸일 때 반대 칸을 거쳐
+        // 좌우로 가면 닿았던 것이 그 증거다.
+        .fullScreenCover(isPresented: $showBatchDeletePreview) {
+            BatchDeletePreview(
+                files: pendingDeletePaths.map { ($0 as NSString).lastPathComponent },
+                cautionCount: cautionCountForBatch,
+                onConfirm: {
+                    showBatchDeletePreview = false
+                    executeBatchDelete()
+                },
+                onCancel: {
+                    showBatchDeletePreview = false
+                }
+            )
+        }
     }
     
     @ViewBuilder

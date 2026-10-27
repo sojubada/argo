@@ -34,7 +34,15 @@ struct BatchDeletePreview: View {
     let cautionCount: Int
     let onConfirm: () -> Void
     let onCancel: () -> Void
-    
+
+    private enum Field { case cancel, confirm }
+    /// 뜨자마자 '취소' 에 포커스를 둔다.
+    ///
+    /// 지우는 화면에서 포커스가 어디에도 없으면 리모컨을 아무리 눌러도
+    /// 반응이 없다. 그리고 처음 놓이는 자리는 취소여야 한다 — 한 번 더
+    /// 누르는 것만으로 지워지면 안 된다.
+    @FocusState private var focus: Field?
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.85).edgesIgnoringSafeArea(.all)
@@ -65,15 +73,21 @@ struct BatchDeletePreview: View {
                 
                 HStack(spacing: 40) {
                     Button("취소", action: onCancel)
+                        .focused($focus, equals: .cancel)
                     Button(action: onConfirm) {
                         Text("휴지통으로 / 삭제")
                             .foregroundColor(.red)
                     }
+                    .focused($focus, equals: .confirm)
                 }
+                // 두 단추를 한 묶음으로 둔다. 좌우로 오갈 때 목록 쪽으로
+                // 새지 않는다.
+                .focusSection()
             }
             .padding(40)
             .background(Color(white: 0.15))
             .cornerRadius(20)
         }
+        .onAppear { focus = .cancel }
     }
 }
