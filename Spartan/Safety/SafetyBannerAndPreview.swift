@@ -88,6 +88,13 @@ struct BatchDeletePreview: View {
             .background(Color(white: 0.15))
             .cornerRadius(20)
         }
-        .onAppear { focus = .cancel }
+        // 뜰 때 취소에 포커스를 둔다.
+        //
+        // onAppear 에서 넣어 보면 단추가 아직 포커스 엔진에 올라오기 전이라
+        // 놓치는 수가 있다. 그때 포커스는 '삭제' 쪽에만 가 닿고 취소로는
+        // 갈 수가 없었다 — 지우는 화면에서 되돌릴 길이 막히는 꼴이다.
+        // defaultFocus 는 이 구역이 생길 때 어디서 시작할지를 알려 주는
+        // 자리라 그 틈이 없다.
+        .defaultFocus($focus, .cancel)
     }
 }

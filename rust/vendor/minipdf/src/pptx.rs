@@ -1323,6 +1323,9 @@ fn read_paragraphs(
     style_color: Option<PdfColor>,
     default_alignment: TextAlignment,
 ) -> Vec<PptxParagraph> {
+    // 자동 번호는 한 글상자 안에서 이어 센다. 단계마다 따로 세고, 윗단계가
+    // 하나 올라가면 그 아래 단계는 다시 1 부터다.
+    let mut counters = [0u32; 9];
     text_body
         .children()
         .filter(|node| is_element(*node, "p"))
@@ -1344,6 +1347,36 @@ fn read_paragraphs(
                 .and_then(read_bullet_setting)
                 .or_else(|| inherited.and_then(|style| style.bullet))
                 .unwrap_or(false);
+
+            // 무엇을 앞에 붙일지. 번호면 세어서 번호를, 글자를 적어 뒀으면
+            // 그 글자를, 아무 말이 없으면 여태처럼 가운뎃점을 붙인다.
+            //
+            // 전에는 buAutoNum 도 가운뎃점으로 그렸다. 번호를 매겨 둔 목록이
+            // 전부 같은 점으로 나와, 차례가 있는 글이 차례 없는 글이 됐다.
+            let marker = if !is_bullet {
+                String::new()
+            } else {
+                match properties.and_then(read_bullet_marker) {
+                    Some(BulletMarker::Number { scheme, start }) => {
+                        let slot = &mut counters[level];
+                        *slot = if *slot == 0 { start } else { *slot + 1 };
+                        let n = *slot;
+                        for deeper in counters.iter_mut().skip(level + 1) {
+                            *deeper = 0;
+                        }
+                        format!("{} ", format_auto_number(&scheme, n))
+                    }
+                    Some(BulletMarker::Char(ch)) => {
+                        counters[level] = 0;
+                        format!("{ch} ")
+                    }
+                    None => {
+                        counters[level] = 0;
+                        "\u{2022} ".to_owned()
+                    }
+                }
+            };
+
             let mut runs = Vec::new();
             let mut has_text = false;
             for run_node in paragraph.children().filter(Node::is_element) {
@@ -1356,7 +1389,7 @@ fn read_paragraphs(
                         };
                         let mut text = text_node.text().unwrap_or_default().to_owned();
                         if is_bullet && !has_text {
-                            text.insert_str(0, "\u{2022} ");
+                            text.insert_str(0, &marker);
                         }
                         if !text.is_empty() {
                             runs.push(read_run(
@@ -1516,6 +1549,90 @@ fn read_bullet_setting(properties: Node<'_, '_>) -> Option<bool> {
     } else {
         None
     }
+}
+
+/// 문단 앞에 붙는 표시.
+enum BulletMarker {
+    /// 적어 둔 글자. buChar 의 char 속성.
+    Char(String),
+    /// 번호. 몇 번부터 셀지와 어떤 꼴로 적을지.
+    Number { scheme: String, start: u32 },
+}
+
+/// 이 문단이 제 몫으로 적어 둔 표시. 물려받는 것은 보지 않는다.
+fn read_bullet_marker(properties: Node<'_, '_>) -> Option<BulletMarker> {
+    if child(properties, "buNone").is_some() {
+        return None;
+    }
+    if let Some(node) = child(properties, "buAutoNum") {
+        return Some(BulletMarker::Number {
+            scheme: node.attribute("type").unwrap_or("arabicPeriod").to_owned(),
+            start: node
+                .attribute("startAt")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(1),
+        });
+    }
+    if let Some(node) = child(properties, "buChar") {
+        if let Some(ch) = node.attribute("char") {
+            return Some(BulletMarker::Char(ch.to_owned()));
+        }
+    }
+    None
+}
+
+/// 번호를 적는 꼴.
+///
+/// 파워포인트는 셈 방식과 뒤에 붙는 문장부호를 한 이름에 담는다 —
+/// arabicPeriod 는 "1.", arabicParenR 은 "1)" 이다.
+fn format_auto_number(scheme: &str, n: u32) -> String {
+    let body = if scheme.starts_with("roman") {
+        let upper = scheme.starts_with("romanUc");
+        let r = roman_numeral(n);
+        if upper { r } else { r.to_lowercase() }
+    } else if scheme.starts_with("alpha") {
+        let upper = scheme.starts_with("alphaUc");
+        let letter = alpha_numeral(n);
+        if upper { letter } else { letter.to_lowercase() }
+    } else {
+        n.to_string()
+    };
+    if scheme.ends_with("ParenBoth") {
+        format!("({body})")
+    } else if scheme.ends_with("ParenR") {
+        format!("{body})")
+    } else if scheme.ends_with("Period") {
+        format!("{body}.")
+    } else {
+        body
+    }
+}
+
+fn roman_numeral(mut n: u32) -> String {
+    const TABLE: [(u32, &str); 13] = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+        (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ];
+    let mut out = String::new();
+    for (value, sign) in TABLE {
+        while n >= value {
+            out.push_str(sign);
+            n -= value;
+        }
+    }
+    out
+}
+
+/// 1→A, 26→Z, 27→AA. 0 은 오지 않는다.
+fn alpha_numeral(n: u32) -> String {
+    let mut n = n.max(1);
+    let mut out = Vec::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        out.push((b'A' + rem as u8) as char);
+        n = (n - 1) / 26;
+    }
+    out.iter().rev().collect()
 }
 
 fn read_run_defaults(node: Node<'_, '_>, theme: &HashMap<String, PdfColor>) -> RunDefaults {
@@ -3125,6 +3242,41 @@ mod tests {
             .elements
             .iter()
             .all(|element| !matches!(element, super::PptxElement::Picture(_))));
+    }
+
+    /// 번호를 매겨 둔 목록은 번호로 나와야 한다.
+    ///
+    /// buAutoNum 을 가운뎃점으로 그리던 동안, 차례가 있는 글이 차례 없는
+    /// 글이 됐다 — 쪽 4 의 "1. 2." 가 "• •" 로 나온 것이 그것이다.
+    #[test]
+    fn numbers_the_lists_that_asked_to_be_numbered() {
+        assert_eq!(super::format_auto_number("arabicPeriod", 1), "1.");
+        assert_eq!(super::format_auto_number("arabicPeriod", 12), "12.");
+        assert_eq!(super::format_auto_number("arabicParenR", 3), "3)");
+        assert_eq!(super::format_auto_number("arabicParenBoth", 3), "(3)");
+        assert_eq!(super::format_auto_number("alphaUcPeriod", 1), "A.");
+        assert_eq!(super::format_auto_number("alphaLcParenR", 2), "b)");
+        assert_eq!(super::format_auto_number("romanUcPeriod", 4), "IV.");
+        assert_eq!(super::format_auto_number("romanLcPeriod", 9), "ix.");
+        // 모르는 꼴이면 숫자만.
+        assert_eq!(super::format_auto_number("someScheme", 7), "7");
+
+        // 스물여섯을 넘어가도 이어진다.
+        assert_eq!(super::alpha_numeral(26), "Z");
+        assert_eq!(super::alpha_numeral(27), "AA");
+
+        // 글상자 하나를 통째로 거쳐 번호가 이어지는지 본다.
+        let xml = r#"<p:txBody xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:bodyPr/><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>첫째</a:t></a:r></a:p><a:p><a:pPr><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>둘째</a:t></a:r></a:p><a:p><a:pPr><a:buChar char="▪"/></a:pPr><a:r><a:t>점</a:t></a:r></a:p></p:txBody>"#;
+        let doc = roxmltree::Document::parse(xml).expect("parses");
+        let body = doc.root_element();
+        let paragraphs = super::read_paragraphs(
+            body, &std::collections::HashMap::new(), None, None, super::TextAlignment::Left);
+        let texts: Vec<String> = paragraphs.iter()
+            .map(|p| p.runs.iter().map(|r| r.text.clone()).collect::<String>())
+            .collect();
+        assert_eq!(texts[0], "1. 첫째", "첫 번호가 1 이어야 한다");
+        assert_eq!(texts[1], "2. 둘째", "번호가 이어져야 한다");
+        assert_eq!(texts[2], "▪ 점", "적어 둔 글자를 써야 한다");
     }
 
     /// 꺾인 연결선은 꺾인 채로, 화살표는 촉을 달고 나와야 한다.

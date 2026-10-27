@@ -2144,6 +2144,51 @@ struct ContentView: View {
     }
 
     
+    /// 직접 쳐 넣은 경로로 간다. 목록 갱신을 보장한다.
+    ///
+    /// 위쪽 칸의 TextField 는 pane.directory 에 바로 묶여 있어서, 엔터를
+    /// 누르는 순간 pane.directory 는 **이미** 쳐 넣은 글자로 바뀌어 있다.
+    /// 그 상태로 navigate 를 부르면 "가려는 곳이 지금 있는 곳과 같다" 가
+    /// 되어 `guard newPath != from` 에 걸려 그냥 돌아간다 — 폴더 이름은
+    /// 바뀌었는데 목록은 옛 폴더 그대로 남는다.
+    ///
+    /// 같으면 목록만 새로 읽고, 다르면 평소대로 간다.
+    func goToTypedFolder(_ target: String) {
+        if pane.directory == target {
+            pane.updateFiles()
+        } else {
+            pane.navigate(to: target)
+        }
+    }
+
+    /// 경로를 글자만 보고 다듬는다. 디스크를 건드리지 않는다.
+    ///
+    /// 휴지통 안인지 가릴 때 `resolvingSymlinksInPath` 를 쓰고 있었다.
+    /// 그것은 링크를 **따라간다.** 휴지통 안에 바깥을 가리키는 심볼릭 링크가
+    /// 들어 있으면 따라간 끝이 휴지통 밖이라 '휴지통 안이 아니다' 로
+    /// 판정되고, 그러면 휴지통으로 옮기려 든다. 그런데 TrashManager 는
+    /// 휴지통 안의 것을 휴지통으로 옮기기를 거부하므로, 그 링크는 지워지지도
+    /// 옮겨지지도 않고 그대로 남는다.
+    ///
+    /// 여기서 알고 싶은 것은 '링크가 가리키는 곳' 이 아니라 '이 항목이 놓인
+    /// 자리' 다. 그래서 따라가지 않고 글자만 다듬는다. /var 는 /private/var
+    /// 로 가는 심링크라 두 철자가 같은 자리를 가리키므로 한쪽으로 모은다.
+    static func lexicalPath(_ path: String) -> String {
+        var p = (path as NSString).expandingTildeInPath
+        while p.contains("//") { p = p.replacingOccurrences(of: "//", with: "/") }
+        var parts: [String] = []
+        for piece in p.split(separator: "/", omittingEmptySubsequences: true) {
+            switch piece {
+            case ".":  continue
+            case "..": if !parts.isEmpty { parts.removeLast() }
+            default:   parts.append(String(piece))
+            }
+        }
+        var out = "/" + parts.joined(separator: "/")
+        if out.hasPrefix("/var/") || out == "/var" { out = "/private" + out }
+        return out
+    }
+
     /// 다른 폴더에 있는 파일 하나를 연다.
     ///
     /// 그 파일이 든 폴더로 먼저 가고, 목록에서 제 자리를 찾아 연다.
@@ -2192,14 +2237,14 @@ struct ContentView: View {
         func asFolder(_ p: String) -> String { p.hasSuffix("/") ? p : p + "/" }
 
         if FileInfo.isDirectory(filePath: typed) {
-            pane.navigate(to: asFolder(typed))
+            goToTypedFolder(asFolder(typed))
             return
         }
 
         if fileManager.fileExists(atPath: typed) {
             let parent = (typed as NSString).deletingLastPathComponent
             let name   = (typed as NSString).lastPathComponent
-            pane.navigate(to: asFolder(parent))
+            goToTypedFolder(asFolder(parent))
             if let idx = masterFiles.firstIndex(where: { $0.name == name }) {
                 defaultAction(index: idx, isDirectPath: false)
             }
@@ -2212,7 +2257,7 @@ struct ContentView: View {
             probe = (probe as NSString).deletingLastPathComponent
         }
         let landing = FileInfo.isDirectory(filePath: probe) ? probe : "/"
-        pane.navigate(to: asFolder(landing))
+        goToTypedFolder(asFolder(landing))
         alertTitle = "그런 경로가 없습니다"
         alertMsg = typed + "\n\n가장 가까운 폴더로 왔습니다."
         showAlert = true
@@ -2256,7 +2301,7 @@ struct ContentView: View {
         let trashRoot = TrashManager.trashRootPath
 
         for path in targets {
-            let norm = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            let norm = Self.lexicalPath(path)
             let insideTrash = norm == trashRoot || norm.hasPrefix(trashRoot + "/")
             if insideTrash {
                 TrashManager.shared.deletePathDirectly(path)
