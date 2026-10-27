@@ -1742,6 +1742,9 @@ struct ContentView: View {
         case .refresh:           pane.updateFiles()
         case .goUp:              pane.goUp()
         case .goBack:            pane.goBack()
+        case .goBackOrUp:
+            // ⌫. 기록이 있으면 뒤로, 없으면 위로 — 막 켰을 때도 키가 먹는다.
+            if pane.canGoBack { pane.goBack() } else { pane.goUp() }
         case .goForward:         pane.goForward()
         case .goHome:            pane.navigate(to: "/var/mobile/Media/")
         case .goRoot:            pane.navigate(to: "/")

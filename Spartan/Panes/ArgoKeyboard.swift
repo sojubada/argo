@@ -53,8 +53,17 @@ enum ArgoCommand: String {
     case goHome
     case goRoot
     case undo
+    /// ⌫. 되돌아갈 기록이 있으면 뒤로, 없으면 한 칸 위로.
+    ///
+    /// 막 켰을 때는 기록이 비어 있다. 그때 ⌫ 가 아무 일도 안 하면 키가
+    /// 고장 난 것처럼 보인다.
+    case goBackOrUp
 
     static let notification = Notification.Name("ArgoKeyCommandNotification")
+
+    /// 키 자리로 가려 pressesBegan 이 직접 처리하는 명령.
+    /// UIKeyCommand 로는 등록하지 않는다.
+    static let pressOnly: Set<ArgoCommand> = [.deleteSelection, .goBackOrUp]
 
     /// 도움말 화면에 보여줄 설명. tvOS에는 메뉴 막대가 없어
     /// 이 화면이 없으면 단축키를 알 길이 자체가 없다.
@@ -74,7 +83,7 @@ enum ArgoCommand: String {
         case .syncPanes:         return "반대 칸을 이 폴더로"
         case .toggleMultiSelect: return "여러 개 고르기"
         case .selectAll:         return "전부 고르기"
-        case .deleteSelection:   return "선택 삭제"
+        case .deleteSelection:   return "휴지통으로 (⌦ 또는 ⌘⌦)"
         case .rename:            return "이름 바꾸기"
         case .fileInfo:          return "정보 보기"
         case .newFolder:         return "새 폴더"
@@ -87,12 +96,13 @@ enum ArgoCommand: String {
         case .sortByDate:        return "날짜순"
         case .sortByKind:        return "종류순"
         case .reverseSort:       return "정렬 뒤집기"
-        case .focusPathField:    return "경로 칸으로"
+        case .focusPathField:    return "경로로 찾아가기"
         case .search:            return "찾기"
         case .showHelp:          return "단축키 도움말"
         case .goHome:            return "미디어 폴더로"
-        case .goRoot:            return "최상위로"
+        case .goRoot:            return "최상위로 (⌘⌫ 도 같음)"
         case .undo:              return "되돌리기 (이동·이름)"
+        case .goBackOrUp:        return "이전 폴더로 (기록이 없으면 위로)"
         }
     }
 
@@ -112,6 +122,7 @@ enum ArgoCommand: String {
         case UIKeyCommand.inputRightArrow: out += "→"
         case "\r": out += "⏎"
         case "\u{8}": out += "⌫"
+        case "\u{7f}": out += "⌦"
         case " ": out += "空白"
         default: out += input.uppercased()
         }
@@ -141,7 +152,9 @@ enum ArgoCommand: String {
         case .syncPanes:         return ("=", .command)
         case .toggleMultiSelect: return ("m", .command)
         case .selectAll:         return ("a", .command)
-        case .deleteSelection:   return ("\u{8}", .command)
+        // 표시용이다. 실제로는 pressesBegan 이 키 자리로 받는다(pressOnly).
+        case .deleteSelection:   return ("\u{7f}", [])
+        case .goBackOrUp:        return ("\u{8}", [])
         case .rename:            return ("\r", .command)
         case .fileInfo:          return ("i", .command)
         case .newFolder:         return ("n", [.command, .shift])
@@ -168,7 +181,7 @@ enum ArgoCommand: String {
 
     /// 도움말 화면의 묶음.
     static let groups: [(String, [ArgoCommand])] = [
-        ("이동", [.goUp, .goBack, .goForward, .goHome, .goRoot, .focusPathField, .refresh]),
+        ("이동", [.goBackOrUp, .goUp, .goBack, .goForward, .goHome, .goRoot, .focusPathField, .refresh]),
         ("복사·이동", [.clipboardCopy, .clipboardCut, .clipboardPaste]),
         ("두 칸", [.toggleDualPane, .switchPane, .copyToOtherPane, .moveToOtherPane, .syncPanes]),
         ("고르기", [.toggleMultiSelect, .selectAll]),
@@ -198,7 +211,9 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         guard !ArgoTextEntry.isActive else { return nil }
 
         var out: [UIKeyCommand] = []
-        for command in allCommands {
+        // 지우기는 UIKeyCommand 로 등록하지 않는다. 키 자리(keyCode)로
+        // pressesBegan 에서 가린다 — 등록해 두면 누름보다 먼저 가로채인다.
+        for command in allCommands where !ArgoCommand.pressOnly.contains(command) {
             let (input, flags) = ArgoCommand.binding(for: command)
             let key = UIKeyCommand(input: input,
                                    modifierFlags: flags,
@@ -236,18 +251,49 @@ final class ArgoHostingController: UIHostingController<ContentView> {
     // MARK: - 글자 입력 점프
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        guard !ArgoTextEntry.isActive else {
+        // 글자를 받는 칸이 떠 있거나, 목록 위에 다른 창이 덮여 있으면 목록용
+        // 키를 쓰지 않는다.
+        //
+        // 덮인 창에서 처리되지 않은 누름은 리스폰더 체인을 타고 여기까지
+        // 올라온다. 문서 뷰어에서 누른 ⌦ 가 뒤에 깔린 목록의 줄을 지우거나,
+        // 삭제 확인 창에서 누른 스페이스가 '누름' 대신 고르기로 먹히면 안 된다.
+        guard !ArgoTextEntry.isActive, presentedViewController == nil else {
             super.pressesBegan(presses, with: event)
             return
         }
 
         var handled = false
         var toggledSelection = false
+        var command: ArgoCommand?
         for press in presses {
             guard let key = press.key else { continue }
             let chars = key.charactersIgnoringModifiers
+            // 캡스록·숫자판 표시는 조합으로 치지 않는다. 그것까지 보면
+            // 캡스록을 켠 채로는 글자 점프도 스페이스도 먹지 않는다.
+            let mods = key.modifierFlags.intersection([.command, .shift, .alternate, .control])
+
+            // 지우기 두 개는 글자가 아니라 키 자리로 가린다.
+            //
+            // ⌫(백스페이스)는 지우기가 아니라 이동이다 — 그냥 누르면 이전
+            // 폴더로, ⌘ 와 함께면 최상위로. ⌦(딜리트)만 지우기이고, 그것도
+            // 휴지통으로 보내는 확인 창을 거친다.
+            //
+            // 전에는 ⌘⌫ 가 지우기였다. 글자를 고치려고 누르는 바로 그 키가
+            // 파일을 지우는 키였고, 실제로 폴더 하나가 그렇게 사라졌다.
+            switch key.keyCode {
+            case .keyboardDeleteOrBackspace:
+                if mods == .command { command = .goRoot }
+                else if mods.isEmpty { command = .goBackOrUp }
+                continue
+            case .keyboardDeleteForward:
+                if mods.isEmpty || mods == .command { command = .deleteSelection }
+                continue
+            default:
+                break
+            }
+
             // 수정키가 걸린 입력은 단축키 쪽이 처리한다.
-            guard key.modifierFlags.isEmpty, chars.count == 1 else { continue }
+            guard mods.isEmpty, chars.count == 1 else { continue }
 
             // 스페이스는 고르기다. 포커스 엔진으로 넘기지 않는다 —
             // 넘기면 포커스된 줄이 눌려서 파일이 열린다.
@@ -264,6 +310,10 @@ final class ArgoHostingController: UIHostingController<ContentView> {
             restartTypeAheadTimer()
         }
 
+        if let command {
+            NotificationCenter.default.post(name: ArgoCommand.notification,
+                                            object: command.rawValue)
+        }
         if toggledSelection {
             NotificationCenter.default.post(name: ArgoSelectToggle.notification, object: nil)
         }
@@ -271,7 +321,7 @@ final class ArgoHostingController: UIHostingController<ContentView> {
             NotificationCenter.default.post(name: ArgoTypeAhead.notification,
                                             object: typeAheadBuffer)
         }
-        if !handled && !toggledSelection {
+        if !handled && !toggledSelection && command == nil {
             super.pressesBegan(presses, with: event)
         }
     }
