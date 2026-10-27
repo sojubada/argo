@@ -225,11 +225,36 @@ struct ContentView: View {
                     // 보여 주고 있었다. 그리고 그 칸이 열려 있는 동안 누른
                     // ⌘⌫ 가 파일 삭제로 흘러들어, 글자를 지우려다 폴더가
                     // 지워지는 길이 되어 있었다.
-                    HStack { //refresh
-                    Button(action: {
-                        updateFiles()
+                    //
+                    // 그 줄에 따로 남아 있던 새로 읽기 단추도 툴바로 옮겼다.
+                    // 거기 붙어 있던 새 파일·폴더·링크 시트는 freeSpace 쪽으로 옮겼다.
+                // 툴바가 화면보다 넓어지면 부모 VStack 의 폭이 같이 커져
+                // 화면 전체가 옆으로 밀려 잘린다. 가로 스크롤로 폭을 가둔다 —
+                // 포커스가 화면 밖 버튼으로 가면 tvOS 가 알아서 스크롤한다.
+                ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    // 자주 쓰는 차례: 전원 · 홈 · 새로 읽기 · 두 칸 · 즐겨찾기.
+                    // Group 으로 묶은 것은 ViewBuilder 자식 수를 열 개 아래로 두려는 것이다.
+                    Group {
+                    Button(action: { //quit
+                        quitArgo()
+                    }) {
+                        Image(systemName: "power")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Button(action: { //홈 — 미디어 폴더로
+                        pane.navigate(to: "/var/mobile/Media/")
+                    }) {
+                        Image(systemName: "house")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Button(action: { //새로 읽기 — 두 칸 모두
+                        refreshBothPanes()
                     }) {
                         Image(systemName: "arrow.clockwise")
+                            .frame(width: 50, height: 50)
                     }
                     .onAppear {
                         if(!buttonCalc) {
@@ -241,33 +266,6 @@ struct ContentView: View {
                             buttonCalc = true
                         }
                     }
-                    .sheet(isPresented: $showSubView[6], onDismiss: refreshBothPanes, content: {
-                        CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
-                            .onAppear { ArgoTextEntry.begin() }
-                            .onDisappear { ArgoTextEntry.end() }
-                    })
-                    .sheet(isPresented: $showSubView[5], onDismiss: refreshBothPanes, content: {
-                        CreateFileView(filePath: directoryBinding, isPresented: $showSubView[5])
-                            .onAppear { ArgoTextEntry.begin() }
-                            .onDisappear { ArgoTextEntry.end() }
-                    })
-                    .sheet(isPresented: $showSubView[20], content: {
-                        CreateSymlinkView(symlinkPath: directoryBinding, isPresented: $showSubView[20])
-                            .onAppear { ArgoTextEntry.begin() }
-                            .onDisappear { ArgoTextEntry.end() }
-                    })
-                }
-                // 툴바가 화면보다 넓어지면 부모 VStack 의 폭이 같이 커져
-                // 화면 전체가 옆으로 밀려 잘린다. 가로 스크롤로 폭을 가둔다 —
-                // 포커스가 화면 밖 버튼으로 가면 tvOS 가 알아서 스크롤한다.
-                ScrollView(.horizontal, showsIndicators: false) {
-                HStack {
-                    Button(action: { //quit
-                        quitArgo()
-                    }) {
-                        Image(systemName: "power")
-                            .frame(width: 50, height: 50)
-                    }
 
                     Button(action: { //두 칸 켜고 끄기
                         withAnimation { dualPaneEnabled.toggle() }
@@ -278,13 +276,6 @@ struct ContentView: View {
                         Image(systemName: dualPaneEnabled
                               ? "rectangle.split.2x1.fill"
                               : "rectangle.split.2x1")
-                            .frame(width: 50, height: 50)
-                    }
-
-                    Button(action: { //홈 — 미디어 폴더로
-                        pane.navigate(to: "/var/mobile/Media/")
-                    }) {
-                        Image(systemName: "house")
                             .frame(width: 50, height: 50)
                     }
 
@@ -302,6 +293,7 @@ struct ContentView: View {
                     .sheet(isPresented: $showSubView[17], content: {
                         AddToFavoritesView(filePath: newViewFilePath, displayName: newViewFileName, showView: $showSubView[17])
                     })
+                    }
 
                     Button(action: { //webdav
                         openWebDAV()
@@ -418,17 +410,160 @@ struct ContentView: View {
                             .frame(width: 50, height: 50)
                     }
 
+                    // 펼침 영역도 자주 쓰는 차례로 둔다:
+                    // 검색 · 새로 만들기 · 고르기(→ 이동·복사·압축·삭제) · 정렬 · 숨긴 항목
+                    // · 반대 칸 명령 · 외장 드라이브 · 단축키 도움말 · 디버그.
                     Group {
+                    // 들어내지 않고 접는다. 검색·드라이브 단추에 시트가 붙어 있어,
+                    // 고르는 중에 들어내면 ⌘F 가 아무 일도 하지 않았다.
                     Group {
-                    Button(action: { //숨긴 항목
-                        pane.showHidden.toggle()
-                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
-                        pane.applySortAndFilter()
+                    Button(action: {
+                        showSubView[19] = true
+                        newViewFilePath = directory
                     }) {
-                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
-                            .frame(width: 50, height: 50)
+                        Image(systemName: "magnifyingglass")
+                            .frame(width:50, height:50)
+                    }
+                    .sheet(isPresented: $showSubView[19], onDismiss: {
+                        if(didSearch) {
+                            if(FileInfo.isDirectory(filePath: newViewFilePath)) {
+                                pane.navigate(to: newViewFilePath.hasSuffix("/")
+                                              ? newViewFilePath : newViewFilePath + "/")
+                            } else {
+                                openFileAtFullPath(newViewFilePath)
+                            }
+                            didSearch = false
+                        }
+                    }, content: {
+                        SearchView(directory: directoryBinding, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
+                    }) //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
+                    //someday I'll figure it out. It's surprisingly good
+
+                    Button(action: { //new file/directory/symlink
+                        showSubView[0] = true
+                    }) {
+                        if #available(tvOS 14.0, *){
+                            Image(systemName: "doc.badge.plus")
+                                .frame(width:50, height:50)
+                        } else {
+                            Image(systemName: "doc")
+                                .frame(width:50, height:50)
+                        }
+                    }
+                    }
+                    .collapsed(multiSelect)
+
+                    Button(action: {
+                        if(multiSelect) {
+                            multiSelectFiles = masterFiles.map { $0.name }
+                            allWereSelected.toggle()
+                            if(allWereSelected) {
+                                iterateOverFileWasSelected(boolToIterate: true)
+                            } else {
+                                iterateOverFileWasSelected(boolToIterate: false)
+                            }
+                        } else {
+                            resetMultiSelectArrays()
+                            withAnimation {
+                                multiSelect = true
+                            }
+                        }
+                    }) {
+                        if (multiSelect) { //multiselect is a robust feature. the issue I had the most trouble with was with updateFiles, since the number of files would change but my multiselect array was too long. so I had to work out resizing the array.
+                        //i gave up on that, and I just reset it to [] and then the length of masterFiles. it works.
+                            if (allWereSelected) {
+                                Image(systemName: "checkmark.circle")
+                                    .frame(width: 50, height: 50)
+                            } else {
+                                Image(systemName: "circle")
+                                    .frame(width: 50, height: 50)
+                            }
+                        } else {
+                            Image(systemName: "checkmark.circle")
+                                .frame(width: 50, height: 50)
+                        }
                     }
 
+                    // 고르는 중에만 펼친다. 고른 것에 쓸 단추가 고르기 바로 뒤에 온다.
+                    Group {
+                        Button(action: {
+                            showSubView[8] = true
+                            newViewFilePath = directory
+                            newViewArrayNames = multiSelectFiles
+                            resetMultiSelectArrays()
+                        }) {
+                            ZStack {
+                                Image(systemName: "doc.on.doc")
+                                    .frame(width: 50, height: 50)
+                                Image(systemName: "arrow.right")
+                                    .resizable()
+                                    .frame(width: 15, height: 13)
+                                    .offset(x: -4, y: 11.75) //i do not know how i came up with these values. i am not going to touch them. hopefully it doesn't break on non-1080p (i don't have this)
+                            }
+                        }
+                
+                        Button(action: {
+                            showSubView[9] = true
+                            newViewFilePath = directory
+                            newViewArrayNames = multiSelectFiles
+                            resetMultiSelectArrays()
+                        }) {
+                            ZStack {
+                                Image(systemName: "doc.on.clipboard")
+                                    .frame(width:50, height:50)
+                                Image(systemName: "arrow.right")
+                                    .resizable()
+                                    .frame(width:15, height:13)
+                                    .offset(x:-3.75, y:11.75)
+                            }
+                        }
+                    
+                        Button(action: {
+                            showSubView[14] = true
+                            newViewFilePath = directory
+                            newViewArrayNames = multiSelectFiles
+                        }) {
+                            Image(systemName: "doc.zipper")
+                                .frame(width:50, height:50)
+                        }
+                    
+                        Button(action: {
+                            // 삭제는 한 길로만 간다. 전에는 여기서 바로
+                            // 미리보기를 띄우면서 지울 목록을 채우지 않아,
+                            // '지울 것 0개' 가 뜨고 눌러도 아무 일이 없었다.
+                            requestDeleteSelection()
+                        }) {
+                            ZStack {
+                                if(directory == "/private/var/mobile/Media/.Trash/"){
+                                    Image(systemName: "trash")
+                                        .frame(width:50, height:50)
+                                        .foregroundColor(.red)
+                                } else {
+                                    Image(systemName: "trash")
+                                        .frame(width:50, height:50)
+                                }
+                            }
+                        }
+                    
+                        Button(action: {
+                            // 고른 표시까지 지운다. 전에는 모드만 껐다 — 동그라미는
+                            // 사라지는데 파일은 고른 채로 남아, 다음 삭제·복사가
+                            // 보이지 않는 선택을 대상으로 삼았다.
+                            resetMultiSelectArrays()
+                            withAnimation {
+                                multiSelect = false
+                            }
+                            allWereSelected = false
+                        }) {
+                            Image(systemName: "xmark")
+                                .frame(width:50, height:50)
+                        }
+                    }
+                    .collapsed(!multiSelect)
+
+                    Group {
                     Button(action: { //정렬 기준 돌리기. 같은 기준을 다시 누르면 오르내림이 뒤집힌다
                         let keys = SortKey.allCases
                         if let i = keys.firstIndex(of: pane.sort) {
@@ -447,15 +582,15 @@ struct ContentView: View {
                         .frame(width: 70, height: 50)
                     }
 
-
-                    Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
-                        showSubView[39] = true
+                    Button(action: { //숨긴 항목
+                        pane.showHidden.toggle()
+                        UserDefaults.settings.set(pane.showHidden, forKey: "showHiddenFiles")
+                        pane.applySortAndFilter()
                     }) {
-                        Image(systemName: "keyboard")
+                        Image(systemName: pane.showHidden ? "eye" : "eye.slash")
                             .frame(width: 50, height: 50)
                     }
                     }
-                    // 고르는 중에는 접어서, 고른 것에 쓸 단추가 그 자리를 차지하게 한다.
                     .collapsed(multiSelect)
 
                     if dualPaneEnabled {
@@ -483,201 +618,51 @@ struct ContentView: View {
                         }
                     }
 
+                    Group {
+                    Button(action: {
+                        showSubView[21] = true
+                    }) {
+                        Image(systemName: "externaldrive")
+                            .frame(width:50, height:50)
+                    }
+                    .sheet(isPresented: $showSubView[21], onDismiss: {
+                        if didChangeDir {
+                            updateFiles()
+                            resetShowSubView()
+                            didChangeDir = false
+                        }
+                    }, content: {
+                        MountPointsView(directory: directoryBinding, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
+                    })
+
+                    Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
+                        showSubView[39] = true
+                    }) {
+                        Image(systemName: "keyboard")
+                            .frame(width: 50, height: 50)
+                    }
+                    }
+                    .collapsed(multiSelect)
+
                     debugMenu
                         .frame(alignment: .leading)
-                    HStack {
-                        Button(action: {
-                            if(multiSelect) {
-                                multiSelectFiles = masterFiles.map { $0.name }
-                                allWereSelected.toggle()
-                                if(allWereSelected) {
-                                    iterateOverFileWasSelected(boolToIterate: true)
-                                } else {
-                                    iterateOverFileWasSelected(boolToIterate: false)
-                                }
-                            } else {
-                                resetMultiSelectArrays()
-                                withAnimation {
-                                    multiSelect = true
-                                }
-                            }
-                        }) {
-                            if (multiSelect) { //multiselect is a robust feature. the issue I had the most trouble with was with updateFiles, since the number of files would change but my multiselect array was too long. so I had to work out resizing the array.
-                            //i gave up on that, and I just reset it to [] and then the length of masterFiles. it works.
-                                if (allWereSelected) {
-                                    Image(systemName: "checkmark.circle")
-                                        .frame(width: 50, height: 50)
-                                } else {
-                                    Image(systemName: "circle")
-                                        .frame(width: 50, height: 50)
-                                }
-                            } else {
-                                Image(systemName: "checkmark.circle")
-                                    .frame(width: 50, height: 50)
-                            }
-                        }
-                        
-                        // 들어내지 않고 접는다. 검색·드라이브 단추에 시트가 붙어 있어,
-                        // 고르는 중에 들어내면 ⌘F 가 아무 일도 하지 않았다.
-                        Group {
-                            Button(action: {
-                                showSubView[19] = true
-                                newViewFilePath = directory
-                            }) {
-                                Image(systemName: "magnifyingglass")
-                                    .frame(width:50, height:50)
-                            }
-                            .sheet(isPresented: $showSubView[19], onDismiss: {
-                                if(didSearch) {
-                                    if(FileInfo.isDirectory(filePath: newViewFilePath)) {
-                                        pane.navigate(to: newViewFilePath.hasSuffix("/")
-                                                      ? newViewFilePath : newViewFilePath + "/")
-                                    } else {
-                                        openFileAtFullPath(newViewFilePath)
-                                    }
-                                    didSearch = false
-                                }
-                            }, content: {
-                                SearchView(directory: directoryBinding, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
-                                    .onAppear { ArgoTextEntry.begin() }
-                                    .onDisappear { ArgoTextEntry.end() }
-                            }) //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
-                            //someday I'll figure it out. It's surprisingly good
-                    
-                            Button(action: { //new file/directory/symlink
-                                showSubView[0] = true
-                            }) {
-                                if #available(tvOS 14.0, *){
-                                    Image(systemName: "doc.badge.plus")
-                                        .frame(width:50, height:50)
-                                } else {
-                                    Image(systemName: "doc")
-                                        .frame(width:50, height:50)
-                                }
-                            }
-                            
-                            Button(action: {
-                                showSubView[21] = true
-                            }) {
-                                Image(systemName: "externaldrive")
-                                    .frame(width:50, height:50)
-                            }
-                            .sheet(isPresented: $showSubView[21], onDismiss: {
-                                if didChangeDir {
-                                    updateFiles()
-                                    resetShowSubView()
-                                    didChangeDir = false
-                                }
-                            }, content: {
-                                MountPointsView(directory: directoryBinding, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
-                            })
-
-                            
-                            /*if #available(tvOS 14.0, *) {
-                                Button(action: {
-                                    showSubView[25] = true
-                                }) {
-                                    Image(systemName: "server.rack")
-                                        .frame(width:50, height:50)
-                                }
-                                .contextMenu {
-                                    serverButton
-                                }
-                            } else {
-                                Button(action: {
-                                    showSubView[29] = true
-                                }) {
-                                    Image(systemName: "server.rack")
-                                        .frame(width:50, height:50)
-                                }
-                                .sheet(isPresented: $showSubView[29], content: {
-                                    serverButton
-                                })
-                            }*/
-                            //this is the webserver button
-                        }
-                        .collapsed(multiSelect)
-
-                        Group {
-                            Button(action: {
-                                showSubView[8] = true
-                                newViewFilePath = directory
-                                newViewArrayNames = multiSelectFiles
-                                resetMultiSelectArrays()
-                            }) {
-                                ZStack {
-                                    Image(systemName: "doc.on.doc")
-                                        .frame(width: 50, height: 50)
-                                    Image(systemName: "arrow.right")
-                                        .resizable()
-                                        .frame(width: 15, height: 13)
-                                        .offset(x: -4, y: 11.75) //i do not know how i came up with these values. i am not going to touch them. hopefully it doesn't break on non-1080p (i don't have this)
-                                }
-                            }
-                    
-                            Button(action: {
-                                showSubView[9] = true
-                                newViewFilePath = directory
-                                newViewArrayNames = multiSelectFiles
-                                resetMultiSelectArrays()
-                            }) {
-                                ZStack {
-                                    Image(systemName: "doc.on.clipboard")
-                                        .frame(width:50, height:50)
-                                    Image(systemName: "arrow.right")
-                                        .resizable()
-                                        .frame(width:15, height:13)
-                                        .offset(x:-3.75, y:11.75)
-                                }
-                            }
-                        
-                            Button(action: {
-                                showSubView[14] = true
-                                newViewFilePath = directory
-                                newViewArrayNames = multiSelectFiles
-                            }) {
-                                Image(systemName: "doc.zipper")
-                                    .frame(width:50, height:50)
-                            }
-                        
-                            Button(action: {
-                                // 삭제는 한 길로만 간다. 전에는 여기서 바로
-                                // 미리보기를 띄우면서 지울 목록을 채우지 않아,
-                                // '지울 것 0개' 가 뜨고 눌러도 아무 일이 없었다.
-                                requestDeleteSelection()
-                            }) {
-                                ZStack {
-                                    if(directory == "/private/var/mobile/Media/.Trash/"){
-                                        Image(systemName: "trash")
-                                            .frame(width:50, height:50)
-                                            .foregroundColor(.red)
-                                    } else {
-                                        Image(systemName: "trash")
-                                            .frame(width:50, height:50)
-                                    }
-                                }
-                            }
-                        
-                            Button(action: {
-                                // 고른 표시까지 지운다. 전에는 모드만 껐다 — 동그라미는
-                                // 사라지는데 파일은 고른 채로 남아, 다음 삭제·복사가
-                                // 보이지 않는 선택을 대상으로 삼았다.
-                                resetMultiSelectArrays()
-                                withAnimation {
-                                    multiSelect = false
-                                }
-                                allWereSelected = false
-                            }) {
-                                Image(systemName: "xmark")
-                                    .frame(width:50, height:50)
-                            }
-                        }
-                        .collapsed(!multiSelect)
-                    }
-                    .frame(alignment: .center)
-                    
                     freeSpace
                         .frame(alignment: .trailing)
+                    .sheet(isPresented: $showSubView[6], onDismiss: refreshBothPanes, content: {
+                        CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
+                    })
+                    .sheet(isPresented: $showSubView[5], onDismiss: refreshBothPanes, content: {
+                        CreateFileView(filePath: directoryBinding, isPresented: $showSubView[5])
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
+                    })
+                    .sheet(isPresented: $showSubView[20], content: {
+                        CreateSymlinkView(symlinkPath: directoryBinding, isPresented: $showSubView[20])
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
+                    })
                         .sheet(isPresented: $showSubView[15], content: {
                             SpawnView(filePath: $newViewFilePath, fileName: $newViewFileName, isPresented: $showSubView[15])
                         })

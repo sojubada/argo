@@ -26,6 +26,20 @@ struct WebDAVRootView: View {
     @State private var editMode = false
 
     var body: some View {
+        // 바탕을 먼저 깐다.
+        //
+        // tvOS 의 fullScreenCover 는 내용이 바탕을 칠하지 않으면 투명하게
+        // 뜬다. 목록과 툴바가 그대로 비쳐 두 화면이 겹쳐 보였고, 비친
+        // 단추가 포커스를 받는 것처럼 보여 어디를 누르는지 알 수 없었다.
+        ZStack {
+            Theme.background
+                .edgesIgnoringSafeArea(.all)
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         Group {
             if screen == 2 {
                 WebDAVBrowserView(server: workingServer,
