@@ -130,6 +130,15 @@ struct FilePaneView: View {
     private var header: some View {
         VStack(spacing: 4) {
             pathRow
+            if let reason = model.readError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text(reason).font(.caption)
+                    Spacer()
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 12)
+            }
             if !model.filter.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")

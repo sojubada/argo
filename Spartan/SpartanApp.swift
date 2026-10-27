@@ -70,7 +70,16 @@ struct SpartanApp: App {
             helperPath = Bundle.main.path(forResource: "RootHelper", ofType: nil)
             print("We are running on Trollstore...")
         #else
-            print("We are jailbroken!")
+            // 탈옥인지는 컴파일 플래그가 아니라 기기에서 본다.
+            //
+            // CI 빌드는 TROLLSTORE 플래그 없이 이 갈래로 컴파일된다. 그래서
+            // 탈옥하지 않은 애플TV 에서도 isJB 가 true 로 남아, .deb·.dmg·실행
+            // 파일을 열면 dpkg 설치·마운트·실행 도구로 보냈다. 그 도구들이 부르는
+            // dpkg 는 탈옥 기기에만 있으므로 아무 말 없이 실패했다. dpkg 가 실제로
+            // 있을 때만 그 길을 연다.
+            isJB = ["/usr/bin/dpkg", "/var/jb/usr/bin/dpkg"]
+                .contains { FileManager.default.isExecutableFile(atPath: $0) }
+            print(isJB ? "We are jailbroken!" : "Not jailbroken — jailbreak-only tools stay closed")
         #endif
         
         UserDefaults.settings.register(defaults: ["safeModeEnabled": true])

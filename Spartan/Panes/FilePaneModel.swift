@@ -83,6 +83,12 @@ final class FilePaneModel: ObservableObject {
     /// 가리키지만, 경로는 새 목록에 없으니 저절로 무효가 된다.
     @Published var lastFocusedPath: String?
 
+    /// 이 폴더를 읽지 못한 이유. 읽었으면 nil.
+    ///
+    /// 전에는 못 읽으면 로그에만 남기고 빈 목록을 보여 줬다. 사용자 눈에는
+    /// 그냥 빈 폴더라, 없어진 폴더인지 권한이 없는 폴더인지 알 수 없었다.
+    @Published var readError: String?
+
     /// 마지막으로 포커스됐던 줄. 지금 목록에 실제로 있을 때만.
     var lastFocusedIndex: Int? {
         guard let path = lastFocusedPath else { return nil }
@@ -118,6 +124,7 @@ final class FilePaneModel: ObservableObject {
 
     /// 디스크를 다시 읽는다. 원래 ContentView.updateFiles()와 같은 일을 한다.
     func updateFiles() {
+        readError = nil
         rawFiles = readDirectory()
         applySortAndFilter()
         normalizeDirectoryPath()
@@ -226,6 +233,9 @@ final class FilePaneModel: ObservableObject {
             writeCacheIfWritable(out)
         } catch {
             print("[FilePane] \(directory) 를 읽지 못했습니다: \(error.localizedDescription)")
+            readError = fileManager.fileExists(atPath: directory)
+                ? "이 폴더를 읽을 수 없습니다. 권한이 없을 수 있습니다."
+                : "이 폴더가 없습니다. 지워졌거나 이름이 바뀌었을 수 있습니다."
         }
         return out
     }
@@ -359,22 +369,38 @@ final class FilePaneModel: ObservableObject {
     }
 
     func goBack() {
-        guard let previous = backStack.popLast() else { return }
-        forwardStack.append(directory)
-        directory = previous
-        multiSelect = false
-        updateFiles()
+        // 기록 중에 그 사이 지워졌거나 이름이 바뀐 폴더가 있으면 건너뛴다.
+        // 그대로 가면 없는 폴더의 빈 목록이 뜬다.
+        while let previous = backStack.popLast() {
+            guard Self.isFolder(previous) else { continue }
+            forwardStack.append(directory)
+            directory = previous
+            multiSelect = false
+            filter = ""
+            updateFiles()
+            return
+        }
     }
 
     func goForward() {
-        guard let next = forwardStack.popLast() else { return }
-        backStack.append(directory)
-        directory = next
-        multiSelect = false
-        updateFiles()
+        while let next = forwardStack.popLast() {
+            guard Self.isFolder(next) else { continue }
+            backStack.append(directory)
+            directory = next
+            multiSelect = false
+            filter = ""
+            updateFiles()
+            return
+        }
     }
 
-    var canGoBack: Bool { !backStack.isEmpty }
+    private static func isFolder(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    /// 실제로 돌아갈 수 있는 폴더가 남았는가. 사라진 기록만 남았으면 false.
+    var canGoBack: Bool { backStack.contains(where: Self.isFolder) }
     var canGoForward: Bool { !forwardStack.isEmpty }
 
     /// 키보드로 글자를 치면 그 글자로 시작하는 첫 항목을 찾는다.
