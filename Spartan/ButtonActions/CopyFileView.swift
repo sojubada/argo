@@ -14,6 +14,8 @@ struct CopyFileView: View {
     @State var newFileName: String = ""
     @State var newFilePath: String = ""
     @Binding var isPresented: Bool
+    /// 실패 이유. 있으면 닫지 않고 보여 준다.
+    @State private var error: String?
     
     var body: some View {
         if(fileNames.count == 0) {
@@ -42,23 +44,24 @@ struct CopyFileView: View {
                     }
                 }
             
+                if let error {
+                    Text(error).foregroundColor(.red).multilineTextAlignment(.center)
+                }
                 Button(action: {
-                    if(multiSelect){
-                        if(fileNames.count > 1){
-                            for fileName in fileNames {
-                                copyFile(path: filePath + fileName, newPath: newFilePath + fileName)
-                            }
-                        } else {
-                            copyFile(path: filePath + fileNames[0], newPath: newFilePath + newFileName)
-                        }
-                    } else if(newFileName == ""){
-                        copyFile(path: filePath + fileNames[0], newPath: newFilePath + fileNames[0])
-                    } else {
-                        copyFile(path: filePath + fileNames[0], newPath: newFilePath + newFileName)
+                    // 같은 폴더에 같은 이름으로 복사하면 원본과 부딪친다. 새
+                    // 이름을 안 적었으면 겹치지 않는 이름으로 비켜 쓴다.
+                    let r = runFileBatch(names: fileNames, from: filePath, to: newFilePath,
+                                         rename: newFileName) { src, dst in
+                        let target = fileManager.fileExists(atPath: dst)
+                            ? PaneTransfer.nonClashingPath(dst) : dst
+                        return copyFile(path: src, newPath: target)
                     }
-                    fileNames[0] = ""
-                    multiSelect = false
-                    isPresented = false
+                    if r.failed == 0 {
+                        multiSelect = false
+                        isPresented = false
+                    } else {
+                        error = "\(fileNames.count)개 중 \(r.failed)개를 복사하지 못했습니다.\n" + (r.reason ?? "")
+                    }
                 }) {
                     Text(NSLocalizedString("CONFIRM", comment: "And begins your career at Honex Industries!"))
                         .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in

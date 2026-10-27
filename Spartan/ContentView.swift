@@ -241,12 +241,12 @@ struct ContentView: View {
                             buttonCalc = true
                         }
                     }
-                    .sheet(isPresented: $showSubView[6], content: {
+                    .sheet(isPresented: $showSubView[6], onDismiss: refreshBothPanes, content: {
                         CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
                             .onAppear { ArgoTextEntry.begin() }
                             .onDisappear { ArgoTextEntry.end() }
                     })
-                    .sheet(isPresented: $showSubView[5], content: {
+                    .sheet(isPresented: $showSubView[5], onDismiss: refreshBothPanes, content: {
                         CreateFileView(filePath: directoryBinding, isPresented: $showSubView[5])
                             .onAppear { ArgoTextEntry.begin() }
                             .onDisappear { ArgoTextEntry.end() }
@@ -673,15 +673,18 @@ struct ContentView: View {
                         .sheet(isPresented: $showSubView[4], content: {
                             TextView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[4])
                         })
-                        .sheet(isPresented: $showSubView[7], content: {
-                            RenameFileView(fileName: $renameFileCurrentName, newFileName: $renameFileNewName, filePath: $newViewFilePath, isPresented: $showSubView[7])
+                        .sheet(isPresented: $showSubView[7], onDismiss: refreshBothPanes, content: {
+                            // 바꾼 이름은 되돌리기에 남긴다. 기록 함수는 있었는데
+                            // 이름 바꾸기 창이 부르지 않아 ⌘Z 가 듣지 않았다.
+                            RenameFileView(fileName: $renameFileCurrentName, newFileName: $renameFileNewName, filePath: $newViewFilePath, isPresented: $showSubView[7],
+                                           onRenamed: { from, to in transfer.recordRename(from: from, to: to) })
                                 .onAppear { ArgoTextEntry.begin() }
                                 .onDisappear { ArgoTextEntry.end() }
                         })
-                        .sheet(isPresented: $showSubView[8], content: {
+                        .sheet(isPresented: $showSubView[8], onDismiss: refreshBothPanes, content: {
                             MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[8])
                         })
-                        .sheet(isPresented: $showSubView[9], content: {
+                        .sheet(isPresented: $showSubView[9], onDismiss: refreshBothPanes, content: {
                             CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[9])
                         })
                         .sheet(isPresented: $showSubView[11], content: {
@@ -1775,8 +1778,18 @@ struct ContentView: View {
 
         // 삭제는 전용 시트가 없다. 선택이 있으면 미리보기를 거쳐 휴지통으로 보낸다.
         case .deleteSelection:   requestDeleteSelection()
-        case .rename:            showSubView[7] = true   // renameFileShow
-        case .fileInfo:          showSubView[3] = true   // fileInfoShow
+        // 이름 바꾸기·정보는 길게 눌러 뜨는 메뉴와 같은 동작을, 포커스된 줄을
+        // 대상으로 부른다.
+        //
+        // 전에는 창만 열었다. 대상은 '지난번에 메뉴로 고른 줄' 로 남아 있어서,
+        // ⌘⏎ 를 누르면 지금 보고 있는 파일이 아니라 지난번에 이름을 바꿨던
+        // 파일의 이름 바꾸기 창이 떴다.
+        case .rename:
+            if let i = pane.focusedIndex { rowMenu(for: activeSide).rename(i) }
+            else { noFocusedRow() }
+        case .fileInfo:
+            if let i = pane.focusedIndex { rowMenu(for: activeSide).info(i) }
+            else { noFocusedRow() }
         case .newFolder:         showSubView[6] = true   // createDirectoryShow
         case .newFile:           showSubView[5] = true   // createFileShow
         case .compress:          showSubView[14] = true  // compFileShow
@@ -1854,6 +1867,23 @@ struct ContentView: View {
         pendingDeletePaths = targets
         cautionCountForBatch = targets.filter { PathSafety.risk(of: $0) != .safe }.count
         showBatchDeletePreview = true
+    }
+
+    /// 줄을 대상으로 하는 단축키를 눌렀는데 포커스된 줄이 없을 때.
+    func noFocusedRow() {
+        alertTitle = "대상이 없습니다"
+        alertMsg = "목록에서 줄을 하나 고른 뒤 다시 누르십시오."
+        showAlert = true
+    }
+
+    /// 만들기·이름 바꾸기·이동·복사 창이 닫힐 때. 양쪽 칸을 새로 읽는다.
+    ///
+    /// 전에는 아무 칸도 새로 읽지 않아, 만든 폴더나 바꾼 이름이 직접 새로
+    /// 고치기 전까지 목록에 나오지 않았다. 이동·복사는 반대 칸이 받는 곳일
+    /// 수 있으므로 둘 다 읽는다.
+    func refreshBothPanes() {
+        leftPane.updateFiles()
+        rightPane.updateFiles()
     }
 
     /// 같은 기준을 다시 누르면 오르내림이 뒤집힌다. 파인더와 같다.

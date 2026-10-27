@@ -642,3 +642,58 @@ struct NotJailbrokenView: View {
             .font(.system(size: 80))
     }
 }
+
+
+/// 새 이름이 쓸 만한지. 안 되면 사용자에게 보여 줄 이유를, 되면 nil.
+///
+/// 이름 바꾸기·새 폴더·새 파일이 아무 검사 없이 경로 뒤에 글자를 이어
+/// 붙였다. 빈 이름이면 폴더 자신을, '/' 가 들어가면 엉뚱한 하위 경로를
+/// 가리키게 된다.
+func invalidFileNameReason(_ raw: String) -> String? {
+    let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if name.isEmpty { return "이름이 비어 있습니다." }
+    if name == "." || name == ".." { return "쓸 수 없는 이름입니다." }
+    if name.contains("/") { return "이름에 / 를 쓸 수 없습니다." }
+    if name.contains("\u{0}") { return "쓸 수 없는 글자가 들어 있습니다." }
+    if name.utf8.count > 255 { return "이름이 너무 깁니다." }
+    return nil
+}
+
+
+/// 여러 개를 옮기거나 복사한다. 몇 개가 실패했는지와 첫 실패 이유를 돌려준다.
+///
+/// 이동·복사 창은 결과를 보지 않고 닫았다. 하나만 골라 새 이름 칸을 비워
+/// 두면 목적지가 '대상 폴더 자신' 이 되어 실패했는데, 그것도 모른 채 닫혔다.
+func runFileBatch(names: [String],
+                  from source: String,
+                  to destination: String,
+                  rename single: String,
+                  using op: (String, String) -> Bool) -> (failed: Int, reason: String?) {
+    func trimSlash(_ p: String) -> String {
+        var t = p
+        while t.count > 1 && t.hasSuffix("/") { t.removeLast() }
+        return t
+    }
+    let dest = destination.hasSuffix("/") ? destination : destination + "/"
+    let custom = single.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if names.count == 1, !custom.isEmpty, let why = invalidFileNameReason(custom) {
+        return (1, why)
+    }
+    var isDir: ObjCBool = false
+    guard fileManager.fileExists(atPath: dest, isDirectory: &isDir), isDir.boolValue else {
+        return (names.count, "받을 폴더가 없습니다: " + dest)
+    }
+
+    var failed = 0
+    var reason: String?
+    for name in names {
+        let target = (names.count == 1 && !custom.isEmpty) ? custom : name
+        let ok = op(trimSlash(source + name), trimSlash(dest + target))
+        if !ok {
+            failed += 1
+            if reason == nil { reason = name + " — " + (RootHelperActs.lastError ?? "알 수 없는 이유") }
+        }
+    }
+    return (failed, reason)
+}

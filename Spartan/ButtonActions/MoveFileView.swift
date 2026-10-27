@@ -14,6 +14,8 @@ struct MoveFileView: View {
     @State var newFileName: String = ""
     @State var newFilePath: String = ""
     @Binding var isPresented: Bool
+    /// 실패 이유. 있으면 닫지 않고 보여 준다.
+    @State private var error: String?
     
     var body: some View {
         VStack{
@@ -39,23 +41,18 @@ struct MoveFileView: View {
                     }
             }
         
+            if let error {
+                Text(error).foregroundColor(.red).multilineTextAlignment(.center)
+            }
             Button(action: {
-                if(multiSelect){
-                    if(fileNames.count > 1){
-                        for fileName in fileNames {
-                            RootHelperActs.mv(filePath + fileName, newFilePath + fileName)
-                        }
-                    } else {
-                        RootHelperActs.mv(filePath + fileNames[0], newFilePath + newFileName)
-                    }
-                } else if(newFileName == "") {
-                    RootHelperActs.mv(filePath + fileNames[0], newFilePath + fileNames[0])
+                let r = runFileBatch(names: fileNames, from: filePath, to: newFilePath,
+                                     rename: newFileName) { RootHelperActs.mv($0, $1) }
+                if r.failed == 0 {
+                    multiSelect = false
+                    isPresented = false
                 } else {
-                    RootHelperActs.mv(filePath + fileNames[0], newFilePath + newFileName)
+                    error = "\(fileNames.count)개 중 \(r.failed)개를 옮기지 못했습니다.\n" + (r.reason ?? "")
                 }
-            
-                multiSelect = false
-                isPresented = false
             }) {
                 Text(NSLocalizedString("CONFIRM", comment: "Students, faculty, distinguished bees,"))
                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
