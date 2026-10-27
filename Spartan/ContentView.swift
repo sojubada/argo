@@ -73,67 +73,30 @@ struct ContentView: View {
     }
     var currentDirRisk: PathRisk { pane.currentDirRisk }
 
-    /// WebDAV 를 띄우고 있는 칸. 없으면 nil.
+    /// WebDAV 가 떠 있는가. 화면을 통째로 덮는 창이다.
     ///
-    /// 두 칸일 때는 전체를 덮는 창 대신 반대 칸 자리에 그립니다 — 받을 곳을
-    /// 보면서 받아야 어디로 가는지 알 수 있습니다. 한 칸일 때는 내줄 자리가
-    /// 없으므로 예전처럼 창으로 엽니다.
-    @State var webdavSide: PaneSide?
+    /// 한때 칸을 나눠 반대 칸에 띄웠다. 받을 곳이 보인다는 점은 좋았지만,
+    /// 원격 목록은 칸에 들어가기에는 넓어 단추 글자가 줄줄이 잘렸고, 칸이
+    /// 바뀌는 사이 포커스가 어느 목록에도 없어 스페이스가 먹지 않았다.
+    /// 다시 한 창으로 돌린다.
+    @State var showWebDAV = false
 
     var directoryBinding: Binding<String> {
         Binding(get: { pane.directory }, set: { pane.directory = $0 })
     }
 
-    /// 한쪽 칸 자리에 들어갈 WebDAV 목록.
+    /// 받은 것이 놓일 곳. 미디어 폴더를 기본으로 둔다.
     ///
-    /// 받는 곳은 이 칸이 아니라 **반대쪽 칸**의 지금 폴더다. 이 칸은 원격을
-    /// 보여 주고 있으므로 받을 자리가 못 된다. 반대쪽은 눈에 보이는 로컬
-    /// 목록이라, 어디로 받는지 보면서 받고 끝나면 그 자리에 바로 나타난다.
-    @ViewBuilder
-    func webdavPane(for side: PaneSide) -> some View {
-        let target = side == .left ? rightPane : leftPane
-        WebDAVRootView(
-            directory: Binding(get: { target.directory },
-                               set: { target.directory = $0 }),
-            isPresented: Binding(
-                get: { webdavSide == side },
-                set: { shown in
-                    guard !shown else { return }
-                    webdavSide = nil
-                    // 받은 것이 바로 보여야 한다.
-                    target.updateFiles()
-                }))
-        .argoSurface()
-    }
+    /// 보고 있던 폴더로 받으면 시스템 폴더 한가운데에 내려받는 수가 있다.
+    /// 받을 곳은 늘 같은 자리여야 찾기도 쉽다.
+    static let webdavDefaultTarget = "/var/mobile/Media/"
 
-    /// WebDAV 를 띄운다. 한 칸이면 먼저 둘로 나눈다.
-    ///
-    /// 전체를 덮는 창으로 열면 받는 곳이 안 보인다. 그래서 한 칸일 때도
-    /// 창을 띄우지 않고 칸을 나눠, 보던 폴더를 왼쪽에 남긴 채 오른쪽에
-    /// 원격을 올린다 — 받는 곳이 왼쪽에 그대로 보인다.
+    /// WebDAV 를 연다.
     func openWebDAV() {
-        if dualPaneEnabled {
-            webdavSide = (activeSide == .left) ? .right : .left
-        } else {
-            // 나뉘고 나서 오른쪽이 원격을 내리면 보여 줄 곳이 있어야 한다.
-            rightPane.navigate(to: leftPane.directory, recordHistory: false)
-            withAnimation { dualPaneEnabled = true }
-            activeSide = .left
-            webdavSide = .right
-        }
-
-        // 받을 곳에 쓸 수 있는지 미리 본다.
-        //
-        // 막는 대신 알리기만 한다 — isWritableFile 은 틀릴 때가 있어서,
-        // 쓸 수 있는 폴더인데 못 쓴다고 막으면 길이 아예 없어진다.
-        let target = (webdavSide == .right ? leftPane : rightPane).directory
-        if !FileManager.default.isWritableFile(atPath: target) {
-            alertTitle = "받는 곳에 쓰지 못할 수 있습니다"
-            alertMsg = target + "\n\n받기가 실패하면 반대 칸을 쓸 수 있는 폴더로 옮긴 뒤 다시 받으십시오."
-            showAlert = true
-        }
-        ArgoDiag.log("webdav", "칸에 띄움 — 받는 곳 \(target)")
+        showWebDAV = true
+        ArgoDiag.log("webdav", "열림 — 받는 곳 \(Self.webdavDefaultTarget)")
     }
+
     var multiSelectBinding: Binding<Bool> {
         Binding(get: { pane.multiSelect }, set: { pane.multiSelect = $0 })
     }
@@ -256,17 +219,17 @@ struct ContentView: View {
 
             VStack {
                 VStack {
-                    HStack { //input directory + refresh
-                    TextField(NSLocalizedString("INPUT_DIRECTORY", comment: "According to all known laws of aviation"), text: directoryBinding, onEditingChanged: { editing in
-                        // 글자를 받는 동안 단축키를 막는다. 안 막으면 파일명에
-                        // 'r' 을 넣는 순간 새로 읽기가 돈다.
-                        if editing { ArgoTextEntry.begin() }
-                        else { ArgoTextEntry.end() }
-                    }, onCommit: {
-                        commitTypedPath()
-                    })
-                    .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                        view.scaledFont(name: "BotW Sheikah Regular", size: 40)
+                    // 위쪽 경로 칸을 뗐다.
+                    //
+                    // 칸마다 제 머리줄에 경로가 나오므로 같은 것을 두 번
+                    // 보여 주고 있었다. 그리고 그 칸이 열려 있는 동안 누른
+                    // ⌘⌫ 가 파일 삭제로 흘러들어, 글자를 지우려다 폴더가
+                    // 지워지는 길이 되어 있었다.
+                    HStack { //refresh
+                    Button(action: {
+                        updateFiles()
+                    }) {
+                        Image(systemName: "arrow.clockwise")
                     }
                     .onAppear {
                         if(!buttonCalc) {
@@ -277,12 +240,6 @@ struct ContentView: View {
                             }
                             buttonCalc = true
                         }
-                    }
-                    
-                    Button(action: {
-                        updateFiles()
-                    }) {
-                        Image(systemName: "arrow.clockwise")
                     }
                     .sheet(isPresented: $showSubView[6], content: {
                         CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
@@ -352,11 +309,32 @@ struct ContentView: View {
                         Image(systemName: "globe")
                             .frame(width:50, height:50)
                     }
-                    // WebDAV 를 덮는 창으로 띄우던 자리였다. 이제 칸에
-                    // 들어가므로 뗀다. 떼면서 같은 showSubView[25] 를
-                    // WebServerView 와 나눠 쓰던 것도 풀린다 — 한 깃발에
-                    // 창이 둘 걸려 있어서, 어느 쪽이 뜨는지는 두 .sheet 중
-                    // 누가 이기느냐에 달려 있었다.
+                    // 받는 곳은 미디어 폴더로 고정한다.
+                    //
+                    // 보고 있던 폴더로 받으면 시스템 폴더 한가운데로
+                    // 내려받는 수가 있고, 나중에 어디에 받았는지 찾기도
+                    // 어렵다. 늘 같은 자리면 둘 다 없어진다.
+                    //
+                    // showSubView[25] 는 쓰지 않는다 — 그 깃발에는
+                    // WebServerView 가 걸려 있어, 한 깃발에 창이 둘이면
+                    // 어느 쪽이 뜨는지가 두 .sheet 중 누가 이기느냐에
+                    // 달리게 된다.
+                    .fullScreenCover(isPresented: $showWebDAV, onDismiss: {
+                        // 받은 것이 바로 보여야 한다. 받는 곳을 보고 있던
+                        // 칸이면 그 칸을, 아니면 양쪽 다 새로 읽는다.
+                        leftPane.updateFiles()
+                        rightPane.updateFiles()
+                    }, content: {
+                        WebDAVRootView(
+                            // 읽을 때는 늘 미디어 폴더 — 받는 곳이 된다.
+                            // 쓸 때는 보던 칸을 그리로 옮긴다 — '받은 폴더
+                            // 열기' 가 이 길로 온다. 하나로 묶어 두면 둘 중
+                            // 하나는 못 하게 된다.
+                            directory: Binding(
+                                get: { Self.webdavDefaultTarget },
+                                set: { pane.navigate(to: $0) }),
+                            isPresented: $showWebDAV)
+                    })
 
                     Button(action: { //trash
                         showSubView[37] = true
@@ -815,29 +793,18 @@ struct ContentView: View {
                     // 칸 사이 좌우 이동은 tvOS 포커스 엔진이 알아서 한다 — 손대면 싸운다.
                     if dualPaneEnabled {
                         HStack(spacing: 12) {
-                            // 한쪽이 WebDAV 를 띄우고 있으면 그 자리에 원격
-                            // 목록을 그린다. 전체를 덮는 창이 아니라 칸이므로,
-                            // 반대쪽 로컬 목록을 보면서 받을 수 있다.
-                            if webdavSide == .left {
-                                webdavPane(for: .left)
-                            } else {
-                                FilePaneView(model: leftPane,
-                                             isActive: activeSide == .left,
-                                             onOpen: { index in openInPane(.left, index: index) },
-                                             onGoUp: { activeSide = .left; leftPane.goUp() },
-                                             onFocus: { if activeSide != .left { activeSide = .left } },
-                                             menu: rowMenu(for: .left))
-                            }
-                            if webdavSide == .right {
-                                webdavPane(for: .right)
-                            } else {
-                                FilePaneView(model: rightPane,
-                                             isActive: activeSide == .right,
-                                             onOpen: { index in openInPane(.right, index: index) },
-                                             onGoUp: { activeSide = .right; rightPane.goUp() },
-                                             onFocus: { if activeSide != .right { activeSide = .right } },
-                                             menu: rowMenu(for: .right))
-                            }
+                            FilePaneView(model: leftPane,
+                                         isActive: activeSide == .left,
+                                         onOpen: { index in openInPane(.left, index: index) },
+                                         onGoUp: { activeSide = .left; leftPane.goUp() },
+                                         onFocus: { if activeSide != .left { activeSide = .left } },
+                                         menu: rowMenu(for: .left))
+                            FilePaneView(model: rightPane,
+                                         isActive: activeSide == .right,
+                                         onOpen: { index in openInPane(.right, index: index) },
+                                         onGoUp: { activeSide = .right; rightPane.goUp() },
+                                         onFocus: { if activeSide != .right { activeSide = .right } },
+                                         menu: rowMenu(for: .right))
                         }
                     } else {
                         FilePaneView(model: leftPane,
@@ -1329,11 +1296,6 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: ArgoSelectToggle.notification)) { _ in
                 handleSelectToggle()
-            }
-            // 한 칸으로 돌아가면 WebDAV 가 설 자리가 없다. 남겨 두면
-            // 한 칸뿐인 화면이 통째로 원격 목록이 된다.
-            .onChange(of: dualPaneEnabled) { on in
-                if !on { webdavSide = nil }
             }
             .sheet(isPresented: $showSubView[39], content: {
                 KeyboardHelpView(isPresented: $showSubView[39])
@@ -1842,13 +1804,40 @@ struct ContentView: View {
 
     /// ⌫ 로 삭제. 기존 일괄 삭제 미리보기를 거친다 — 되돌릴 수 없는 일이라 확인을 뺄 수 없다.
     func requestDeleteSelection() {
-        let targets = pane.selectedPaths.isEmpty
-            ? (newViewFilePath.isEmpty ? [] : [newViewFilePath])
-            : pane.selectedPaths
+        // 고른 것이 없으면 포커스가 올라간 **줄** 을 지운다.
+        //
+        // 전에는 newViewFilePath 로 물러섰는데, 그 값은 폴더에 들어갈 때마다
+        // '지금 폴더' 로 덮어써진다. 그래서 아무것도 고르지 않은 채 ⌘⌫ 를
+        // 누르면 보고 있던 폴더가 통째로 지울 것이 됐다 — 경로 칸에 글자를
+        // 치다가 지우려고 ⌫ 를 눌러도 같은 일이 났다.
+        var targets = pane.selectedPaths
+        if targets.isEmpty,
+           let index = pane.focusedIndex,
+           pane.masterFiles.indices.contains(index) {
+            targets = [pane.masterFiles[index].fullPath]
+        }
         guard !targets.isEmpty else {
             alertTitle = "삭제할 항목이 없습니다"
             alertMsg = "먼저 항목을 고르십시오."
             showAlert = true
+            return
+        }
+
+        // 보고 있는 폴더와 그 윗폴더는 지울 수 없다.
+        //
+        // 목록에 보이는 것을 지우는 자리이지, 발밑을 지우는 자리가 아니다.
+        // 한 번 이렇게 지워지면 되돌릴 길이 없다.
+        let here = Self.lexicalPath(pane.directory)
+        if let bad = targets.first(where: { target in
+            let t = Self.lexicalPath(target)
+            return t == here || here.hasPrefix(t + "/")
+        }) {
+            alertTitle = "이 폴더는 지울 수 없습니다"
+            alertMsg = (bad as NSString).lastPathComponent
+                + "\n\n지금 보고 있는 폴더이거나 그 윗폴더입니다. "
+                + "윗폴더로 올라가서 지우십시오."
+            showAlert = true
+            ArgoDiag.log("delete", "거부 — 현재 폴더/윗폴더 \(bad)")
             return
         }
         // 관문을 먼저 지난다. 막히면 왜 막혔는지 말해 준다 —
@@ -2144,23 +2133,6 @@ struct ContentView: View {
     }
 
     
-    /// 직접 쳐 넣은 경로로 간다. 목록 갱신을 보장한다.
-    ///
-    /// 위쪽 칸의 TextField 는 pane.directory 에 바로 묶여 있어서, 엔터를
-    /// 누르는 순간 pane.directory 는 **이미** 쳐 넣은 글자로 바뀌어 있다.
-    /// 그 상태로 navigate 를 부르면 "가려는 곳이 지금 있는 곳과 같다" 가
-    /// 되어 `guard newPath != from` 에 걸려 그냥 돌아간다 — 폴더 이름은
-    /// 바뀌었는데 목록은 옛 폴더 그대로 남는다.
-    ///
-    /// 같으면 목록만 새로 읽고, 다르면 평소대로 간다.
-    func goToTypedFolder(_ target: String) {
-        if pane.directory == target {
-            pane.updateFiles()
-        } else {
-            pane.navigate(to: target)
-        }
-    }
-
     /// 경로를 글자만 보고 다듬는다. 디스크를 건드리지 않는다.
     ///
     /// 휴지통 안인지 가릴 때 `resolvingSymlinksInPath` 를 쓰고 있었다.
@@ -2211,57 +2183,6 @@ struct ContentView: View {
         defaultAction(index: idx, isDirectPath: false)
     }
 
-    /// 위쪽 칸에 직접 쳐 넣은 경로로 간다.
-    ///
-    /// 전에 있던 것은 세 가지가 틀렸다.
-    ///
-    /// 하나, `^[a-zA-Z0-9_\-./]+$` 로 걸러서 한글이나 띄어쓰기가 든 폴더
-    /// 이름은 통과하지 못했다. 통과 못 하면 루트로 보내 버렸으므로, 한글
-    /// 폴더로 가려고 칠 때마다 / 로 튕겼다.
-    ///
-    /// 둘, 그 검사를 `defaultAction` 을 부른 **뒤에** 했다. 이미 간 다음에
-    /// 길을 확인한 셈이다.
-    ///
-    /// 셋, `directory.lastIndex(of: "/")!` 가 있었다. 슬래시 없이 글자만
-    /// 치면 nil 이 나와 그 자리에서 앱이 죽었다.
-    ///
-    /// 지금은 거르지 않고, 있는 곳이면 가고, 파일이면 그 파일이 든 폴더로
-    /// 가서 연다. 없는 곳이면 있는 윗폴더까지 거슬러 올라간다 — 오타 하나에
-    /// 루트로 내쫓지 않기 위해서다.
-    func commitTypedPath() {
-        var typed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !typed.hasPrefix("/") { typed = "/" + typed }
-        while typed.count > 1 && typed.hasSuffix("/") { typed.removeLast() }
-        if typed.isEmpty { typed = "/" }
-
-        func asFolder(_ p: String) -> String { p.hasSuffix("/") ? p : p + "/" }
-
-        if FileInfo.isDirectory(filePath: typed) {
-            goToTypedFolder(asFolder(typed))
-            return
-        }
-
-        if fileManager.fileExists(atPath: typed) {
-            let parent = (typed as NSString).deletingLastPathComponent
-            let name   = (typed as NSString).lastPathComponent
-            goToTypedFolder(asFolder(parent))
-            if let idx = masterFiles.firstIndex(where: { $0.name == name }) {
-                defaultAction(index: idx, isDirectPath: false)
-            }
-            return
-        }
-
-        // 없는 경로다. 있는 윗폴더까지 올라간다.
-        var probe = (typed as NSString).deletingLastPathComponent
-        while probe.count > 1 && !FileInfo.isDirectory(filePath: probe) {
-            probe = (probe as NSString).deletingLastPathComponent
-        }
-        let landing = FileInfo.isDirectory(filePath: probe) ? probe : "/"
-        goToTypedFolder(asFolder(landing))
-        alertTitle = "그런 경로가 없습니다"
-        alertMsg = typed + "\n\n가장 가까운 폴더로 왔습니다."
-        showAlert = true
-    }
     func resetShowSubView() {
         for i in 0..<showSubView.count {
             showSubView[i] = false

@@ -215,6 +215,13 @@ final class ArgoHostingController: UIHostingController<ContentView> {
     }
 
     @objc private func handleKeyCommand(_ sender: UIKeyCommand) {
+        // 글자를 받는 칸이 떠 있으면 단축키는 돌지 않는다.
+        //
+        // keyCommands 에서 nil 을 돌려주는 것만으로는 부족하다. UIKit 은 그
+        // 목록을 미리 받아 두고 쓰므로, 칸이 열린 뒤에도 먼저 등록해 둔
+        // 조합이 그대로 살아 있을 수 있다. 받는 쪽에서 한 번 더 막는다 —
+        // 글자를 지우려고 ⌫ 를 눌렀는데 파일이 지워지면 안 된다.
+        guard !ArgoTextEntry.isActive else { return }
         guard let input = sender.input else { return }
         let flags = sender.modifierFlags
         guard let matched = allCommands.first(where: { command in
