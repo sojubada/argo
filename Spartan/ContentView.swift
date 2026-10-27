@@ -413,11 +413,12 @@ struct ContentView: View {
                     Button(action: { //더보기 — 나머지 아이콘 펼치기
                         withAnimation { toolbarExpanded.toggle() }
                     }) {
-                        Image(systemName: toolbarExpanded
+                        Image(systemName: (toolbarExpanded || multiSelect)
                               ? "chevron.left.circle" : "ellipsis.circle")
                             .frame(width: 50, height: 50)
                     }
 
+                    Group {
                     Group {
                     Button(action: { //숨긴 항목
                         pane.showHidden.toggle()
@@ -453,6 +454,9 @@ struct ContentView: View {
                         Image(systemName: "keyboard")
                             .frame(width: 50, height: 50)
                     }
+                    }
+                    // 고르는 중에는 접어서, 고른 것에 쓸 단추가 그 자리를 차지하게 한다.
+                    .collapsed(multiSelect)
 
                     if dualPaneEnabled {
                         Button(action: { //반대 칸으로 복사
@@ -513,7 +517,9 @@ struct ContentView: View {
                             }
                         }
                         
-                        if (!multiSelect) {
+                        // 들어내지 않고 접는다. 검색·드라이브 단추에 시트가 붙어 있어,
+                        // 고르는 중에 들어내면 ⌘F 가 아무 일도 하지 않았다.
+                        Group {
                             Button(action: {
                                 showSubView[19] = true
                                 newViewFilePath = directory
@@ -589,10 +595,10 @@ struct ContentView: View {
                                 })
                             }*/
                             //this is the webserver button
-                            
-                        
+                        }
+                        .collapsed(multiSelect)
 
-                        } else {
+                        Group {
                             Button(action: {
                                 showSubView[8] = true
                                 newViewFilePath = directory
@@ -653,6 +659,10 @@ struct ContentView: View {
                             }
                         
                             Button(action: {
+                                // 고른 표시까지 지운다. 전에는 모드만 껐다 — 동그라미는
+                                // 사라지는데 파일은 고른 채로 남아, 다음 삭제·복사가
+                                // 보이지 않는 선택을 대상으로 삼았다.
+                                resetMultiSelectArrays()
                                 withAnimation {
                                     multiSelect = false
                                 }
@@ -662,6 +672,7 @@ struct ContentView: View {
                                     .frame(width:50, height:50)
                             }
                         }
+                        .collapsed(!multiSelect)
                     }
                     .frame(alignment: .center)
                     
@@ -782,9 +793,11 @@ struct ContentView: View {
                     // 접혀 있으면 폭 0 · 투명 · 포커스 불가. 계층에서 빼지 않는 이유는
                     // 이 버튼들에 시트가 붙어 있어서다 — if 로 들어내면 단축키로 띄우는
                     // 시트까지 같이 사라진다.
-                    .frame(maxWidth: toolbarExpanded ? nil : 0)
-                    .opacity(toolbarExpanded ? 1 : 0)
-                    .disabled(!toolbarExpanded)
+                    //
+                    // 고르는 중이면 펼침 영역을 연다. 이동·복사·압축·삭제 단추가
+                    // 이 안에 있어서, 접혀 있으면 골라 놓고도 할 일을 찾을 수
+                    // 없었다(이슈 #2).
+                    .collapsed(!(toolbarExpanded || multiSelect))
                 }
                 .padding(.horizontal, 8)
                 }
@@ -2317,3 +2330,16 @@ struct SpartanFile: Hashable, Encodable, Decodable {
     var size: Int64? = nil
     var modified: Date? = nil
 } // i am so glad I switched to this instead of having like five different arrays
+
+
+extension View {
+    /// 계층에서 빼지 않고 접는다. 폭 0 · 투명 · 포커스 불가.
+    ///
+    /// 툴바 단추에는 시트가 붙어 있다. if 로 단추를 들어내면 그 시트도 같이
+    /// 사라져, 단축키로 띄우려 해도 아무 일이 없다.
+    func collapsed(_ yes: Bool) -> some View {
+        self.frame(maxWidth: yes ? 0 : nil)
+            .opacity(yes ? 0 : 1)
+            .disabled(yes)
+    }
+}
