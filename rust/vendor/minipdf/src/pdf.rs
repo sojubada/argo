@@ -836,6 +836,12 @@ fn font_preference(
     preferred_font: Option<&str>,
 ) -> u8 {
     let name = name.to_ascii_lowercase();
+    // 굵기·기울기가 요청과 맞는지. 이름이 말해 주는 것만 본다.
+    //
+    // 전에는 굵기를 arial→arialbd 처럼 윈도우 글꼴 이름 대응표로만 다뤘다.
+    // 그 표에 없는 글꼴 — 한글 글꼴은 전부 여기 해당한다 — 은 굵은 자형을
+    // 등록해 두어도 고를 길이 없어서, 굵게 쓴 제목이 보통 굵기로 나왔다.
+    let style = font_style_penalty(&name, bold, italic);
     if let Some(preferred) = preferred_font {
         let preferred = match preferred.trim() {
             "宋体" | "新宋体" => "simsun".to_owned(),
@@ -915,9 +921,37 @@ fn font_preference(
     } else if name == "calibri" {
         2
     } else {
-        10
+        // 이름으로는 아무것도 못 맞춘 갈래. 여기서만 굵기를 따진다.
+        //
+        // 위의 이름들(calibrib·simhei 따위)은 그 자체가 굵은 자형을 가리키는
+        // 윈도우 이름이라 굵기가 이미 담겨 있다. 거기에 또 벌점을 매기면
+        // 제대로 고른 글꼴을 밀어내게 된다. 반대로 여기까지 내려온 글꼴들은
+        // 서로 구별할 근거가 이름의 굵기밖에 없다 — 한글 글꼴이 늘 여기로
+        // 온다.
+        10 + style
     };
     fallback_score + if preferred_font.is_some() { 2 } else { 0 }
+}
+
+/// 이름이 말하는 굵기·기울기가 요청과 어긋난 정도.
+///
+/// 점수는 낮을수록 먼저 고른다. 어긋나면 밀어내되, 밀려나도 그 글자를
+/// 그릴 수 있는 글꼴이 그것뿐이면 여전히 가장 낮은 점수라 그대로 뽑힌다 —
+/// 굵은 자형이 없다고 글자가 사라지지는 않는다.
+fn font_style_penalty(name: &str, bold: bool, italic: bool) -> u8 {
+    let name_bold = name.contains("bold")
+        || name.contains("black")
+        || name.contains("heavy")
+        || name.contains("extrabold");
+    let name_italic = name.contains("italic") || name.contains("oblique");
+    let mut penalty = 0;
+    if name_bold != bold {
+        penalty += 3;
+    }
+    if name_italic != italic {
+        penalty += 1;
+    }
+    penalty
 }
 
 fn font_supports(font_index: usize, font: &RegisteredFont, ch: char) -> bool {
@@ -1414,6 +1448,44 @@ mod tests {
 
         assert!(cache.support_by_character.is_empty());
         assert!(cache.selections.is_empty());
+    }
+
+    /// 한글 굵은 글씨는 굵은 자형을 골라야 한다.
+    ///
+    /// 굵기를 윈도우 이름 대응표로만 다루던 동안, 그 표에 없는 한글 글꼴은
+    /// 굵은 자형을 등록해 두어도 고를 길이 없었다 — 굵게 쓴 제목이 보통
+    /// 굵기로 나오던 까닭이다.
+    #[test]
+    fn prefers_the_bold_face_for_bold_korean_text() {
+        let regular = "Pretendard-Regular";
+        let bold = "Pretendard-Bold";
+        let hangul = '한';
+
+        // 굵게 요청하면 굵은 자형이 앞선다.
+        assert!(
+            font_preference(bold, hangul, true, false, Some("맑은 고딕"))
+                < font_preference(regular, hangul, true, false, Some("맑은 고딕")),
+            "굵게 썼는데 보통 자형을 먼저 골랐다"
+        );
+
+        // 보통으로 요청하면 보통 자형이 앞선다.
+        assert!(
+            font_preference(regular, hangul, false, false, Some("맑은 고딕"))
+                < font_preference(bold, hangul, false, false, Some("맑은 고딕")),
+            "보통으로 썼는데 굵은 자형을 먼저 골랐다"
+        );
+
+        // 문서가 글꼴을 안 적었을 때도 마찬가지다.
+        assert!(
+            font_preference(bold, hangul, true, false, None)
+                < font_preference(regular, hangul, true, false, None)
+        );
+
+        // 기울임도 같은 규칙을 탄다.
+        assert!(
+            font_preference("NanumMyeongjo-Italic", hangul, false, true, None)
+                < font_preference("NanumMyeongjo-Regular", hangul, false, true, None)
+        );
     }
 
     #[test]

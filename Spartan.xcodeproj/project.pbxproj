@@ -63,6 +63,9 @@
 		42E764402B0BC7E9000D1330 /* FileInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42E7643F2B0BC7E9000D1330 /* FileInfo.swift */; };
 		F82095202A2622D100DC6D79 /* CarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F820951F2A2622D100DC6D79 /* CarView.swift */; };
 		F83CB3C02A41170F005BF95A /* FontView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83CB3BF2A41170F005BF95A /* FontView.swift */; };
+		887834CE394349558A3CDD8A /* Pretendard-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 96CA230996A7471682696862 /* Pretendard-Regular.ttf */; };
+		CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */; };
+		1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */; };
 		F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F83F052D2A297CDE00EB0720 /* Sheikah.ttf */; };
 		F83F47D22A43782E00A4C47F /* CommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83F47D12A43782E00A4C47F /* CommandRunner.swift */; };
 		F845C82829F4D77C0025AC0A /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F845C82A29F4D77C0025AC0A /* Localizable.strings */; };
@@ -174,6 +177,9 @@
 		42E7643F2B0BC7E9000D1330 /* FileInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileInfo.swift; sourceTree = "<group>"; };
 		F820951F2A2622D100DC6D79 /* CarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarView.swift; sourceTree = "<group>"; };
 		F83CB3BF2A41170F005BF95A /* FontView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontView.swift; sourceTree = "<group>"; };
+		96CA230996A7471682696862 /* Pretendard-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-Regular.ttf"; sourceTree = "<group>"; };
+		6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-Bold.ttf"; sourceTree = "<group>"; };
+		8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-LICENSE.txt"; sourceTree = "<group>"; };
 		F83F052D2A297CDE00EB0720 /* Sheikah.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Sheikah.ttf; sourceTree = "<group>"; };
 		F83F47D12A43782E00A4C47F /* CommandRunner.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandRunner.swift; sourceTree = "<group>"; };
 		F84430612A43EF290042BAB5 /* Pogo-BridgingHeader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Pogo-BridgingHeader.h"; sourceTree = "<group>"; };
@@ -459,6 +465,9 @@
 				F845C82E29F6247A0025AC0A /* EThree.swift */,
 				F853AB3229DBCB1E006EA2D5 /* Assets.xcassets */,
 				F845C82A29F4D77C0025AC0A /* Localizable.strings */,
+				96CA230996A7471682696862 /* Pretendard-Regular.ttf */,
+				6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */,
+				8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */,
 				F83F052D2A297CDE00EB0720 /* Sheikah.ttf */,
 				F88CC49E2A44ADEB001FACFC /* SF Mono.otf */,
 			);
@@ -641,6 +650,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				F88CC4A02A44AE40001FACFC /* SF Mono.otf in Resources */,
+				887834CE394349558A3CDD8A /* Pretendard-Regular.ttf in Resources */,
+				CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */,
+				1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */,
 				F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */,
 				F845C82829F4D77C0025AC0A /* Localizable.strings in Resources */,
 				F853AB3329DBCB1E006EA2D5 /* Assets.xcassets in Resources */,

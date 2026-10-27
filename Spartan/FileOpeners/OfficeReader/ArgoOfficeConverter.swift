@@ -71,6 +71,17 @@ enum ArgoOfficeConverter {
             "/System/Library/Fonts/LanguageSupport/AppleSDGothicNeo.ttc",
         ]
 
+        // 앱에 넣어 둔 한글 글꼴.
+        //
+        // 기기에 있는 것은 AppleSDGothicNeo 한 벌뿐인데, 그 한 벌로는 굵게
+        // 쓴 글을 굵게 그릴 수가 없습니다 — 굵은 자형이 따로 있어야 고를 수
+        // 있습니다. 굵기를 갖춘 한 가족을 들고 다닙니다.
+        for name in ["Pretendard-Regular", "Pretendard-Bold"] {
+            if let path = Bundle.main.path(forResource: name, ofType: "ttf") {
+                candidates.append(path)
+            }
+        }
+
         // 사용자가 직접 넣는 자리. 기기에 없는 글꼴이 필요할 때 쓸 수 있게
         // 둡니다 — 파일 탐색기로 넣고 바로 쓰면 됩니다.
         let userDir = "/var/mobile/Media/Argo/fonts"
