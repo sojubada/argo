@@ -1785,10 +1785,10 @@ struct ContentView: View {
         // ⌘⏎ 를 누르면 지금 보고 있는 파일이 아니라 지난번에 이름을 바꿨던
         // 파일의 이름 바꾸기 창이 떴다.
         case .rename:
-            if let i = pane.focusedIndex { rowMenu(for: activeSide).rename(i) }
+            if let i = pane.lastFocusedIndex { rowMenu(for: activeSide).rename(i) }
             else { noFocusedRow() }
         case .fileInfo:
-            if let i = pane.focusedIndex { rowMenu(for: activeSide).info(i) }
+            if let i = pane.lastFocusedIndex { rowMenu(for: activeSide).info(i) }
             else { noFocusedRow() }
         case .newFolder:         showSubView[6] = true   // createDirectoryShow
         case .newFile:           showSubView[5] = true   // createFileShow
@@ -1826,12 +1826,7 @@ struct ContentView: View {
         // '지금 폴더' 로 덮어써진다. 그래서 아무것도 고르지 않은 채 ⌘⌫ 를
         // 누르면 보고 있던 폴더가 통째로 지울 것이 됐다 — 경로 칸에 글자를
         // 치다가 지우려고 ⌫ 를 눌러도 같은 일이 났다.
-        var targets = pane.selectedPaths
-        if targets.isEmpty,
-           let index = pane.focusedIndex,
-           pane.masterFiles.indices.contains(index) {
-            targets = [pane.masterFiles[index].fullPath]
-        }
+        let targets = currentTargets
         guard !targets.isEmpty else {
             alertTitle = "삭제할 항목이 없습니다"
             alertMsg = "먼저 항목을 고르십시오."
@@ -1843,17 +1838,8 @@ struct ContentView: View {
         //
         // 목록에 보이는 것을 지우는 자리이지, 발밑을 지우는 자리가 아니다.
         // 한 번 이렇게 지워지면 되돌릴 길이 없다.
-        let here = Self.lexicalPath(pane.directory)
-        if let bad = targets.first(where: { target in
-            let t = Self.lexicalPath(target)
-            return t == here || here.hasPrefix(t + "/")
-        }) {
-            alertTitle = "이 폴더는 지울 수 없습니다"
-            alertMsg = (bad as NSString).lastPathComponent
-                + "\n\n지금 보고 있는 폴더이거나 그 윗폴더입니다. "
-                + "윗폴더로 올라가서 지우십시오."
-            showAlert = true
-            ArgoDiag.log("delete", "거부 — 현재 폴더/윗폴더 \(bad)")
+        if let bad = targetUnderfoot(targets) {
+            refuseUnderfoot(bad, verb: "지울")
             return
         }
         // 관문을 먼저 지난다. 막히면 왜 막혔는지 말해 준다 —
@@ -1929,6 +1915,8 @@ struct ContentView: View {
             newViewFilePath = file.fullPath
             newViewFileName = file.name
             newViewFileIndex = index
+            // 메뉴가 뜨면 포커스는 메뉴로 간다. 누른 줄을 대상으로 못박아 둔다.
+            model.lastFocusedPath = file.fullPath
             return file.fullPath
         }
 
@@ -1994,10 +1982,41 @@ struct ContentView: View {
     // MARK: - 클립보드
 
     /// 지금 대상이 되는 항목들. 고른 것이 있으면 그것, 없으면 마지막으로 만진 파일.
+    /// 지우기·복사·잘라내기·반대 칸으로 보내기가 다룰 대상.
+    ///
+    /// 고른 것이 있으면 그것, 없으면 이 칸에서 마지막으로 포커스됐던 줄.
+    ///
+    /// 전에는 고른 것이 없을 때 newViewFilePath 로 물러섰다. 그 값은 폴더에
+    /// 들어갈 때마다 '지금 폴더' 로 덮어써진다. 그래서 아무것도 고르지 않고
+    /// ⌘⌫ 를 누르면 보던 폴더가 지울 것이 됐고, ⌘X 나 ⌘⌥X 를 누르면 보던
+    /// 폴더가 통째로 잘라내지거나 반대 칸으로 옮겨질 참이었다. 세 곳이 같은
+    /// 방식이었으므로 한 곳으로 모은다.
     var currentTargets: [String] {
         let selected = pane.selectedPaths
         if !selected.isEmpty { return selected }
-        return newViewFilePath.isEmpty ? [] : [newViewFilePath]
+        if let i = pane.lastFocusedIndex { return [pane.masterFiles[i].fullPath] }
+        return []
+    }
+
+    /// 대상 중에 보던 폴더나 그 윗폴더가 있으면 그것을 돌려준다.
+    ///
+    /// 목록에 보이는 것을 다루는 자리이지 발밑을 다루는 자리가 아니다.
+    /// 보던 폴더를 지우거나 옮기면 되돌릴 길이 없다.
+    func targetUnderfoot(_ targets: [String]) -> String? {
+        let here = Self.lexicalPath(pane.directory)
+        return targets.first { target in
+            let t = Self.lexicalPath(target)
+            return t == here || here.hasPrefix(t + "/")
+        }
+    }
+
+    /// 발밑을 다루려 할 때 알린다.
+    func refuseUnderfoot(_ path: String, verb: String) {
+        alertTitle = "이 폴더는 \(verb) 수 없습니다"
+        alertMsg = (path as NSString).lastPathComponent
+            + "\n\n지금 보고 있는 폴더이거나 그 윗폴더입니다. 윗폴더로 올라가서 하십시오."
+        showAlert = true
+        ArgoDiag.log("target", "거부(\(verb)) — 현재 폴더/윗폴더 \(path)")
     }
 
     func clipboardTake(mode: ClipboardMode) {
@@ -2006,6 +2025,10 @@ struct ContentView: View {
             alertTitle = "고른 항목이 없습니다"
             alertMsg = "파일을 길게 눌러 고르거나 여러 개 고르기를 켜십시오."
             showAlert = true
+            return
+        }
+        if let bad = targetUnderfoot(targets) {
+            refuseUnderfoot(bad, verb: mode == .move ? "잘라낼" : "복사할")
             return
         }
         clipboard.take(targets, mode: mode)
@@ -2075,13 +2098,15 @@ struct ContentView: View {
     /// 활성 칸의 선택을 반대 칸으로 복사한다. 두 칸의 존재 이유다.
     /// 쓰기는 반드시 FileGuard를 지난다 — 관문을 우회하면 안전장치가 무의미해진다.
     func copySelectionToOtherPane(move: Bool) {
-        let sources = pane.selectedPaths.isEmpty
-            ? (newViewFilePath.isEmpty ? [] : [newViewFilePath])
-            : pane.selectedPaths
+        let sources = currentTargets
         guard !sources.isEmpty else {
             alertTitle = "복사할 항목이 없습니다"
             alertMsg = "먼저 항목을 고르십시오."
             showAlert = true
+            return
+        }
+        if let bad = targetUnderfoot(sources) {
+            refuseUnderfoot(bad, verb: move ? "옮길" : "복사할")
             return
         }
 

@@ -102,6 +102,9 @@ struct FilePaneView: View {
         // 이 값을 보고 어느 줄을 고를지 정한다.
         .onChange(of: focusedRow) { row in
             model.focusedIndex = row
+            if let row, model.masterFiles.indices.contains(row) {
+                model.lastFocusedPath = model.masterFiles[row].fullPath
+            }
             // 포커스가 들어온 칸이 곧 명령을 받을 칸이다. 두 칸을 쓸 때
             // 커서만 옮기고 스페이스를 누르면 반대 칸이 골라지던 것을 막는다.
             if row != nil { onFocus() }

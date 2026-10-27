@@ -68,9 +68,30 @@ final class PaneTransfer: ObservableObject {
 
         let targets = sources.map { destination + (($0 as NSString).lastPathComponent) }
 
+        // 폴더를 그 자신의 안으로 보내지 않는다.
+        //
+        // 두 칸을 쓰면 흔히 생긴다 — 왼쪽에서 A 를 고르고 오른쪽이 A 안의 하위
+        // 폴더에 있을 때. 복사는 자기 자신을 끝없이 안으로 퍼 담으려 들고,
+        // 이동은 제 발밑으로 들어가려다 실패한다.
+        func bare(_ p: String) -> String {
+            var t = (p as NSString).standardizingPath
+            if t.hasPrefix("/var/") { t = "/private" + t }
+            return t
+        }
+        let dest = bare(destination)
+        if let inside = sources.first(where: { dest == bare($0) || dest.hasPrefix(bare($0) + "/") }) {
+            onBlocked("‘\((inside as NSString).lastPathComponent)’ 을(를) 그 자신의 안으로 "
+                      + (move ? "옮길" : "복사할") + " 수 없습니다.")
+            return
+        }
+
         // 관문을 먼저 지난다. 한 건이라도 막히면 전부 멈춘다 —
         // 절반만 옮겨진 상태가 가장 수습하기 어렵다.
-        switch FileGuard.authorize(action: move ? "move" : "copy", paths: targets) {
+        //
+        // 옮기기는 원본 자리에서 보면 지우기다. 목적지만 물으면 보호된 폴더에서
+        // 파일을 빼내는 것이 그대로 통과하므로, 원본도 같이 묻는다.
+        let asked = move ? targets + sources : targets
+        switch FileGuard.authorize(action: move ? "move" : "copy", paths: asked) {
         case .failure(let err):
             onBlocked(err.localizedDescription)
             return

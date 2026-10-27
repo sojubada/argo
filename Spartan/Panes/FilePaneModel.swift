@@ -72,6 +72,23 @@ final class FilePaneModel: ObservableObject {
     /// 물어볼 데가 없습니다. 칸이 직접 받아 적어 둡니다.
     @Published var focusedIndex: Int?
 
+    /// 이 칸에서 마지막으로 포커스가 올라갔던 줄의 **경로**.
+    ///
+    /// focusedIndex 는 포커스가 목록을 떠나면 nil 이 된다. 길게 눌러 메뉴가
+    /// 뜨거나 툴바로 올라가면 포커스가 거기로 옮겨 가므로, '지금 무엇을
+    /// 대상으로 하나' 를 그것만으로 정하면 메뉴의 삭제·복사가 대상을 잃는다.
+    /// 그래서 마지막 줄을 따로 들고 있는다.
+    ///
+    /// 번호가 아니라 경로로 든다. 폴더를 옮기면 번호는 새 목록의 엉뚱한 줄을
+    /// 가리키지만, 경로는 새 목록에 없으니 저절로 무효가 된다.
+    @Published var lastFocusedPath: String?
+
+    /// 마지막으로 포커스됐던 줄. 지금 목록에 실제로 있을 때만.
+    var lastFocusedIndex: Int? {
+        guard let path = lastFocusedPath else { return nil }
+        return masterFiles.firstIndex { $0.fullPath == path }
+    }
+
     @Published var currentDirRisk: PathRisk = .safe
 
     // 2-D: 정렬·걸러보기·숨김
