@@ -89,6 +89,24 @@ struct PptxLine {
     x2: f32,
     y2: f32,
     outline: PptxOutline,
+    /// 중간에 꺾이는 점들. 비어 있으면 곧은 선이다.
+    ///
+    /// 도식의 연결선은 대개 ㄱ자로 꺾인다(bentConnector2·3·4). 꺾임을 버리고
+    /// 상자 모서리에서 모서리로 곧게 그으면 대각선이 되어, 상자 사이를
+    /// 가로지르는 엉뚱한 그림이 된다.
+    bends: Vec<(f32, f32)>,
+    /// 끝에 붙는 화살촉. (시작, 끝) 순서다.
+    heads: (Option<PptxArrowHead>, Option<PptxArrowHead>),
+}
+
+/// 선 끝의 화살촉.
+#[derive(Debug, Clone, Copy)]
+struct PptxArrowHead {
+    /// 선 굵기의 몇 배로 그릴지. w·len 속성에서 온다.
+    length: f32,
+    width: f32,
+    /// 삼각형을 속까지 채울지. open 은 선 두 줄로만 그린다.
+    filled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -667,10 +685,18 @@ fn read_shape(
             .or_else(|| inherited.and_then(|style| style.outline.clone()))
     };
     if shape_type.eq_ignore_ascii_case("line") {
+        // 도형으로 그린 직선도 끝에 화살촉이 붙는다. 연결선만 보면
+        // '선 도형' 으로 그린 화살표가 그대로 맨 선으로 남는다.
+        let line_node = shape_properties.and_then(|node| child(node, "ln"));
         add_line_from_bounds(
             shape_properties.and_then(|node| child(node, "xfrm")),
             bounds,
             outline.unwrap_or_else(default_outline),
+            Vec::new(),
+            (
+                line_node.and_then(|node| read_arrow_head(node, "headEnd")),
+                line_node.and_then(|node| read_arrow_head(node, "tailEnd")),
+            ),
             elements,
         );
         return;
@@ -802,10 +828,91 @@ fn read_connector(
         return;
     };
     let bounds = read_bounds(transform, coordinate_map);
-    let outline = child(properties, "ln")
+    let line_node = child(properties, "ln");
+    let outline = line_node
         .and_then(|node| read_outline(node, theme))
         .unwrap_or_else(default_outline);
-    add_line_from_bounds(Some(transform), bounds, outline, elements);
+
+    // 어떤 모양의 연결선인지. 이것을 안 보면 ㄱ자가 대각선이 된다.
+    let preset = child(properties, "prstGeom")
+        .and_then(|node| node.attribute("prst"))
+        .unwrap_or("line");
+
+    let flip_h = transform.attribute("flipH").is_some_and(read_bool);
+    let flip_v = transform.attribute("flipV").is_some_and(read_bool);
+    let bends = connector_bends(preset, bounds, flip_h, flip_v);
+
+    let heads = (
+        line_node.and_then(|node| read_arrow_head(node, "headEnd")),
+        line_node.and_then(|node| read_arrow_head(node, "tailEnd")),
+    );
+
+    add_line_from_bounds(Some(transform), bounds, outline, bends, heads, elements);
+}
+
+/// 꺾인 연결선의 중간 점들. 곧은 연결선이면 빈 배열.
+///
+/// bentConnector3 는 가운데에서 한 번 꺾여 두 번 도는 ㄱ자 두 개짜리
+/// 모양이고, 2 는 한 번, 4·5 는 더 여러 번 꺾인다. 꺾이는 자리는 원래
+/// adj 값으로 조절되지만, 조절값이 없으면 PowerPoint 도 가운데에서 꺾는다 —
+/// 가운데로 두는 것만으로 대각선보다 훨씬 원본에 가깝다.
+fn connector_bends(
+    preset: &str,
+    bounds: PptxRect,
+    flip_h: bool,
+    flip_v: bool,
+) -> Vec<(f32, f32)> {
+    let left = bounds.x;
+    let right = bounds.x + bounds.width;
+    let top = bounds.y;
+    let bottom = bounds.y + bounds.height;
+    let (sx, ex) = if flip_h { (right, left) } else { (left, right) };
+    let (sy, ey) = if flip_v { (bottom, top) } else { (top, bottom) };
+    let mid_x = (sx + ex) / 2.0;
+    let mid_y = (sy + ey) / 2.0;
+
+    match preset {
+        // 한 번 꺾는다. 가로로 나갔다가 세로로 붙는다.
+        "bentConnector2" => vec![(ex, sy)],
+        // 두 번 꺾는다. 가장 흔한 모양이다.
+        "bentConnector3" => vec![(mid_x, sy), (mid_x, ey)],
+        // 세 번. 가로 → 세로 → 가로.
+        "bentConnector4" => vec![(mid_x, sy), (mid_x, mid_y), (ex, mid_y)],
+        "bentConnector5" => vec![
+            (mid_x, sy),
+            (mid_x, mid_y),
+            (ex, mid_y),
+        ],
+        // 굽은 연결선은 꺾은선으로 근사한다. 곧은 대각선보다 가깝다.
+        "curvedConnector2" => vec![(ex, sy)],
+        "curvedConnector3" | "curvedConnector4" | "curvedConnector5" => {
+            vec![(mid_x, sy), (mid_x, ey)]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// 선 끝의 화살촉을 읽는다. 없으면 None.
+fn read_arrow_head(line: Node<'_, '_>, name: &str) -> Option<PptxArrowHead> {
+    let node = child(line, name)?;
+    let kind = node.attribute("type").unwrap_or("none");
+    if kind == "none" {
+        return None;
+    }
+    // sm·med·lg 세 단계다. 없으면 med.
+    fn step(value: Option<&str>) -> f32 {
+        match value.unwrap_or("med") {
+            "sm" => 2.0,
+            "lg" => 5.0,
+            _ => 3.5,
+        }
+    }
+    Some(PptxArrowHead {
+        length: step(node.attribute("len")),
+        width: step(node.attribute("w")),
+        // stealth·triangle·diamond·oval 은 채우고, open 만 비운다.
+        filled: kind != "open",
+    })
 }
 
 fn read_picture(
@@ -1025,6 +1132,8 @@ fn add_table_borders(
                 x2,
                 y2,
                 outline,
+                bends: Vec::new(),
+                heads: (None, None),
             }));
         }
     }
@@ -1486,6 +1595,8 @@ fn add_line_from_bounds(
     transform: Option<Node<'_, '_>>,
     bounds: PptxRect,
     outline: PptxOutline,
+    bends: Vec<(f32, f32)>,
+    heads: (Option<PptxArrowHead>, Option<PptxArrowHead>),
     elements: &mut Vec<PptxElement>,
 ) {
     let flip_horizontal = transform
@@ -1516,6 +1627,8 @@ fn add_line_from_bounds(
             bounds.y + bounds.height
         },
         outline,
+        bends,
+        heads,
     }));
 }
 
@@ -1861,18 +1974,104 @@ fn render_slide(document: &mut PdfDocument, slide: &PptxSlide, options: &Convers
                 }
             }
             PptxElement::Line(line) => {
-                page.add_line_with_dash_pattern(
-                    (line.x1 * scale_x, page_size.height - line.y1 * scale_y),
-                    (line.x2 * scale_x, page_size.height - line.y2 * scale_y),
-                    line.outline.color,
-                    line.outline.width * scale_x.min(scale_y),
-                    &line.outline.dash_pattern,
-                );
+                render_line(page, line, page_size.height, scale_x, scale_y);
             }
             PptxElement::Shape(shape) => {
                 render_shape(page, shape, page_size.height, scale_x, scale_y);
             }
         }
+    }
+}
+
+/// 연결선 하나를 그린다. 꺾임과 화살촉을 함께 본다.
+fn render_line(
+    page: &mut crate::pdf::PdfPage,
+    line: &PptxLine,
+    page_height: f32,
+    scale_x: f32,
+    scale_y: f32,
+) {
+    let to_pdf = |x: f32, y: f32| (x * scale_x, page_height - y * scale_y);
+    let width = line.outline.width * scale_x.min(scale_y);
+
+    // 시작점 → 꺾임들 → 끝점. 꺾임이 없으면 두 점짜리 곧은 선이 된다.
+    let mut points = Vec::with_capacity(line.bends.len() + 2);
+    points.push(to_pdf(line.x1, line.y1));
+    for bend in &line.bends {
+        points.push(to_pdf(bend.0, bend.1));
+    }
+    points.push(to_pdf(line.x2, line.y2));
+
+    for pair in points.windows(2) {
+        page.add_line_with_dash_pattern(
+            pair[0],
+            pair[1],
+            line.outline.color,
+            width,
+            &line.outline.dash_pattern,
+        );
+    }
+
+    // 화살촉은 그 끝에 닿는 마디의 방향을 따른다. 꺾인 선에서 전체
+    // 시작·끝을 이은 방향으로 그리면 화살촉만 비뚤게 붙는다.
+    if let (Some(head), Some(pair)) = (line.heads.0, points.get(0..2)) {
+        add_arrow_head(page, pair[0], pair[1], head, line.outline.color, width);
+    }
+    if let Some(head) = line.heads.1 {
+        let last = points.len() - 1;
+        if last > 0 {
+            add_arrow_head(
+                page,
+                points[last],
+                points[last - 1],
+                head,
+                line.outline.color,
+                width,
+            );
+        }
+    }
+}
+
+/// `tip` 자리에 `from` 쪽을 등지고 선 화살촉을 그린다.
+fn add_arrow_head(
+    page: &mut crate::pdf::PdfPage,
+    tip: (f32, f32),
+    from: (f32, f32),
+    head: PptxArrowHead,
+    color: PdfColor,
+    line_width: f32,
+) {
+    let (dx, dy) = (from.0 - tip.0, from.1 - tip.1);
+    let length = (dx * dx + dy * dy).sqrt();
+    if length < 0.01 {
+        return;
+    }
+    // 뒤로 가는 단위 벡터와, 그것에 직각인 단위 벡터.
+    let (ux, uy) = (dx / length, dy / length);
+    let (px, py) = (-uy, ux);
+
+    // 선이 굵을수록 촉도 커진다. 너무 작으면 보이지 않으므로 바닥을 둔다.
+    let back = (line_width.max(0.5) * head.length).min(length);
+    let half = line_width.max(0.5) * head.width / 2.0;
+
+    let base = (tip.0 + ux * back, tip.1 + uy * back);
+    let left = (base.0 + px * half, base.1 + py * half);
+    let right = (base.0 - px * half, base.1 - py * half);
+
+    if head.filled {
+        page.add_path(
+            vec![
+                crate::pdf::PdfPathCommand::MoveTo(tip.0, tip.1),
+                crate::pdf::PdfPathCommand::LineTo(left.0, left.1),
+                crate::pdf::PdfPathCommand::LineTo(right.0, right.1),
+                crate::pdf::PdfPathCommand::Close,
+            ],
+            color,
+        );
+    } else {
+        // 열린 촉은 선 두 줄이다.
+        page.add_line(tip.0, tip.1, left.0, left.1, color, line_width);
+        page.add_line(tip.0, tip.1, right.0, right.1, color, line_width);
     }
 }
 
@@ -2926,6 +3125,77 @@ mod tests {
             .elements
             .iter()
             .all(|element| !matches!(element, super::PptxElement::Picture(_))));
+    }
+
+    /// 꺾인 연결선은 꺾인 채로, 화살표는 촉을 달고 나와야 한다.
+    ///
+    /// 전에는 연결선의 prstGeom 을 보지 않아 bentConnector3 가 상자 모서리를
+    /// 잇는 대각선 하나로 나왔고, headEnd·tailEnd 를 읽는 코드가 아예 없어
+    /// 모든 화살표가 맨 선이었다.
+    #[test]
+    fn draws_connectors_bent_and_with_their_arrow_heads() {
+        // 가로 200 세로 100 짜리 자리에 놓인 ㄱ자 연결선.
+        let bends = super::connector_bends(
+            "bentConnector3",
+            super::PptxRect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 },
+            false,
+            false,
+        );
+        assert_eq!(bends, vec![(100.0, 0.0), (100.0, 100.0)],
+                   "가운데에서 두 번 꺾여야 한다");
+
+        // 곧은 연결선은 꺾이지 않는다.
+        assert!(super::connector_bends(
+            "straightConnector1",
+            super::PptxRect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 },
+            false, false).is_empty());
+
+        // 뒤집힌 연결선은 꺾이는 쪽도 따라 뒤집힌다.
+        let flipped = super::connector_bends(
+            "bentConnector2",
+            super::PptxRect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 },
+            true, false,
+        );
+        assert_eq!(flipped, vec![(0.0, 0.0)], "flipH 면 끝 x 가 왼쪽이다");
+
+        // 그려 보고 촉이 실제로 들어갔는지 본다.
+        fn content(line: super::PptxLine) -> String {
+            let mut document = crate::pdf::PdfDocument::new();
+            {
+                let page = document.add_page(300.0, 200.0);
+                super::render_line(page, &line, 200.0, 1.0, 1.0);
+            }
+            String::from_utf8_lossy(&document.to_bytes()).into_owned()
+        }
+        let outline = super::PptxOutline {
+            color: crate::pdf::PdfColor::new(0.0, 0.0, 0.0),
+            width: 2.0,
+            dash_pattern: Vec::new(),
+        };
+        let head = super::PptxArrowHead { length: 3.5, width: 3.5, filled: true };
+
+        // 촉이 없으면 채운 경로가 없어야 한다.
+        let bare = content(super::PptxLine {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            outline: outline.clone(), bends: Vec::new(), heads: (None, None),
+        });
+        assert!(!bare.contains(" f\n"), "촉이 없는데 삼각형을 채웠다");
+
+        // 촉이 있으면 채운 삼각형이 생긴다.
+        let tipped = content(super::PptxLine {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            outline: outline.clone(), bends: Vec::new(), heads: (None, Some(head)),
+        });
+        assert!(tipped.contains(" f\n"), "tailEnd 촉을 안 그렸다");
+
+        // 꺾인 선은 마디 수만큼 선이 늘어난다.
+        let straight_ops = bare.matches(" S\n").count();
+        let bent = content(super::PptxLine {
+            x1: 0.0, y1: 0.0, x2: 200.0, y2: 100.0,
+            outline, bends: vec![(100.0, 0.0), (100.0, 100.0)], heads: (None, None),
+        });
+        assert!(bent.matches(" S\n").count() > straight_ops,
+                "꺾인 선인데 마디가 하나뿐이다");
     }
 
     /// 짝홀 규칙으로 그린 아이콘은 구멍이 뚫린 채 나와야 한다.
@@ -4090,6 +4360,8 @@ fn push_line_wide(
             width,
             dash_pattern: Vec::new(),
         },
+        bends: Vec::new(),
+        heads: (None, None),
     }));
 }
 
