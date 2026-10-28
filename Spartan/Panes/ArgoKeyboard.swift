@@ -399,8 +399,8 @@ enum ArgoKeyMap {
     private static let digits = Array("1234567890")
     private static let digitsShifted = Array("!@#$%^&*()")
     // 0x2D 부터 키 자리 순서. 0x32 는 미국 배열에 없는 자리라 '\' 로 둔다.
-    private static let punct = Array("-=[]\\\;'`,./")
-    private static let punctShifted = Array("_+{}||:\"~<>?")
+    private static let punct: [Character] = ["-", "=", "[", "]", "\\", "\\", ";", "'", "`", ",", ".", "/"]
+    private static let punctShifted: [Character] = ["_", "+", "{", "}", "|", "|", ":", "\"", "~", "<", ">", "?"]
 
     static func latin(_ code: UIKeyboardHIDUsage, shift: Bool) -> String? {
         let v = code.rawValue
