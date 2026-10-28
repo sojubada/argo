@@ -43,6 +43,10 @@ struct ContentView: View {
     /// 툴바에 나머지 아이콘을 펼칠지. 기본은 접어 둔다 —
     /// 25개가 한 줄에 늘어서면 무엇이 무엇인지 알 수 없다.
     @State private var toolbarExpanded = false
+    /// ⌘L 경로로 이동, ⌘⇧F 걸러보기. showSubView 번호를 더 늘리지 않는다 —
+    /// 번호로 시트를 고르는 방식은 겹쳐 쓰기 쉽다(25번이 그랬다).
+    @State private var showGoToPath = false
+    @State private var showFilterList = false
 
     /// 활성 칸. 툴바의 모든 동작은 이쪽을 대상으로 한다.
     var pane: FilePaneModel { activeSide == .left ? leftPane : rightPane }
@@ -441,6 +445,22 @@ struct ContentView: View {
                     }) //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
                     //someday I'll figure it out. It's surprisingly good
 
+                    Button(action: { //경로로 이동 (⌘L)
+                        showGoToPath = true
+                    }) {
+                        Image(systemName: "arrow.right.to.line.circle")
+                            .frame(width: 50, height: 50)
+                    }
+
+                    Button(action: { //걸러보기 (⌘⇧F). 켜져 있으면 채운 아이콘
+                        showFilterList = true
+                    }) {
+                        Image(systemName: pane.filter.isEmpty
+                              ? "line.3.horizontal.decrease.circle"
+                              : "line.3.horizontal.decrease.circle.fill")
+                            .frame(width: 50, height: 50)
+                    }
+
                     Button(action: { //new file/directory/symlink
                         showSubView[0] = true
                     }) {
@@ -678,7 +698,8 @@ struct ContentView: View {
                                 .onDisappear { ArgoTextEntry.end() }
                         })
                         .sheet(isPresented: $showSubView[8], onDismiss: refreshBothPanes, content: {
-                            MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[8])
+                            MoveFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[8],
+                                         onMoved: { transfer.recordMoves($0) })
                         })
                         .sheet(isPresented: $showSubView[9], onDismiss: refreshBothPanes, content: {
                             CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[9])
@@ -1180,6 +1201,10 @@ struct ContentView: View {
                                 view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                             }
                         }
+                        // 폴더면 용량을 셀 수 있게 한다. 누를 때만 센다.
+                        if FileInfo.isDirectory(filePath: directory + newViewFileName) {
+                            FolderSizeRow(path: directory + newViewFileName)
+                        }
                         Button(action: {
                             showSubView[3] = false
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -1301,6 +1326,28 @@ struct ContentView: View {
             .sheet(isPresented: $showSubView[39], content: {
                 KeyboardHelpView(isPresented: $showSubView[39])
             })
+            .sheet(isPresented: $showGoToPath) {
+                GoToPathView(startDirectory: pane.directory,
+                             isPresented: $showGoToPath,
+                             onGo: { folder, file in
+                                 pane.navigate(to: folder)
+                                 // 파일을 쳤으면 그 파일만 보이게 거른다. 포커스는
+                                 // 코드로 옮길 수 없지만, 한 줄만 남으면 바로 닿는다.
+                                 // 다른 폴더로 가면 걸러보기는 저절로 풀린다.
+                                 if let file {
+                                     pane.filter = file
+                                     pane.applySortAndFilter()
+                                 }
+                             })
+            }
+            .sheet(isPresented: $showFilterList) {
+                FilterListView(initial: pane.filter,
+                               isPresented: $showFilterList,
+                               onApply: { text in
+                                   pane.filter = text
+                                   pane.applySortAndFilter()
+                               })
+            }
             
             // 진행률. 큰 파일을 복사하는 동안 멈춘 것처럼 보이면 안 된다.
             if transfer.isRunning {
@@ -1310,12 +1357,14 @@ struct ContentView: View {
                         .truncationMode(.middle)
                     ProgressView(value: transfer.progress)
                         .frame(width: 600)
-                    Text("\(transfer.completed) / \(transfer.total)")
+                    // 복사는 바이트로 보여 준다. 큰 파일 하나도 움직이는 것이 보여야 한다.
+                    Text(transferCaption)
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Button(action: { transfer.cancel() }) {
-                        Text("취소")
+                        Text(transfer.isCancelling ? "멈추는 중…" : "취소")
                     }
+                    .disabled(transfer.isCancelling)
                 }
                 .padding(40)
                 .background(Color.black.opacity(0.85))
@@ -1810,9 +1859,10 @@ struct ContentView: View {
             undoLastAction()
 
         case .focusPathField:
-            // 경로 칸은 TextField라 포커스를 코드로 줄 수 없다.
-            // 대신 경로를 알려주는 찾기 시트를 연다.
-            showSubView[19] = true
+            // 위쪽 경로 칸을 뗐으므로 경로를 칠 작은 창을 띄운다.
+            showGoToPath = true
+        case .filterList:
+            showFilterList = true
         }
     }
 
@@ -2050,7 +2100,7 @@ struct ContentView: View {
                         alertMsg = reason
                         showAlert = true
                      },
-                     onFinish: { done, failed in
+                     onFinish: { done, failed, cancelled in
                         destinationPane.updateFiles()
                         // 잘라내기는 원본이 사라졌으니 양쪽 다 다시 읽는다.
                         if move {
@@ -2061,6 +2111,12 @@ struct ContentView: View {
                         if !failed.isEmpty {
                             alertTitle = "일부를 옮기지 못했습니다"
                             alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
+                            showAlert = true
+                        } else if cancelled {
+                            // 쓰다 만 것은 지웠다. 끝난 것은 남아 있다는 것을 알려야
+                            // 반쯤 된 상태를 찾아 헤매지 않는다.
+                            alertTitle = "취소했습니다"
+                            alertMsg = "\(done)개는 끝났고, 하던 것은 지웠습니다."
                             showAlert = true
                         }
                      })
@@ -2120,7 +2176,7 @@ struct ContentView: View {
                         alertMsg = reason
                         showAlert = true
                      },
-                     onFinish: { done, failed in
+                     onFinish: { done, failed, cancelled in
                         destinationPane.updateFiles()
                         if move { sourcePane.updateFiles() }
                         sourcePane.multiSelect = false
@@ -2128,8 +2184,24 @@ struct ContentView: View {
                             alertTitle = "일부를 옮기지 못했습니다"
                             alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
                             showAlert = true
+                        } else if cancelled {
+                            // 쓰다 만 것은 지웠다. 끝난 것은 남아 있다는 것을 알려야
+                            // 반쯤 된 상태를 찾아 헤매지 않는다.
+                            alertTitle = "취소했습니다"
+                            alertMsg = "\(done)개는 끝났고, 하던 것은 지웠습니다."
+                            showAlert = true
                         }
                      })
+    }
+
+    /// 진행 창 아래 줄. 복사는 바이트로, 이동은 개수로 보여 준다.
+    /// body 안에 그대로 쓰면 타입 검사가 무거워져 따로 뺐다.
+    var transferCaption: String {
+        let count = "\(transfer.completed) / \(transfer.total)"
+        guard transfer.bytesTotal > 0 else { return count }
+        let done = ByteCountFormatter.string(fromByteCount: transfer.bytesDone, countStyle: .file)
+        let all = ByteCountFormatter.string(fromByteCount: transfer.bytesTotal, countStyle: .file)
+        return done + " / " + all + " · " + count + "개"
     }
 
     /// 마지막 이동·이름 변경을 되돌린다.

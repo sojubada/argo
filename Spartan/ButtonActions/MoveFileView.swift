@@ -16,6 +16,9 @@ struct MoveFileView: View {
     @Binding var isPresented: Bool
     /// 실패 이유. 있으면 닫지 않고 보여 준다.
     @State private var error: String?
+    /// 옮긴 것을 (원래 자리, 새 자리) 로 알린다. 되돌리기(⌘Z)에 쓴다.
+    /// 전에는 이 창으로 옮긴 것은 기록이 남지 않아 되돌릴 수 없었다.
+    var onMoved: (([(from: String, to: String)]) -> Void)? = nil
     
     var body: some View {
         VStack{
@@ -45,8 +48,14 @@ struct MoveFileView: View {
                 Text(error).foregroundColor(.red).multilineTextAlignment(.center)
             }
             Button(action: {
+                var moved: [(from: String, to: String)] = []
                 let r = runFileBatch(names: fileNames, from: filePath, to: newFilePath,
-                                     rename: newFileName) { RootHelperActs.mv($0, $1) }
+                                     rename: newFileName) { from, to in
+                    let ok = RootHelperActs.mv(from, to)
+                    if ok { moved.append((from: from, to: to)) }
+                    return ok
+                }
+                onMoved?(moved)
                 if r.failed == 0 {
                     multiSelect = false
                     isPresented = false

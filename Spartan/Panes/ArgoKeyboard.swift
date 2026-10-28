@@ -48,6 +48,8 @@ enum ArgoCommand: String {
     case sortByKind
     case reverseSort
     case focusPathField
+    /// 지금 칸의 목록을 이름·확장자로 거른다.
+    case filterList
     case search
     case showHelp
     case goHome
@@ -96,7 +98,8 @@ enum ArgoCommand: String {
         case .sortByDate:        return "날짜순"
         case .sortByKind:        return "종류순"
         case .reverseSort:       return "정렬 뒤집기"
-        case .focusPathField:    return "경로로 찾아가기"
+        case .focusPathField:    return "경로로 이동"
+        case .filterList:        return "걸러보기 (이름·확장자)"
         case .search:            return "찾기"
         case .showHelp:          return "단축키 도움말"
         case .goHome:            return "미디어 폴더로"
@@ -170,6 +173,7 @@ enum ArgoCommand: String {
         case .sortByKind:        return ("4", [.command, .alternate])
         case .reverseSort:       return ("t", .command)
         case .focusPathField:    return ("l", .command)
+        case .filterList:        return ("f", [.command, .shift])
         case .search:            return ("f", .command)
         case .showHelp:          return ("/", .command)
         case .goHome:            return ("h", [.command, .shift])
@@ -186,7 +190,7 @@ enum ArgoCommand: String {
         ("두 칸", [.toggleDualPane, .switchPane, .copyToOtherPane, .moveToOtherPane, .syncPanes]),
         ("고르기", [.toggleMultiSelect, .selectAll]),
         ("파일", [.newFolder, .newFile, .rename, .fileInfo, .deleteSelection, .compress, .extractArchive, .undo]),
-        ("보기", [.toggleHidden, .sortByName, .sortBySize, .sortByDate, .sortByKind, .reverseSort, .search]),
+        ("보기", [.toggleHidden, .sortByName, .sortBySize, .sortByDate, .sortByKind, .reverseSort, .search, .filterList]),
         ("도움말", [.showHelp])
     ]
 }

@@ -138,6 +138,42 @@ final class FilePaneModel: ObservableObject {
         // 늘 실패해서 무해했을 뿐이다 — 작업 기록의 'MOVE (root)' 들이 그것이다.
     }
 
+    // MARK: - 걸러보기
+
+    /// 걸러보기 글을 조각으로 나눈다. 빈칸이나 쉼표로 여러 개를 주면
+    /// 어느 하나에 맞는 항목을 남긴다 — "mp4 mkv" 처럼 쓴다.
+    static func filterTerms(_ raw: String) -> [String] {
+        raw.lowercased()
+            .split(whereSeparator: { $0 == " " || $0 == "," })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    /// 조각 하나에 이름이 맞는가.
+    ///
+    /// - ".mp4" 나 "*.mp4" → 확장자가 정확히 같을 때
+    /// - "*" 나 "?" 가 들어 있으면 → 와일드카드 (대소문자 무시)
+    /// - 나머지 → 이름에 들어 있으면
+    ///
+    /// 폴더 이름 끝의 "/" 는 떼고 본다. 그대로 두면 확장자가 "/" 로 끝나
+    /// 맞을 수가 없다.
+    static func matches(_ rawName: String, term: String) -> Bool {
+        var name = rawName.lowercased()
+        while name.count > 1 && name.hasSuffix("/") { name.removeLast() }
+
+        var ext: String?
+        if term.hasPrefix("*.") { ext = String(term.dropFirst(2)) }
+        else if term.hasPrefix(".") && term.count > 1 { ext = String(term.dropFirst()) }
+        if let ext, !ext.isEmpty, !ext.contains("*"), !ext.contains("?") {
+            // ".bashrc" 처럼 점으로 시작하는 이름 자체를 친 경우도 맞춰 준다.
+            return (name as NSString).pathExtension == ext || name == term
+        }
+        if term.contains("*") || term.contains("?") {
+            return NSPredicate(format: "SELF LIKE[c] %@", term).evaluate(with: name)
+        }
+        return name.contains(term)
+    }
+
     /// 정렬·걸러보기만 다시 적용한다. 디스크를 읽지 않는다.
     func applySortAndFilter() {
         var out = rawFiles
@@ -146,9 +182,9 @@ final class FilePaneModel: ObservableObject {
             out = out.filter { !$0.name.hasPrefix(".") }
         }
 
-        let needle = filter.trimmingCharacters(in: .whitespaces).lowercased()
-        if !needle.isEmpty {
-            out = out.filter { $0.name.lowercased().contains(needle) }
+        let terms = Self.filterTerms(filter)
+        if !terms.isEmpty {
+            out = out.filter { file in terms.contains { Self.matches(file.name, term: $0) } }
         }
 
         out.sort { a, b in
