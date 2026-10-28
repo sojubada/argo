@@ -643,3 +643,4 @@
 "안전판 — 안전 모드가 늘 켜져 있습니다" = "Safe edition — safe mode is always on";
 "시스템 잠금이 걸린 항목이 안에 있는 폴더는 지울 수 없습니다. 끄려면 모험가판을 설치하십시오." = "Folders that contain system-locked items cannot be deleted. Install the Adventurer edition to turn this off.";
 "{0} — 안전 모드를 끌 수 있습니다. 켜 두면 잠긴 항목이 든 폴더는 지울 수 없습니다." = "{0} — safe mode can be turned off. While it is on, folders containing locked items cannot be deleted.";
+"저장한 연결이 없습니다. WebDAV, FTP 를 더할 수 있습니다." = "No saved connections. You can add WebDAV or FTP.";
