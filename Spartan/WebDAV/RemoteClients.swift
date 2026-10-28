@@ -2,17 +2,14 @@
 //  RemoteClients.swift
 //  Argo
 //
-//  원격 연결 공통 틀 + FTP + GitHub.
+//  원격 연결 공통 틀 + FTP.
 //
 //  WebDAV 화면(목록·받기·보기·설치)을 그대로 쓰고, 연결 종류만 늘린다.
 //  화면은 RemoteFileClient 만 알고, 어느 종류인지는 모른다.
 //
-//  - WebDAV: 기존 WebDAVClient. Nextcloud·시놀로지 같은 클라우드·NAS 가
-//    이 길로 온다(편집 화면에서 서비스를 고르면 주소가 채워진다).
+//  - WebDAV: 기존 WebDAVClient.
 //  - FTP: Network.framework 로 직접 말한다. URLSession 은 FTP 를 더는
 //    지원하지 않는다. 일반 FTP(암호화 없음)만 한다.
-//  - GitHub: REST API. 공개 저장소는 토큰 없이, 비공개는 토큰으로.
-//    저장소 안의 파일과 '릴리즈' 의 첨부 파일을 받을 수 있다.
 //
 
 import Foundation
@@ -38,7 +35,6 @@ enum RemoteClients {
         switch server.kind {
         case .webdav: return WebDAVClient(server: server)
         case .ftp:    return FTPClient(server: server)
-        case .github: return GitHubClient(server: server)
         }
     }
 }
@@ -75,70 +71,6 @@ private func freshLocalPath(_ path: String) -> String {
         if !FileManager.default.fileExists(atPath: p) { return p }
     }
     return path
-}
-
-// MARK: - HTTP 받기 (GitHub 가 쓴다)
-
-/// 진행률을 주는 받기 하나. 받을 때마다 새로 만든다.
-private final class HTTPFetch: NSObject, URLSessionDownloadDelegate {
-    private var session: URLSession!
-    private let target: String
-    private let progress: (Double) -> Void
-    private let completion: (Result<String, Error>) -> Void
-    private var keepAlive: HTTPFetch?
-
-    init(request: URLRequest, target: String,
-         progress: @escaping (Double) -> Void,
-         completion: @escaping (Result<String, Error>) -> Void) {
-        self.target = target
-        self.progress = progress
-        self.completion = completion
-        super.init()
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 6 * 3600
-        session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        keepAlive = self
-        session.downloadTask(with: request).resume()
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        let f = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-        DispatchQueue.main.async { self.progress(f) }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
-        if let http = downloadTask.response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            finish(.failure(RemoteError.message("HTTP \(http.statusCode)")))
-            return
-        }
-        let dest = freshLocalPath(target)
-        do {
-            try FileManager.default.moveItem(at: location, to: URL(fileURLWithPath: dest))
-            finish(.success(dest))
-        } catch {
-            finish(.failure(error))
-        }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error { finish(.failure(error)) }
-    }
-
-    private var done = false
-    private func finish(_ r: Result<String, Error>) {
-        guard !done else { return }
-        done = true
-        DispatchQueue.main.async {
-            self.completion(r)
-            self.session.finishTasksAndInvalidate()
-            self.keepAlive = nil
-        }
-    }
 }
 
 // MARK: - FTP
@@ -538,195 +470,5 @@ enum FTPParse {
             if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-    }
-}
-
-// MARK: - GitHub
-
-/// 주소 칸에는 "owner/repo" 나 "github.com/owner/repo", 또는 "owner" 만 쓴다.
-/// owner 만 쓰면 그 사람의 저장소 목록이 맨 위가 된다.
-/// 비밀번호 칸에 토큰을 넣으면 비공개 저장소도 보이고, 한 시간 60번이라는
-/// 익명 한도도 풀린다.
-final class GitHubClient: RemoteFileClient {
-    let server: WebDAVServer
-    private let session: URLSession
-
-    init(server: WebDAVServer) {
-        self.server = server
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.httpAdditionalHeaders = ["User-Agent": "Argo-tvOS", "Accept": "application/vnd.github+json"]
-        session = URLSession(configuration: config)
-    }
-
-    var startPath: String { "/" }
-
-    /// 주소에서 owner 와 (있으면) repo.
-    var target: (owner: String, repo: String?) {
-        var s = server.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        for p in ["https://", "http://", "www.", "github.com/", "github.com"] where s.lowercased().hasPrefix(p) {
-            s = String(s.dropFirst(p.count))
-        }
-        if s.hasSuffix(".git") { s = String(s.dropLast(4)) }
-        let parts = s.split(separator: "/").map(String.init)
-        return (parts.first ?? "", parts.count > 1 ? parts[1] : nil)
-    }
-
-    private static let releasesFolder = "Releases"
-
-    private func get(_ url: String, _ completion: @escaping (Result<Any, Error>) -> Void) {
-        guard let u = URL(string: url) else { return completion(.failure(RemoteError.message(L("주소가 올바르지 않습니다")))) }
-        var req = URLRequest(url: u)
-        if !server.password.isEmpty { req.setValue("Bearer " + server.password, forHTTPHeaderField: "Authorization") }
-        session.dataTask(with: req) { data, resp, e in
-            let done: (Result<Any, Error>) -> Void = { r in DispatchQueue.main.async { completion(r) } }
-            if let e { return done(.failure(e)) }
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard let data, let obj = try? JSONSerialization.jsonObject(with: data) else {
-                return done(.failure(RemoteError.message("HTTP \(code)")))
-            }
-            guard (200..<300).contains(code) else {
-                let msg = (obj as? [String: Any])?["message"] as? String ?? ""
-                if code == 403 || code == 429 {
-                    return done(.failure(RemoteError.message(L("GitHub 요청 한도를 넘었습니다. 토큰을 넣으면 풀립니다.") + " " + msg)))
-                }
-                if code == 401 { return done(.failure(RemoteError.message(L("토큰이 맞지 않습니다")))) }
-                if code == 404 { return done(.failure(RemoteError.message(L("저장소나 경로를 찾지 못했습니다")))) }
-                return done(.failure(RemoteError.message("HTTP \(code) \(msg)")))
-            }
-            done(.success(obj))
-        }.resume()
-    }
-
-    private func enc(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s
-    }
-
-    /// 화면 경로 → (repo, 저장소 안 경로). owner 만 줬으면 첫 칸이 repo 다.
-    private func split(_ path: String) -> (repo: String?, rest: [String]) {
-        var parts = path.split(separator: "/").map(String.init)
-        if let fixed = target.repo { return (fixed, parts) }
-        guard !parts.isEmpty else { return (nil, []) }
-        let repo = parts.removeFirst()
-        return (repo, parts)
-    }
-
-    func list(path: String, completion: @escaping (Result<[WebDAVItem], Error>) -> Void) {
-        let owner = target.owner
-        guard !owner.isEmpty else { return completion(.failure(RemoteError.message(L("owner/repo 를 적어 주십시오")))) }
-        let (repo, rest) = split(path)
-
-        // 저장소 목록
-        guard let repo else {
-            let url = server.password.isEmpty
-                ? "https://api.github.com/users/\(enc(owner))/repos?per_page=100&sort=updated"
-                : "https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member"
-            get(url) { r in
-                completion(r.map { obj in
-                    ((obj as? [[String: Any]]) ?? []).compactMap { d -> WebDAVItem? in
-                        guard let name = d["name"] as? String else { return nil }
-                        let o = (d["owner"] as? [String: Any])?["login"] as? String ?? owner
-                        // 토큰으로 본 목록에는 다른 사람 저장소도 섞인다. 내 것만 owner 가 같다.
-                        guard self.server.password.isEmpty || o.lowercased() == owner.lowercased() else { return nil }
-                        return WebDAVItem(path: "/" + name + "/", name: name, isDirectory: true, size: 0,
-                                          modified: nil, contentType: "repo")
-                    }
-                })
-            }
-            return
-        }
-        let base = target.repo == nil ? "/" + repo : ""
-
-        // 릴리즈 폴더
-        if rest.first == Self.releasesFolder {
-            if rest.count == 1 {
-                get("https://api.github.com/repos/\(enc(owner))/\(enc(repo))/releases?per_page=50") { r in
-                    completion(r.map { obj in
-                        ((obj as? [[String: Any]]) ?? []).compactMap { d -> WebDAVItem? in
-                            guard let tag = d["tag_name"] as? String else { return nil }
-                            let title = (d["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tag
-                            let when = (d["published_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
-                            return WebDAVItem(path: base + "/" + Self.releasesFolder + "/" + tag + "/",
-                                              name: title == tag ? tag : "\(tag) — \(title)",
-                                              isDirectory: true, size: 0, modified: when, contentType: "release")
-                        }
-                    })
-                }
-            } else {
-                let tag = rest[1]
-                get("https://api.github.com/repos/\(enc(owner))/\(enc(repo))/releases/tags/\(enc(tag))") { r in
-                    completion(r.map { obj in
-                        let assets = ((obj as? [String: Any])?["assets"] as? [[String: Any]]) ?? []
-                        return assets.compactMap { a -> WebDAVItem? in
-                            guard let name = a["name"] as? String else { return nil }
-                            // 비공개 저장소의 첨부는 API 주소 + octet-stream 으로만 받힌다.
-                            let api = a["url"] as? String
-                            let browser = a["browser_download_url"] as? String
-                            var item = WebDAVItem(path: base + "/" + Self.releasesFolder + "/" + tag + "/" + name,
-                                                  name: name, isDirectory: false,
-                                                  size: (a["size"] as? NSNumber)?.int64Value ?? 0,
-                                                  modified: (a["updated_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) },
-                                                  contentType: "asset")
-                            item.remoteURL = self.server.password.isEmpty ? browser : (api ?? browser)
-                            return item
-                        }
-                    })
-                }
-            }
-            return
-        }
-
-        // 저장소 안
-        let sub = rest.map(enc).joined(separator: "/")
-        get("https://api.github.com/repos/\(enc(owner))/\(enc(repo))/contents/\(sub)") { r in
-            completion(r.map { obj in
-                var items: [WebDAVItem] = []
-                if rest.isEmpty {
-                    items.append(WebDAVItem(path: base + "/" + Self.releasesFolder + "/", name: "🏷 " + Self.releasesFolder,
-                                            isDirectory: true, size: 0, modified: nil, contentType: "releases"))
-                }
-                let list = (obj as? [[String: Any]]) ?? [obj as? [String: Any]].compactMap { $0 }
-                for d in list {
-                    guard let name = d["name"] as? String, let type = d["type"] as? String else { continue }
-                    let isDir = type == "dir"
-                    let inRepo = (rest + [name]).joined(separator: "/")
-                    var item = WebDAVItem(path: base + "/" + inRepo + (isDir ? "/" : ""), name: name,
-                                          isDirectory: isDir, size: (d["size"] as? NSNumber)?.int64Value ?? 0,
-                                          modified: nil, contentType: type)
-                    item.remoteURL = d["download_url"] as? String
-                    items.append(item)
-                }
-                return items.sorted {
-                    if $0.contentType == "releases" { return true }
-                    if $1.contentType == "releases" { return false }
-                    if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
-                    return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-                }
-            })
-        }
-    }
-
-    func testConnection(completion: @escaping (Result<Void, Error>) -> Void) {
-        list(path: "/") { r in completion(r.map { _ in () }) }
-    }
-
-    func fetch(item: WebDAVItem, to localPath: String,
-               progress: @escaping (Double) -> Void,
-               completion: @escaping (Result<String, Error>) -> Void) {
-        guard let s = item.remoteURL, let url = URL(string: s) else {
-            return completion(.failure(RemoteError.message(L("이 항목은 받을 수 없습니다"))))
-        }
-        var req = URLRequest(url: url)
-        if !server.password.isEmpty {
-            req.setValue("Bearer " + server.password, forHTTPHeaderField: "Authorization")
-            if item.contentType == "asset" { req.setValue("application/octet-stream", forHTTPHeaderField: "Accept") }
-        }
-        _ = HTTPFetch(request: req, target: localPath, progress: progress, completion: completion)
-    }
-
-    func directURL(for item: WebDAVItem) -> URL? {
-        // 토큰이 필요한 주소는 설치기에 넘겨도 받지 못한다.
-        guard server.password.isEmpty, let s = item.remoteURL else { return nil }
-        return URL(string: s)
     }
 }

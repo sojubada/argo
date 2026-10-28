@@ -75,7 +75,7 @@ struct WebDAVRootView: View {
                 .font(.title)
 
             if store.servers.isEmpty {
-                Text(L("저장한 연결이 없습니다. WebDAV·클라우드·NAS, FTP, GitHub 를 더할 수 있습니다."))
+                Text(L("저장한 연결이 없습니다. WebDAV, FTP 를 더할 수 있습니다."))
                     .foregroundColor(.secondary)
                     .padding(.top, 20)
             } else {
@@ -182,30 +182,10 @@ struct WebDAVServerEditView: View {
                 }
             }
 
-            if server.kind == .webdav {
-                // 클라우드·NAS 를 고르면 주소 틀이 채워진다.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(CloudPreset.all) { p in
-                            Button(action: {
-                                server.urlString = p.template
-                                if server.name.isEmpty { server.name = p.name }
-                                status = p.note.isEmpty ? L("<…> 자리를 바꿔 넣으십시오.") : p.note
-                            }) {
-                                Text(p.name).font(.caption)
-                            }
-                        }
-                    }
-                }
-            }
-
             ArgoTextField(L("이름 (선택)"), text: $server.name)
             ArgoTextField(urlPlaceholder, text: $server.urlString)
-            if server.kind != .github {
-                ArgoTextField(L("사용자 이름"), text: $server.username)
-            }
-            ArgoTextField(server.kind == .github ? L("토큰 (공개 저장소는 비워 두기)") : L("비밀번호"),
-                          text: $server.password, secure: true)
+            ArgoTextField(L("사용자 이름"), text: $server.username)
+            ArgoTextField(L("비밀번호"), text: $server.password, secure: true)
             if server.kind == .webdav {
                 Toggle(L("검증되지 않은 인증서 허용 (집 NAS)"), isOn: $server.allowInsecureTLS)
             }
@@ -251,7 +231,6 @@ struct WebDAVServerEditView: View {
         switch server.kind {
         case .webdav: return "https://host:port/path"
         case .ftp:    return "ftp://host:21/path"
-        case .github: return "owner/repo  ·  owner"
         }
     }
 
@@ -259,7 +238,6 @@ struct WebDAVServerEditView: View {
         switch server.kind {
         case .webdav: return L("Nextcloud·시놀로지 같은 클라우드와 NAS 는 대부분 WebDAV 로 붙습니다.")
         case .ftp:    return L("일반 FTP 입니다. 암호화되지 않으니 집 안 네트워크에서 쓰십시오. 사용자 이름을 비우면 익명으로 접속합니다.")
-        case .github: return L("owner/repo 를 적으면 그 저장소를, owner 만 적으면 저장소 목록을 엽니다. 릴리즈 첨부 파일(IPA 등)도 받을 수 있습니다.")
         }
     }
 
@@ -267,7 +245,6 @@ struct WebDAVServerEditView: View {
         switch server.kind {
         case .webdav: return L("http:// 나 https:// 로 시작하는 주소를 넣으십시오.")
         case .ftp:    return L("ftp:// 로 시작하는 주소를 넣으십시오.")
-        case .github: return L("owner/repo 를 넣으십시오.")
         }
     }
 
