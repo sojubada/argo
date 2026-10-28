@@ -182,6 +182,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     /// 오른쪽 ⌥ 를 혼자 눌렀다 뗐는지 보려고 둔다. 다른 키와 같이 누르면 바꾸지 않는다.
     private var lonelyModifier: Int?
 
+    private var holdingTextEntry = false
     private var blinkTimer: Timer?
     private var repeatTimer: Timer?
     private var repeatKey: UIKeyboardHIDUsage?
@@ -269,8 +270,9 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // 뒤의 파일 탐색기가 단축키를 가져가지 않게 한다. ⌘C·⌘V 가 파일
-        // 복사로 흘러가면 안 된다.
-        ArgoTextEntry.begin()
+        // 복사로 흘러가면 안 된다. 경고창이 닫힐 때도 여기가 다시 불릴 수
+        // 있어, 한 번만 센다.
+        if !holdingTextEntry { holdingTextEntry = true; ArgoTextEntry.begin() }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -283,7 +285,11 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        ArgoTextEntry.end()
+        // 경고창 때문에 잠깐 가려진 것이면 놓지 않는다.
+        if presentedViewController == nil, holdingTextEntry {
+            holdingTextEntry = false
+            ArgoTextEntry.end()
+        }
         blinkTimer?.invalidate()
         repeatTimer?.invalidate()
         highlightTimer?.invalidate()

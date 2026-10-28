@@ -212,7 +212,14 @@ final class ArgoHostingController: UIHostingController<ContentView> {
 
 
     override var keyCommands: [UIKeyCommand]? {
-        guard !ArgoTextEntry.isActive else { return nil }
+        // 목록 위에 창(시트·편집기·뷰어)이 떠 있으면 목록 단축키를 내놓지 않는다.
+        //
+        // 전에는 '글자 칸이 열려 있는가'를 계수기로 셌다. 칸이 열릴 때 +1,
+        // 닫힐 때 -1 인데, 창이 다시 나타나는 일(경고창이 닫힐 때 등)이
+        // 겹치면 +1 만 한 번 더 되어 0 으로 돌아오지 않았다. 그 뒤로는 목록의
+        // ⌘F·⌘L 이 영영 먹지 않았다. 목록 화면 자체에는 글자 칸이 없으므로,
+        // 위에 창이 있는지만 보면 된다.
+        guard isTopmost else { return nil }
 
         var out: [UIKeyCommand] = []
         // 지우기는 UIKeyCommand 로 등록하지 않는다. 키 자리(keyCode)로
@@ -229,6 +236,13 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         return out
     }
 
+    /// 목록이 맨 위에 있는가. 맨 위면 글자 칸 계수기가 남아 있어도 낡은 값이라 비운다.
+    private var isTopmost: Bool {
+        guard presentedViewController == nil else { return false }
+        if ArgoTextEntry.isActive { ArgoTextEntry.reset() }
+        return true
+    }
+
     private var allCommands: [ArgoCommand] {
         ArgoCommand.groups.flatMap { $0.1 }
     }
@@ -240,7 +254,7 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         // 목록을 미리 받아 두고 쓰므로, 칸이 열린 뒤에도 먼저 등록해 둔
         // 조합이 그대로 살아 있을 수 있다. 받는 쪽에서 한 번 더 막는다 —
         // 글자를 지우려고 ⌫ 를 눌렀는데 파일이 지워지면 안 된다.
-        guard !ArgoTextEntry.isActive else { return }
+        guard isTopmost else { return }
         guard let input = sender.input else { return }
         let flags = sender.modifierFlags
         guard let matched = allCommands.first(where: { command in
@@ -260,7 +274,7 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         // 덮인 창에서 처리되지 않은 누름은 리스폰더 체인을 타고 여기까지
         // 올라온다. 문서 뷰어에서 누른 ⌦ 가 뒤에 깔린 목록의 줄을 지우거나,
         // 삭제 확인 창에서 누른 스페이스가 '누름' 대신 고르기로 먹히면 안 된다.
-        guard !ArgoTextEntry.isActive, presentedViewController == nil else {
+        guard isTopmost else {
             super.pressesBegan(presses, with: event)
             return
         }
@@ -387,6 +401,7 @@ enum ArgoTextEntry {
     /// 경로 칸에 포커스가 있는 채로 찾기 시트가 뜰 수 있다.
     static func begin() { depth += 1 }
     static func end()   { depth = max(0, depth - 1) }
+    static func reset() { depth = 0 }
 }
 
 /// 키 자리(HID 번호) → 미국 배열 글자.
