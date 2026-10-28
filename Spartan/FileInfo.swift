@@ -48,6 +48,11 @@ class FileInfo {
             return 12 //svg
         } else if (doesFileHaveFileExtension(filePath: file, extensions: [".ttf", ".otf", ".ttc", ".pfb", ".pfa"])) {
             return 11 //a font (badly)
+        } else if (ArgoTextKind.textExtensions.contains((file as NSString).pathExtension.lowercased())
+                   || ArgoTextKind.language(for: file) == .makefile) {
+            // 확장자로 아는 글 파일. 내용 검사보다 먼저 본다 — 실행 권한이 붙은
+            // .sh 는 '실행 파일' 로, CP949 로 된 .txt 는 '모르는 파일' 로 갔다.
+            return 4 //text file
         } else if(isCar(filePath: file)) {
             return 10 //asset catalog
         } else if (fileManager.isExecutableFile(atPath: file)) { //executables detect as utf32 lol
@@ -157,14 +162,32 @@ class FileInfo {
         return false
     }
     class func isText(filePath: String) -> Bool {
-        guard let data = fileManager.contents(atPath: filePath) else {
+        // 앞부분만 본다. 전에는 파일을 통째로 읽어 판정해서, 큰 파일이 든
+        // 폴더를 열 때마다 그 파일을 전부 읽었다.
+        guard let data = headBytes(filePath, 64 * 1024), !data.isEmpty else {
             return false
         }
-    
-        return data.allSatisfy { Character(UnicodeScalar($0)).isASCII } || String(data: data, encoding: .utf8) != nil || String(data: data, encoding: .utf16) != nil || String(data: data, encoding: .utf32) != nil
+        // UTF-16 은 BOM 으로 안다. 그 밖에 0 바이트가 있으면 바이너리다.
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) { return true }
+        if data.contains(0) { return false }
+        // 잘린 끝의 반쪽 글자 때문에 UTF-8 판정이 실패하지 않게 몇 바이트 떼고 본다.
+        let probe = data.count > 8 ? data.prefix(data.count - 4) : data
+        if String(data: probe, encoding: .utf8) != nil { return true }
+        if String(data: probe, encoding: ArgoTextCodec.cp949) != nil { return true }
+        // 제어 글자가 거의 없으면 글로 친다.
+        let controls = data.filter { $0 < 0x09 || ($0 > 0x0D && $0 < 0x20) }.count
+        return controls * 100 < data.count
+    }
+
+    /// 파일 앞부분만 읽는다.
+    class func headBytes(_ path: String, _ count: Int) -> Data? {
+        guard let h = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { h.closeFile() }
+        return h.readData(ofLength: count)
     }
     class func isPlist(filePath: String) -> Double {
-        guard let data = fileManager.contents(atPath: filePath) else {
+        // 머리 몇 바이트면 된다. 통째로 읽지 않는다.
+        guard let data = headBytes(filePath, 16) else {
             return 0
         }
         

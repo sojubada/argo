@@ -41,13 +41,20 @@ final class ArgoTextReaderController: UIViewController {
     private var fontSize: CGFloat = 28
     private var truncated = false
     private var lineCount = 0
+    /// 읽은 글 그대로. 글자 크기를 바꾸거나 보기 방식을 바꿀 때 다시 그린다.
+    private var rawText = ""
+    /// .md 를 꾸며서 볼지, 원문으로 볼지.
+    private var showRendered = true
+    private var renderToggle: UIButton?
+
+    private var language: ArgoLanguage { ArgoTextKind.language(for: filePath) }
+    private var isMarkdown: Bool { language == .markdown }
 
     private var ext: String { (filePath as NSString).pathExtension.lowercased() }
 
     /// 로그·코드·설정 파일은 고정폭이 읽기 쉽다. 줄이 세로로 정렬된다.
     private var wantsMonospace: Bool {
-        ["log", "json", "plist", "xml", "yml", "yaml", "conf", "cfg",
-         "ini", "sh", "swift", "m", "h", "c", "py", "js", "css", "csv"].contains(ext)
+        language != .plain && language != .markdown
     }
 
     // MARK: 화면
@@ -172,6 +179,7 @@ final class ArgoTextReaderController: UIViewController {
 
     /// 인코딩을 찍어서 읽는다. UTF-8 이 아닌 한글 파일(CP949)이 흔하다.
     private func decode(_ data: Data) -> String? {
+        if let decoded = ArgoTextCodec.decode(data) { return decoded.0 }
         if let s = String(data: data, encoding: .utf8) { return s }
         let detected = NSString.stringEncoding(for: data, encodingOptions: nil,
                                                convertedString: nil, usedLossyConversion: nil)
@@ -203,10 +211,31 @@ final class ArgoTextReaderController: UIViewController {
             body += "\n\n--- 여기까지만 읽었습니다 (8MB 상한) ---"
         }
         lineCount = body.reduce(into: 1) { n, c in if c == "\n" { n += 1 } }
-        textView.attributedText = styled(body)
+        rawText = body
+        render()
         // 글자를 넣은 직후에는 아직 레이아웃이 안 끝나 contentSize 가 0 이다.
         // 그대로 상태줄을 그리면 0% 가 아니라 '모르는 값'이 찍힌다.
         textView.layoutIfNeeded()
+        updateStatus()
+    }
+
+    /// 지금 설정으로 다시 그린다.
+    private func render() {
+        if isMarkdown && showRendered {
+            textView.attributedText = ArgoMarkdown.render(rawText, baseSize: fontSize)
+        } else {
+            textView.attributedText = styled(rawText)
+        }
+        renderToggle?.setTitle(showRendered ? "원문" : "꾸며 보기", for: .normal)
+    }
+
+    @objc private func toggleRendered() {
+        showRendered.toggle()
+        let ratio = textView.contentOffset.y / max(1, textView.contentSize.height)
+        render()
+        textView.layoutIfNeeded()
+        textView.contentOffset.y = ratio * textView.contentSize.height
+        setToolbar(visible: true, interactive: true, animated: true)
         updateStatus()
     }
 
@@ -222,11 +251,16 @@ final class ArgoTextReaderController: UIViewController {
                ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular))
             : UIFont.systemFont(ofSize: fontSize)
 
-        return NSAttributedString(string: body, attributes: [
+        let out = NSMutableAttributedString(string: body, attributes: [
             .font: font,
             .foregroundColor: ArgoTheme.textPrimary(),
             .paragraphStyle: paragraph
         ])
+        // 코드·설정·로그는 색을 입힌다. 너무 크면 칠하는 데 오래 걸려 건너뛴다.
+        if out.length <= 1_000_000 {
+            ArgoSyntax.highlight(out, range: NSRange(location: 0, length: out.length), language: language)
+        }
+        return out
     }
 
     // MARK: 리모컨
@@ -259,7 +293,7 @@ final class ArgoTextReaderController: UIViewController {
         let i = sizes.firstIndex(where: { $0 >= fontSize }) ?? 0
         fontSize = sizes[(i + 1) % sizes.count]
         UserDefaults.settings.set(Double(fontSize), forKey: "readerFontSize")
-        textView.attributedText = styled(textView.text ?? "")
+        render()
         setToolbar(visible: true, interactive: true, animated: true)
         updateStatus()
     }
@@ -281,7 +315,15 @@ final class ArgoTextReaderController: UIViewController {
         let close = ArgoBarButton.make(title: "닫기")
         close.addTarget(self, action: #selector(closeNow), for: .primaryActionTriggered)
 
-        toolbar = UIStackView(arrangedSubviews: [top, bottom, statusLabel, size, edit, close])
+        var items: [UIView] = [top, bottom, statusLabel, size]
+        if isMarkdown {
+            let toggle = ArgoBarButton.make(title: "원문")
+            toggle.addTarget(self, action: #selector(toggleRendered), for: .primaryActionTriggered)
+            renderToggle = toggle
+            items.append(toggle)
+        }
+        items += [edit, close]
+        toolbar = UIStackView(arrangedSubviews: items)
         toolbar.axis = .horizontal
         toolbar.spacing = ArgoTheme.gutter()
         toolbar.alignment = .center

@@ -786,7 +786,7 @@ struct ContentView: View {
                                                isPresented: $showSubView[40],
                                                onEdit: {
                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                                                       showSubView[4] = true
+                                                       presentTextEditor()
                                                    }
                                                })
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1026,7 +1026,7 @@ struct ContentView: View {
 								newViewFileName = masterFiles[newViewFileIndex].name
                                 showSubView[2] = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    showSubView[4] = true
+                                    presentTextEditor()
                                 }
                             })
                             
@@ -1613,13 +1613,23 @@ struct ContentView: View {
         presentReader(vc)
     }
 
+    /// 글·코드 편집기. 전체 화면으로 띄운다 — 시트로 띄우면 화면 가장자리가
+    /// 잘려 줄 번호와 상태줄이 들어갈 자리가 없다.
+    private func presentTextEditor() {
+        let vc = ArgoCodeEditorController()
+        vc.filePath = readerPath()
+        vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+        vc.onSaved = { refreshBothPanes() }
+        presentReader(vc)
+    }
+
     private func presentTextReader() {
         let vc = ArgoTextReaderController()
         vc.filePath = readerPath()
         vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
         vc.onEdit = { [weak vc] in
             vc?.dismiss(animated: true) {
-                showSubView[4] = true
+                presentTextEditor()
             }
         }
         presentReader(vc)
