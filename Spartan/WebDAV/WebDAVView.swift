@@ -71,11 +71,11 @@ struct WebDAVRootView: View {
 
     private var connectionList: some View {
         VStack {
-            Text("WebDAV")
+            Text(L("원격 연결"))
                 .font(.title)
 
             if store.servers.isEmpty {
-                Text("No saved connections yet.")
+                Text(L("저장한 연결이 없습니다. WebDAV·클라우드·NAS, FTP, GitHub 를 더할 수 있습니다."))
                     .foregroundColor(.secondary)
                     .padding(.top, 20)
             } else {
@@ -92,10 +92,10 @@ struct WebDAVRootView: View {
                         }
                     }) {
                         HStack {
-                            Image(systemName: editMode ? "gear" : "globe")
+                            Image(systemName: editMode ? "gear" : server.kind.symbol)
                             VStack(alignment: .leading) {
                                 Text(server.displayName)
-                                Text(server.urlString)
+                                Text(server.kind.label + " · " + server.urlString)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -105,8 +105,8 @@ struct WebDAVRootView: View {
             }
 
             Text(editMode
-                 ? "Edit mode: choose a connection to change its settings."
-                 : "Choose a connection to browse it.")
+                 ? L("고칠 연결을 고르십시오.")
+                 : L("둘러볼 연결을 고르십시오."))
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -118,7 +118,7 @@ struct WebDAVRootView: View {
                 }) {
                     HStack {
                         Image(systemName: "plus")
-                        Text("Add connection")
+                        Text(L("연결 더하기"))
                     }
                 }
 
@@ -126,7 +126,7 @@ struct WebDAVRootView: View {
                     Button(action: { editMode.toggle() }) {
                         HStack {
                             Image(systemName: "gear")
-                            Text(editMode ? "Done" : "Edit connections")
+                            Text(editMode ? L("완료") : L("연결 고치기"))
                         }
                     }
                 }
@@ -137,12 +137,12 @@ struct WebDAVRootView: View {
                 }) {
                     HStack {
                         Image(systemName: "folder")
-                        Text("Open download folder")
+                        Text(L("받은 폴더 열기"))
                     }
                 }
             }
 
-            Text("Downloads are staged in \(WebDAVCache.directory) - \(ByteCountFormatter.string(fromByteCount: WebDAVCache.usedBytes, countStyle: .file)) used")
+            Text(LF("임시로 받는 곳: {0} — {1} 사용 중", WebDAVCache.directory, ByteCountFormatter.string(fromByteCount: WebDAVCache.usedBytes, countStyle: .file)))
                 .font(.caption)
                 .foregroundColor(.secondary)
             Text(IPAInstaller.routeDescription)
@@ -167,14 +167,52 @@ struct WebDAVServerEditView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text(isNew ? "New connection" : "Edit connection")
+            Text(isNew ? L("새 연결") : L("연결 고치기"))
                 .font(.title)
 
-            ArgoTextField("Name (optional)", text: $server.name)
-            ArgoTextField("https://host:port/path", text: $server.urlString)
-            ArgoTextField("Username", text: $server.username)
-            ArgoTextField("Password", text: $server.password, secure: true)
-            Toggle("Allow untrusted certificates", isOn: $server.allowInsecureTLS)
+            // 종류. 한 줄에 버튼 셋 — 포커스가 한 칸씩 옮겨 간다.
+            HStack {
+                ForEach(RemoteKind.allCases, id: \.self) { k in
+                    Button(action: { server.kind = k; status = "" }) {
+                        HStack {
+                            Image(systemName: server.kind == k ? "largecircle.fill.circle" : "circle")
+                            Text(k.label)
+                        }
+                    }
+                }
+            }
+
+            if server.kind == .webdav {
+                // 클라우드·NAS 를 고르면 주소 틀이 채워진다.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(CloudPreset.all) { p in
+                            Button(action: {
+                                server.urlString = p.template
+                                if server.name.isEmpty { server.name = p.name }
+                                status = p.note.isEmpty ? L("<…> 자리를 바꿔 넣으십시오.") : p.note
+                            }) {
+                                Text(p.name).font(.caption)
+                            }
+                        }
+                    }
+                }
+            }
+
+            ArgoTextField(L("이름 (선택)"), text: $server.name)
+            ArgoTextField(urlPlaceholder, text: $server.urlString)
+            if server.kind != .github {
+                ArgoTextField(L("사용자 이름"), text: $server.username)
+            }
+            ArgoTextField(server.kind == .github ? L("토큰 (공개 저장소는 비워 두기)") : L("비밀번호"),
+                          text: $server.password, secure: true)
+            if server.kind == .webdav {
+                Toggle(L("검증되지 않은 인증서 허용 (집 NAS)"), isOn: $server.allowInsecureTLS)
+            }
+
+            Text(kindHint)
+                .font(.caption)
+                .foregroundColor(.secondary)
 
             if !status.isEmpty {
                 Text(status)
@@ -184,23 +222,23 @@ struct WebDAVServerEditView: View {
 
             HStack {
                 Button(action: test) {
-                    Text(testing ? "Testing..." : "Test")
+                    Text(testing ? L("확인 중…") : L("연결 확인"))
                 }
                 Button(action: {
                     if server.isValid {
                         onSave()
                     } else {
-                        status = "Enter a valid http:// or https:// URL first."
+                        status = invalidMessage
                     }
                 }) {
-                    Text("Save")
+                    Text(L("저장"))
                 }
                 Button(action: onCancel) {
-                    Text("Cancel")
+                    Text(L("취소"))
                 }
                 if !isNew {
                     Button(action: onDelete) {
-                        Text("Delete")
+                        Text(L("삭제"))
                             .foregroundColor(.red)
                     }
                 }
@@ -209,19 +247,43 @@ struct WebDAVServerEditView: View {
         .padding()
     }
 
+    private var urlPlaceholder: String {
+        switch server.kind {
+        case .webdav: return "https://host:port/path"
+        case .ftp:    return "ftp://host:21/path"
+        case .github: return "owner/repo  ·  owner"
+        }
+    }
+
+    private var kindHint: String {
+        switch server.kind {
+        case .webdav: return L("Nextcloud·시놀로지 같은 클라우드와 NAS 는 대부분 WebDAV 로 붙습니다.")
+        case .ftp:    return L("일반 FTP 입니다. 암호화되지 않으니 집 안 네트워크에서 쓰십시오. 사용자 이름을 비우면 익명으로 접속합니다.")
+        case .github: return L("owner/repo 를 적으면 그 저장소를, owner 만 적으면 저장소 목록을 엽니다. 릴리즈 첨부 파일(IPA 등)도 받을 수 있습니다.")
+        }
+    }
+
+    private var invalidMessage: String {
+        switch server.kind {
+        case .webdav: return L("http:// 나 https:// 로 시작하는 주소를 넣으십시오.")
+        case .ftp:    return L("ftp:// 로 시작하는 주소를 넣으십시오.")
+        case .github: return L("owner/repo 를 넣으십시오.")
+        }
+    }
+
     private func test() {
         guard server.isValid else {
-            status = "Enter a valid http:// or https:// URL first."
+            status = invalidMessage
             return
         }
         testing = true
         status = ""
-        let client = WebDAVClient(server: server)
+        let client = RemoteClients.make(server)
         client.testConnection { result in
             testing = false
             switch result {
             case .success:
-                status = "Connected."
+                status = L("연결되었습니다.")
             case .failure(let error):
                 status = error.localizedDescription
             }
@@ -239,7 +301,7 @@ struct WebDAVBrowserView: View {
     @Binding var isPresented: Bool
     var onBack: () -> Void
 
-    @State private var client: WebDAVClient
+    @State private var client: RemoteFileClient
     @State private var path: String
     @State private var items: [WebDAVItem] = []
     @State private var loading = false
@@ -273,13 +335,14 @@ struct WebDAVBrowserView: View {
         self._directory = directory
         self._isPresented = isPresented
         self.onBack = onBack
-        self._client = State(initialValue: WebDAVClient(server: server))
-        self._path = State(initialValue: server.rootPath)
+        let c = RemoteClients.make(server)
+        self._client = State(initialValue: c)
+        self._path = State(initialValue: c.startPath)
         self._destination = State(initialValue: directory.wrappedValue)
     }
 
     private var atRoot: Bool {
-        WebDAVClient.normalize(path) == WebDAVClient.normalize(server.rootPath)
+        WebDAVClient.normalize(path) == WebDAVClient.normalize(client.startPath)
     }
 
     var body: some View {
@@ -548,7 +611,7 @@ struct WebDAVBrowserView: View {
         progress = 0
         transferLabel = label
         message = ""
-        client.download(item: item, to: target, progress: { fraction in
+        client.fetch(item: item, to: target, progress: { fraction in
             progress = fraction
         }, completion: { result in
             switch result {
@@ -633,7 +696,7 @@ struct WebDAVBrowserView: View {
             transferLabel = "Installing \(item.name)"
             progress = 1
             IPAInstaller.install(localPath: local,
-                                 remoteFallbackURL: client.url(forPath: item.path)) { result in
+                                 remoteFallbackURL: client.directURL(for: item)) { result in
                 transferring = false
                 switch result {
                 case .success(let log):

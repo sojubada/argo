@@ -89,7 +89,17 @@ struct SettingsView: View {
 			sheikahFont
 			Text(" ")
             
-            // 안전 모드 스위치
+            // 안전 모드 스위치. 안전판에서는 끌 수 없다.
+            if ArgoEdition.isSafe {
+                HStack {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundColor(.green)
+                    Text(L("안전판 — 안전 모드가 늘 켜져 있습니다"))
+                }
+                Text(L("시스템 잠금이 걸린 항목이 안에 있는 폴더는 지울 수 없습니다. 끄려면 모험가판을 설치하십시오."))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
             Button(action: {
                 if safeModeEnabledPre {
                     showSafeModeWarning = true // 끌 때만 경고
@@ -117,6 +127,10 @@ struct SettingsView: View {
                     }),
                     secondaryButton: .cancel(Text(L("유지")))
                 )
+            }
+            Text(LF("{0} — 안전 모드를 끌 수 있습니다. 켜 두면 잠긴 항목이 든 폴더는 지울 수 없습니다.", ArgoEdition.name))
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
             
             Button(action: {

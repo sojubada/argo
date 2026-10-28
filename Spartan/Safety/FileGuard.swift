@@ -10,6 +10,27 @@ extension Notification.Name {
     static let fileGuardBlocked = Notification.Name("ArgoFileGuardBlockedNotification")
 }
 
+/// 안전판 · 모험가판.
+///
+/// 같은 코드에서 두 IPA 를 낸다. 빌드할 때 ARGO_SAFE 를 주면 안전판이다.
+/// - 안전판: 안전 모드가 늘 켜져 있고 끌 수 없다.
+/// - 모험가판: 안전 모드를 설정에서 끌 수 있다(지금까지의 동작).
+/// 시스템 폴더 쓰기 금지는 두 판 모두 같다 — 그것은 벽돌을 막는 선이다.
+enum ArgoEdition {
+    #if ARGO_SAFE
+    static let isSafe = true
+    #else
+    static let isSafe = false
+    #endif
+
+    static var name: String { isSafe ? L("안전판") : L("모험가판") }
+
+    /// 지금 안전 모드인가. 안전판은 설정값과 상관없이 늘 켜짐이다.
+    static var safeMode: Bool {
+        isSafe || UserDefaults.settings.bool(forKey: "safeModeEnabled")
+    }
+}
+
 enum GuardError: LocalizedError {
     case forbidden(String)
     case safeModeActive(String)
@@ -45,7 +66,7 @@ enum FileGuard {
 
     /// 모든 파괴적 쓰기 작업(FileManager 및 RootHelperActs)의 단일 승인 관문
     static func authorize(action: String, paths: [String], notifyOnBlock: Bool = true) -> Result<Void, GuardError> {
-        let safeMode = UserDefaults.settings.bool(forKey: "safeModeEnabled")
+        let safeMode = ArgoEdition.safeMode
 
         for path in paths {
             // 심볼릭 링크 자체를 지우거나 옮길 때는 링크가 가리키는 대상이 아니라 '링크가 놓인 부모 폴더' 기준으로 판정
@@ -67,8 +88,74 @@ enum FileGuard {
                 }
                 return .failure(err)
             }
+            // 안전 모드에서 폴더를 지울 때는 안까지 본다. 잠긴 것이
+            // 하나라도 있으면 통째로 막는다 — 폴더 하나 지우려다 그 안의
+            // 시스템 파일이 같이 사라지면 안 된다.
+            if safeMode && Self.destructive.contains(action),
+               let locked = lockedDescendant(in: targetForCheck) {
+                let err = GuardError.safeModeActive(LF("안전 모드 — 안에 잠긴 항목이 있어 막았습니다: '{0}' ({1})", itemName, locked))
+                if notifyOnBlock {
+                    reportBlocked(err.localizedDescription)
+                }
+                return .failure(err)
+            }
         }
         return .success(())
+    }
+
+    /// 안까지 살펴볼 작업. 지우기뿐이다 — 이름 바꾸기·옮기기도 mv 를 타지만
+    /// 그것까지 막으면 root 파일이 하나 든 폴더는 이름도 못 바꾼다.
+    private static let destructive: Set<String> = ["rm", "delete", "trash", "batch_delete"]
+
+    /// 폴더 안의 잠긴 항목을 찾는다. 없으면 nil, 있으면 무엇이 왜 잠겼는지.
+    ///
+    /// 잠금으로 치는 것:
+    /// - 시스템 폴더를 가리키는 링크 (목록에 자물쇠가 붙는 것)
+    /// - 바꿀 수 없게 표시된 파일 (immutable · append-only 플래그)
+    /// - root 가 가진 파일 — 사용자 것이 아니다
+    /// 너무 커서 정해진 시간 안에 다 보지 못하면 그것도 막는다. 다 보지
+    /// 못한 것을 괜찮다고 할 수는 없다.
+    static func lockedDescendant(in path: String) -> String? {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            return nil
+        }
+        // 링크 자체를 지우는 것이면 안을 볼 일이 없다.
+        if let t = (try? FileManager.default.attributesOfItem(atPath: path))?[.type] as? FileAttributeType,
+           t == .typeSymbolicLink {
+            return nil
+        }
+        let keys: [URLResourceKey] = [.isSymbolicLinkKey]
+        guard let walker = FileManager.default.enumerator(at: URL(fileURLWithPath: path),
+                                                          includingPropertiesForKeys: keys,
+                                                          options: [], errorHandler: { _, _ in true }) else {
+            return nil
+        }
+        let started = Date()
+        var seen = 0
+        while let url = walker.nextObject() as? URL {
+            seen += 1
+            if seen > 50_000 || Date().timeIntervalSince(started) > 3 {
+                return L("너무 커서 다 살펴보지 못했습니다")
+            }
+            let p = url.path
+            let name = url.lastPathComponent
+            if let v = try? url.resourceValues(forKeys: Set(keys)), v.isSymbolicLink == true {
+                if PathSafety.risk(of: p) == .forbidden {
+                    return LF("{0}: 시스템 폴더를 가리킵니다", name)
+                }
+                continue
+            }
+            guard let a = try? FileManager.default.attributesOfItem(atPath: p) else { continue }
+            if (a[.immutable] as? Bool) == true || (a[.appendOnly] as? Bool) == true {
+                return LF("{0}: 바꿀 수 없게 잠겨 있습니다", name)
+            }
+            // 앱이 root 로 돈다면 앱이 만든 것도 root 것이라 이 기준은 쓸 수 없다.
+            if getuid() != 0, let owner = a[.ownerAccountID] as? NSNumber, owner.intValue == 0 {
+                return LF("{0}: 시스템(root) 소유입니다", name)
+            }
+        }
+        return nil
     }
 
     /// 백그라운드/다중 호출 시 메인 스레드에서 1회로 묶어 알림 발송

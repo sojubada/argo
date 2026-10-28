@@ -53,6 +53,7 @@
 		DA1828535CF149EB8F458802 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */; };
 		DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */; };
 		DA17B8E2F203D6193BAF75A7 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1704A1BED4F852B009A51E /* WebDAVClient.swift */; };
+		A39D006E82424274B56DEB56 /* RemoteClients.swift in Sources */ = {isa = PBXBuildFile; fileRef = B68DD2049980404294D2309F /* RemoteClients.swift */; };
 		DA17E24BBAB89B82D06CD005 /* WebDAVStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA179073550B298ED786CD4A /* WebDAVStore.swift */; };
 		DA175E25CD06A4D70EABB2F6 /* IPAInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA176C4708C8E770779FD1BC /* IPAInstaller.swift */; };
 		DA1711CEC25E47595DBE2140 /* WebDAVView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA1734ECA562981F6B678BF1 /* WebDAVView.swift */; };
@@ -177,6 +178,7 @@
 		DA18BF4BF7916FCCFFCE1D54 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
 		DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVModels.swift; sourceTree = "<group>"; };
 		DA1704A1BED4F852B009A51E /* WebDAVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift; sourceTree = "<group>"; };
+		B68DD2049980404294D2309F /* RemoteClients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteClients.swift; sourceTree = "<group>"; };
 		DA179073550B298ED786CD4A /* WebDAVStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVStore.swift; sourceTree = "<group>"; };
 		DA176C4708C8E770779FD1BC /* IPAInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPAInstaller.swift; sourceTree = "<group>"; };
 		DA1734ECA562981F6B678BF1 /* WebDAVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVView.swift; sourceTree = "<group>"; };
@@ -399,6 +401,7 @@
 			children = (
 				DA17B64C5107F394BF7BE2B8 /* WebDAVModels.swift */,
 				DA1704A1BED4F852B009A51E /* WebDAVClient.swift */,
+				B68DD2049980404294D2309F /* RemoteClients.swift */,
 				DA179073550B298ED786CD4A /* WebDAVStore.swift */,
 				DA176C4708C8E770779FD1BC /* IPAInstaller.swift */,
 				DA1734ECA562981F6B678BF1 /* WebDAVView.swift */,
@@ -753,6 +756,7 @@
 				DA1828535CF149EB8F458802 /* TrashView.swift in Sources */,
 				DA17BC1291B3AE25EB414735 /* WebDAVModels.swift in Sources */,
 				DA17B8E2F203D6193BAF75A7 /* WebDAVClient.swift in Sources */,
+				A39D006E82424274B56DEB56 /* RemoteClients.swift in Sources */,
 				DA17E24BBAB89B82D06CD005 /* WebDAVStore.swift in Sources */,
 				DA175E25CD06A4D70EABB2F6 /* IPAInstaller.swift in Sources */,
 				DA1711CEC25E47595DBE2140 /* WebDAVView.swift in Sources */,

@@ -7,9 +7,32 @@
 
 import Foundation
 
-/// A saved WebDAV connection.
+/// 연결 종류. 이름은 예전 그대로 WebDAVServer 지만 FTP·GitHub 도 담는다 —
+/// 저장해 둔 연결을 옮겨 적지 않고 쓰려고 이름을 바꾸지 않았다.
+enum RemoteKind: String, Codable, CaseIterable {
+    case webdav, ftp, github
+
+    var label: String {
+        switch self {
+        case .webdav: return L("WebDAV · 클라우드")
+        case .ftp:    return "FTP"
+        case .github: return "GitHub"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .webdav: return "icloud"
+        case .ftp:    return "server.rack"
+        case .github: return "chevron.left.forwardslash.chevron.right"
+        }
+    }
+}
+
+/// A saved remote connection.
 struct WebDAVServer: Codable, Identifiable, Hashable {
     var id: UUID = UUID()
+    var kind: RemoteKind = .webdav
     var name: String = ""
     /// Full base URL, e.g. https://nas.local:5006/dav
     var urlString: String = ""
@@ -34,9 +57,64 @@ struct WebDAVServer: Codable, Identifiable, Hashable {
     }
 
     var isValid: Bool {
-        guard let comps = URLComponents(string: urlString), let scheme = comps.scheme?.lowercased() else { return false }
-        return (scheme == "http" || scheme == "https") && (comps.host?.isEmpty == false)
+        switch kind {
+        case .github:
+            return !urlString.trimmingCharacters(in: .whitespaces).isEmpty
+        case .ftp:
+            guard let comps = URLComponents(string: urlString), comps.scheme?.lowercased() == "ftp" else { return false }
+            return comps.host?.isEmpty == false
+        case .webdav:
+            guard let comps = URLComponents(string: urlString), let scheme = comps.scheme?.lowercased() else { return false }
+            return (scheme == "http" || scheme == "https") && (comps.host?.isEmpty == false)
+        }
     }
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, name, urlString, username, password, allowInsecureTLS
+    }
+
+    /// 예전에 저장한 연결에는 kind 가 없다. 없으면 WebDAV 로 읽는다 —
+    /// 그대로 두면 디코딩이 실패해 저장한 연결이 전부 사라진다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = try c.decodeIfPresent(RemoteKind.self, forKey: .kind) ?? .webdav
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        urlString = try c.decodeIfPresent(String.self, forKey: .urlString) ?? ""
+        username = try c.decodeIfPresent(String.self, forKey: .username) ?? ""
+        password = try c.decodeIfPresent(String.self, forKey: .password) ?? ""
+        allowInsecureTLS = try c.decodeIfPresent(Bool.self, forKey: .allowInsecureTLS) ?? false
+    }
+}
+
+/// WebDAV 를 쓰는 클라우드·NAS. 고르면 주소 틀이 채워진다. <…> 자리만 바꾸면 된다.
+struct CloudPreset: Identifiable {
+    var id: String { name }
+    let name: String
+    let template: String
+    let note: String
+
+    static let all: [CloudPreset] = [
+        CloudPreset(name: "Nextcloud", template: "https://<server>/remote.php/dav/files/<user>/",
+                    note: L("앱 비밀번호를 쓰십시오 (설정 → 보안)")),
+        CloudPreset(name: "ownCloud", template: "https://<server>/remote.php/webdav/", note: ""),
+        CloudPreset(name: "Synology NAS", template: "https://<nas>:5006/",
+                    note: L("WebDAV Server 패키지를 켜야 합니다")),
+        CloudPreset(name: "QNAP NAS", template: "https://<nas>:8081/",
+                    note: L("제어판에서 WebDAV 를 켜야 합니다")),
+        CloudPreset(name: "Seafile", template: "https://<server>/seafdav", note: ""),
+        CloudPreset(name: "pCloud", template: "https://webdav.pcloud.com/",
+                    note: L("유럽 계정은 ewebdav.pcloud.com")),
+        CloudPreset(name: "Yandex Disk", template: "https://webdav.yandex.com/",
+                    note: L("앱 비밀번호를 쓰십시오")),
+        CloudPreset(name: "Koofr", template: "https://app.koofr.net/dav/Koofr",
+                    note: L("앱 비밀번호를 쓰십시오")),
+        CloudPreset(name: "InfiniCLOUD", template: "https://<id>.teracloud.jp/dav/",
+                    note: L("앱 접속 비밀번호를 쓰십시오")),
+        CloudPreset(name: "Hetzner Storage Box", template: "https://<user>.your-storagebox.de/", note: ""),
+    ]
 }
 
 /// One entry returned by a PROPFIND.
@@ -49,6 +127,8 @@ struct WebDAVItem: Identifiable, Hashable {
     var size: Int64
     var modified: Date?
     var contentType: String
+    /// 바로 받을 주소가 따로 있는 연결(GitHub)에서 쓴다.
+    var remoteURL: String? = nil
 
     var isIPA: Bool {
         let ext = (name as NSString).pathExtension.lowercased()

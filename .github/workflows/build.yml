@@ -68,7 +68,10 @@ jobs:
           brew install ldid || brew install ldid-procursus
           ldid -v || true
 
-      - name: Build (unsigned)
+      # 두 판을 같은 코드에서 낸다. 안전판은 ARGO_SAFE 를 켜서 짓는다 —
+      # 안전 모드가 늘 켜져 있고, 잠긴 항목이 든 폴더는 지우거나 옮기지 못한다.
+      # 모험가판은 지금까지와 같다(안전 모드를 끌 수 있다).
+      - name: Build Adventurer edition (unsigned)
         run: |
           set -o pipefail
           xcodebuild \
@@ -84,50 +87,44 @@ jobs:
             ONLY_ACTIVE_ARCH=NO \
             build
 
-      - name: Fakesign and package
+      - name: Package Adventurer edition
         run: |
           set -e
-          # DEPLOYMENT_LOCATION=YES in this project installs the app next to the
-          # sources rather than into DerivedData, so look in both places.
-          APP_PATH="$(find build/Build/Products Applications . -maxdepth 4 -name 'Argo.app' -type d 2>/dev/null | head -n 1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "Could not find Argo.app"
-            find . -maxdepth 5 -name '*.app' -type d -print
-            exit 1
-          fi
-          echo "App: $APP_PATH"
+          bash tools/package_ipa.sh "Argo-Adventurer.ipa" "Argo" "${{ github.run_number }}"
 
-          # Apply the entitlements the app needs under TrollStore / a jailbreak.
-          ldid -S"$GITHUB_WORKSPACE/Argo.entitlements" "$APP_PATH/Argo"
+      - name: Build Safe edition (unsigned)
+        run: |
+          set -o pipefail
+          # 앞 판의 앱을 치운다. 이 프로젝트는 앱을 소스 옆에 설치하므로
+          # 남겨 두면 포장 단계가 옛 앱을 집을 수 있다.
+          find build/Build/Products Applications . -maxdepth 4 -name 'Argo.app' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          xcodebuild \
+            -project Spartan.xcodeproj \
+            -scheme Spartan \
+            -configuration Release \
+            -destination 'generic/platform=tvOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_BITCODE=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ARGO_SAFE' \
+            build
 
-          # Fakesign anything else that ships inside the bundle.
-          find "$APP_PATH" -type f \( -name '*.dylib' -o -name 'RootHelper' \) -print0 \
-            | xargs -0 -I{} ldid -S "{}" || true
-
-          # Stamp the run number so an installed build is identifiable on the
-          # device. CFBundleShortVersionString stays 1.0; this is the build
-          # counter beside it.
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" \
-            "$APP_PATH/Info.plist" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${{ github.run_number }}" \
-                 "$APP_PATH/Info.plist"
-
-          rm -rf Payload Argo.ipa
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -qry Argo.ipa Payload
-          ls -lh Argo.ipa
-
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" 2>/dev/null || echo 1.0)"
-          echo "IPA_VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Package Safe edition
+        run: |
+          set -e
+          bash tools/package_ipa.sh "Argo-Safe.ipa" "Argo Safe" "${{ github.run_number }}"
           echo "BUILD_TAG=build-$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_ENV"
           echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          ls -lh Argo-*.ipa
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Argo-ipa
-          path: Argo.ipa
+          path: Argo-*.ipa
 
       # Releases are cut by hand, from the Actions tab, when a build is actually
       # going onto the Apple TV. A push only proves the code compiles and leaves
@@ -144,8 +141,14 @@ jobs:
             Unsigned, fakesigned build of Argo - a tvOS file browser.
             Install with TrollStore on your Apple TV.
 
+            - Argo-Safe.ipa: 안전판 — 안전 모드 항상 켜짐, 잠긴 항목이 든 폴더는 지우기 불가
+            - Argo-Adventurer.ipa: 모험가판 — 안전 모드를 끌 수 있음
+            (두 판은 같은 앱이라 하나만 설치됩니다)
+
             - Build: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
 
             Test checklist: docs/TEST_CHECKLIST.md
-          files: Argo.ipa
+          files: |
+            Argo-Safe.ipa
+            Argo-Adventurer.ipa

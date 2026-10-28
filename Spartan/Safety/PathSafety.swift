@@ -119,7 +119,7 @@ enum PathSafety {
         let r = risk(of: path)
         if r == .forbidden { return false }
         if r == .caution {
-            return !UserDefaults.settings.bool(forKey: "safeModeEnabled") // 안전모드면 주의구역 쓰기 불가
+            return !ArgoEdition.safeMode // 안전모드면 주의구역 쓰기 불가
         }
         return true
     }
