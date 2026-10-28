@@ -28,12 +28,12 @@ struct SearchView: View {
     
     var body: some View {
         if (!showResults) {
-            TextField(NSLocalizedString("SEARCH_TERM", comment: "How can you say that? One job forever?"), text: $searchTerm)
+            ArgoTextField(NSLocalizedString("SEARCH_TERM", comment: "How can you say that? One job forever?"), text: $searchTerm)
                 .disabled(currentlySearching)
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                 }
-            TextField(NSLocalizedString("SEARCH_PATH", comment: "That's an insane choice to have to make."), text: $directoryToSearch)
+            ArgoTextField(NSLocalizedString("SEARCH_PATH", comment: "That's an insane choice to have to make."), text: $directoryToSearch)
                 .disabled(currentlySearching)
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)

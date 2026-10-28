@@ -19,11 +19,11 @@ struct CreateSymlinkView: View {
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                 }
-            TextField(NSLocalizedString("SYMTOUCH_NAME", comment: "- Wow."), text: $symlinkName)
+            ArgoTextField(NSLocalizedString("SYMTOUCH_NAME", comment: "- Wow."), text: $symlinkName)
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                 }
-            TextField(NSLocalizedString("SYMTOUCH_DEST", comment: "I've never seen them this close."), text: $symlinkDest, onEditingChanged: { (isEditing) in
+            ArgoTextField(NSLocalizedString("SYMTOUCH_DEST", comment: "I've never seen them this close."), text: $symlinkDest, onEditingChanged: { (isEditing) in
                     if !isEditing {
                         if(symlinkName.hasSuffix("/")) && UserDefaults.settings.bool(forKey: "autoComplete"){
                             symlinkName = String(symlinkName.dropLast())

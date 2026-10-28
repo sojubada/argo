@@ -101,7 +101,7 @@ struct GoToPathView: View {
             Text("경로로 이동")
                 .font(.title2)
 
-            TextField("/var/mobile/Media/", text: $text, onCommit: go)
+            ArgoTextField("/var/mobile/Media/", text: $text, onCommit: go)
                 .disableAutocorrection(true)
                 .textInputAutocapitalization(.never)
 
@@ -156,7 +156,7 @@ struct FilterListView: View {
             Text("걸러보기")
                 .font(.title2)
 
-            TextField("이름 일부, .mp4, *.log …", text: $text, onCommit: apply)
+            ArgoTextField("이름 일부, .mp4, *.log …", text: $text, onCommit: apply)
                 .disableAutocorrection(true)
                 .textInputAutocapitalization(.never)
 

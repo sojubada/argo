@@ -28,7 +28,7 @@ struct PlistAddDictView: View {
 				}
 			}
 			
-			TextField(NSLocalizedString("PLIST_KEY", comment: "Still Alive"), text: $newKeyName)
+			ArgoTextField(NSLocalizedString("PLIST_KEY", comment: "Still Alive"), text: $newKeyName)
 			
 			Button(action: {
 				switch selectedKeyType {

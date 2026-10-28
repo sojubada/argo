@@ -17,7 +17,7 @@ struct PlistDictEditor: View {
 	@State var selectedKeyType: String
 
     var body: some View {
-        TextField(LocalizedString("PLIST_KEY"), text: $keyToEdit.key)
+        ArgoTextField(LocalizedString("PLIST_KEY"), text: $keyToEdit.key)
         Picker(NSLocalizedString("PLIST_KEY", comment: "A Walk Down Strawberry Lane"), selection: Binding(
                 get: { self.selectedKeyType },
                 set: { value in

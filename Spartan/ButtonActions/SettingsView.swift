@@ -102,7 +102,7 @@ struct SettingsView: View {
 			GeometryReader { geometry in
 				HStack {
 					Spacer()
-					TextField("SETTINGS_DATEFORMAT", text: $dateFormatPre)
+					ArgoTextField(NSLocalizedString("SETTINGS_DATEFORMAT", comment: ""), text: $dateFormatPre)
 						.frame(maxWidth: geometry.size.width * 0.8)
 					Spacer()
 				}

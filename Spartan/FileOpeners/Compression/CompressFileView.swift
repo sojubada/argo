@@ -103,7 +103,7 @@ struct CompressFileView: View {
                 }
             }
             
-            TextField("COMP_DESTNAME", text: $destPath, onCommit: {
+            ArgoTextField(NSLocalizedString("COMP_DESTNAME", comment: ""), text: $destPath, onCommit: {
                 let ext = selectedCompType.stringRepresentation() + selectedTarCompType.stringRepresentation()
                 if destPath.suffix(ext.count) != ext {
                     destPath += ext
@@ -188,7 +188,7 @@ struct UncompressFileView: View {
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 60)
                 }
-            TextField("UNCOMP_DIR", text: $extractFilePath)
+            ArgoTextField(NSLocalizedString("UNCOMP_DIR", comment: ""), text: $extractFilePath)
                 .onAppear {
                     extractFilePath = filePath
                 }

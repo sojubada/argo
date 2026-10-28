@@ -12,7 +12,7 @@ struct PlistStringView: View {
 	@Binding var isPresented: Bool
 	
 	var body: some View {
-		TextField(LocalizedString("PLIST_STRINGDATA"), text: $value)
+		ArgoTextField(LocalizedString("PLIST_STRINGDATA"), text: $value)
 		
 		Button(action: {
 			isPresented = false

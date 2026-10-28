@@ -170,10 +170,10 @@ struct WebDAVServerEditView: View {
             Text(isNew ? "New connection" : "Edit connection")
                 .font(.title)
 
-            TextField("Name (optional)", text: $server.name)
-            TextField("https://host:port/path", text: $server.urlString)
-            TextField("Username", text: $server.username)
-            SecureField("Password", text: $server.password)
+            ArgoTextField("Name (optional)", text: $server.name)
+            ArgoTextField("https://host:port/path", text: $server.urlString)
+            ArgoTextField("Username", text: $server.username)
+            ArgoTextField("Password", text: $server.password, secure: true)
             Toggle("Allow untrusted certificates", isOn: $server.allowInsecureTLS)
 
             if !status.isEmpty {

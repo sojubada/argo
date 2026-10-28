@@ -26,7 +26,7 @@ struct RenameFileView: View {
             .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                 view.scaledFont(name: "BotW Sheikah Regular", size: 60)
             }
-        TextField(NSLocalizedString("RENAME_NAME", comment: "under the circumstances."), text: $newFileName)
+        ArgoTextField(NSLocalizedString("RENAME_NAME", comment: "under the circumstances."), text: $newFileName)
             .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                 view.scaledFont(name: "BotW Sheikah Regular", size: 40)
             }

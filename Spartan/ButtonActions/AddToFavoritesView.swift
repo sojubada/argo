@@ -20,12 +20,12 @@ struct AddToFavoritesView: View {
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                 }
 
-            TextField(NSLocalizedString("FAVORITESADD_DISPLAYNAME", comment: ""), text: $displayName)
+            ArgoTextField(NSLocalizedString("FAVORITESADD_DISPLAYNAME", comment: ""), text: $displayName)
                 .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                     view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                 }
 
-            TextField(NSLocalizedString("FAVORITESADD_FILEPATH", comment: ""), text: $filePath, onEditingChanged: { isEditing in
+            ArgoTextField(NSLocalizedString("FAVORITESADD_FILEPATH", comment: ""), text: $filePath, onEditingChanged: { isEditing in
                 if !isEditing {
                     filePath = FavoritesStore.normalizePath(filePath)
                 }
