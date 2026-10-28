@@ -14,8 +14,10 @@
 //  - 블루투스 키보드: 맥의 코드 편집기와 같은 단축키 (⌘S 저장, ⌘Z 되돌리기,
 //    ⌘F 찾기, ⌘/ 주석, ⌘D 줄 복제, ⌥↑↓ 줄 옮기기, Tab 들여쓰기 …)
 //  - 리모컨: 방향키로 커서, 가운데 버튼으로 도구 모음, 재생 버튼으로 글 넣기
-//  - 한글: 키보드의 키 신호로는 한글 조합이 되지 않는다. '글 넣기'(⌘E) 와
-//    '줄 고치기'(⌘⇧E) 가 시스템 입력 창을 띄우므로 거기서 한글을 친다.
+//  - 한글: tvOS 는 키보드에 한글 입력기를 주지 않는다. 키 자리를 미국 배열로
+//    읽어 두벌식으로 직접 조합한다(TV-safari 의 조합기). 단축키도 키 자리로
+//    가리므로 시스템 입력 언어가 한국어여도 ⌘S 가 ⌘ㄴ 이 되지 않는다.
+//    시스템 입력 창이 필요하면 '글 넣기'(⌘E) · '줄 고치기'(⌘⇧E).
 //
 
 import UIKit
@@ -169,6 +171,16 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     private var findHits: [NSRange] = []
     private var selectionPainted: NSRange?
     private var findHitsNeedPaint = false
+
+    // 한글 입력
+    private var hangul = ArgoHangulComposer()
+    /// 만드는 중인 글자가 놓인 자리.
+    private var composingRange: NSRange?
+    private var koreanInput = false {
+        didSet { UserDefaults.settings.set(koreanInput, forKey: "editorKoreanInput"); updateStatus() }
+    }
+    /// 오른쪽 ⌥ 를 혼자 눌렀다 뗐는지 보려고 둔다. 다른 키와 같이 누르면 바꾸지 않는다.
+    private var lonelyModifier: Int?
 
     private var blinkTimer: Timer?
     private var repeatTimer: Timer?
@@ -332,6 +344,12 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
             setText("")
         }
         indentUnit = ArgoTextKind.indentUnit(for: storage.string, language: language)
+        // 지난번 고른 입력 언어를 따른다. 처음이면 글은 한글, 코드는 영문.
+        if let saved = UserDefaults.settings.object(forKey: "editorKoreanInput") as? Bool {
+            koreanInput = saved
+        } else {
+            koreanInput = (language == .plain || language == .markdown)
+        }
         updateTitle()
         updateStatus()
     }
@@ -548,11 +566,14 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         let after = cursorAfter ?? NSMaxRange(newRange)
 
         // 연달아 친 글자는 한 번에 되돌린다.
-        if coalesce, var last = undoStack.last, NSMaxRange(last.range) == range.location,
-           range.length == 0, !text.contains("\n"), Date().timeIntervalSince(last.time) < 1.5,
-           !last.newText.contains("\n") {
-            last.range.length += newRange.length
-            last.newText += text
+        if coalesce, var last = undoStack.last, !text.contains("\n"),
+           Date().timeIntervalSince(last.time) < 1.5, !last.newText.contains("\n"),
+           range.location >= last.range.location, NSMaxRange(range) == NSMaxRange(last.range) {
+            // 바로 앞 고침의 끝에 잇거나, 그 끝을 갈아 끼운다. 한글은 조합하는
+            // 동안 마지막 글자를 계속 바꿔 끼우므로 뒤쪽이 필요하다.
+            let keep = (last.newText as NSString).substring(to: range.location - last.range.location)
+            last.newText = keep + text
+            last.range.length = (last.newText as NSString).length
             last.cursorAfter = after
             last.time = Date()
             undoStack[undoStack.count - 1] = last
@@ -790,6 +811,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     // MARK: 되돌리기
 
     private func undo() {
+        endComposition()
         guard let e = undoStack.popLast() else { flash("되돌릴 것이 없습니다"); return }
         apply(range: e.range, text: e.oldText)
         redoStack.append(e)
@@ -800,6 +822,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     private func redo() {
+        endComposition()
         guard let e = redoStack.popLast() else { flash("다시 할 것이 없습니다"); return }
         let r = NSRange(location: e.range.location, length: (e.oldText as NSString).length)
         apply(range: r, text: e.newText)
@@ -938,6 +961,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func insertTextPrompt() {
+        endComposition()
         ask(title: "글 넣기", message: "커서 자리에 넣습니다. 한글도 여기서 칠 수 있습니다.",
             fields: [("넣을 글", "")],
             actions: [("넣기", { [weak self] v in
@@ -947,6 +971,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func editLinePrompt() {
+        endComposition()
         let line = lineOf(cursor)
         let r = lineRange(line)
         ask(title: "\(line + 1)번 줄 고치기", fields: [("줄 내용", ns.substring(with: r))],
@@ -957,6 +982,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func findPrompt() {
+        endComposition()
         ask(title: "찾기 · 바꾸기", message: "대소문자는 가리지 않습니다. 다음은 ⌘G, 이전은 ⌘⇧G.",
             fields: [("찾을 글", lastFind), ("바꿀 글 (모두 바꾸기만)", "")],
             actions: [
@@ -969,6 +995,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func gotoLinePrompt() {
+        endComposition()
         ask(title: "줄로 가기", message: "1 ~ \(lineStarts.count)", fields: [("줄 번호", "")],
             actions: [("가기", { [weak self] v in
                 guard let self, let n = Int((v.first ?? "").trimmingCharacters(in: .whitespaces)) else { return }
@@ -984,6 +1011,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     private func save(then: (() -> Void)?) {
+        endComposition()
         if let why = readOnlyReason { flash(why); return }
         if case .failure(let err) = FileGuard.authorize(action: "write_text", paths: [filePath], notifyOnBlock: false) {
             alert("저장이 막혔습니다", err.localizedDescription)
@@ -1079,7 +1107,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     private func updateStatus() {
         let line = lineOf(cursor)
         let col = cursor - lineStarts[line] + 1
-        var parts = ["\(line + 1):\(col)"]
+        var parts = [koreanInput ? "한" : "EN", "\(line + 1):\(col)"]
         if let sel = selection { parts.append("\(sel.length)자 선택") }
         parts.append(language == .plain ? "텍스트" : language.rawValue)
         parts.append(codec.label)
@@ -1118,7 +1146,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func undoTapped() { undo() }
-    @objc private func commentTapped() { toggleComment() }
+    @objc private func commentTapped() { endComposition(); toggleComment() }
 
     @objc private func cycleFontSize() {
         let sizes: [CGFloat] = [20, 23, 26, 30, 34, 40]
@@ -1127,6 +1155,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     private func setFontSize(_ size: CGFloat) {
+        endComposition()
         fontSize = max(16, min(48, size))
         UserDefaults.settings.set(Double(fontSize), forKey: "editorFontSize")
         let all = NSRange(location: 0, length: storage.length)
@@ -1150,13 +1179,16 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         ⌘D 줄 복제 · ⌘⇧K 줄 지우기 · ⌥↑ ⌥↓ 줄 옮기기
         ⌥← ⌥→ 낱말 · ⌘← ⌘→ 줄 처음·끝 · ⌘↑ ⌘↓ 문서 처음·끝
         ⇧ 를 같이 누르면 고르면서 간다 · PageUp/Down
-        ⌘E 글 넣기(한글) · ⌘⇧E 줄 고치기 · ⌘+ ⌘- 글자 크기
+        한/영: Caps Lock · ⌥ 한 번 · ⌃Space · 한/영 키 (상태줄 왼쪽에 한/EN)
+        한글 상태에서 ⌥ 를 누른 채 치면 영문 · 글자 밑줄은 조합 중
+        ⌘E 글 넣기 · ⌘⇧E 줄 고치기 · ⌘+ ⌘- 글자 크기
 
         리모컨: 방향키 커서 · 가운데 도구 모음 · 재생 글 넣기 · 메뉴 닫기
         """)
     }
 
     private func setToolbar(interactive: Bool) {
+        if interactive { endComposition() }
         toolbarInteractive = interactive
         for sub in toolbar.arrangedSubviews { (sub as? UIControl)?.isEnabled = interactive }
         let a: CGFloat = interactive ? 1.0 : 0.0
@@ -1173,6 +1205,10 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         for press in presses {
             if press.type == .menu { continue }   // menuPressed 가 받는다
             if let key = press.key {
+                let code = key.keyCode.rawValue
+                // ⌥(왼쪽 0xE2, 오른쪽 0xE6)를 혼자 눌렀다 떼면 한/영을 바꾼다.
+                // 누른 채 다른 키를 치면(⌥← 낱말 이동, ⌥+글자 영문) 바꾸지 않는다.
+                lonelyModifier = (code == 0xE2 || code == 0xE6) ? code : nil
                 if handleKey(key) {
                     handled = true
                     startRepeat(for: key)
@@ -1185,6 +1221,12 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     private func pressesFinished(_ presses: Set<UIPress>) {
+        for p in presses {
+            if let code = p.key?.keyCode.rawValue, code == 0xE2 || code == 0xE6, lonelyModifier == code {
+                lonelyModifier = nil
+                toggleInputLanguage()
+            }
+        }
         for p in presses where p.key?.keyCode == repeatKey {
             repeatTimer?.invalidate()
             repeatKey = nil
@@ -1218,6 +1260,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         if toolbarInteractive {
             return false   // 버튼 사이 이동은 포커스 엔진이 한다
         }
+        endComposition()
         switch type {
         case .upArrow:    moveCursor(to: verticalStep(-1), extend: false, keepColumn: true)
         case .downArrow:  moveCursor(to: verticalStep(1), extend: false, keepColumn: true)
@@ -1237,7 +1280,35 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         let shift = m.contains(.shift)
         let alt = m.contains(.alternate)
         let ctrl = m.contains(.control)
-        let ch = key.charactersIgnoringModifiers.lowercased()
+        // 입력 언어가 한국어면 charactersIgnoringModifiers 가 'ㄴ' 처럼 온다.
+        // 단축키는 키 자리에서 미국 배열 글자를 얻어 가린다.
+        let ch = ArgoKeyMap.latin(key.keyCode, shift: false) ?? key.charactersIgnoringModifiers.lowercased()
+        let code = key.keyCode.rawValue
+
+        // 한/영 바꾸기: 한/영 키(LANG1), Caps Lock, ⌃Space.
+        // ⌥ 는 떼었을 때 pressesFinished 에서 바꾼다.
+        if code == 0x90 || code == 0x39 || (code == 0x2C && ctrl && !cmd) {
+            toggleInputLanguage()
+            return true
+        }
+        // 수정키만 눌린 것은 아무 일도 하지 않는다.
+        if (0xE0...0xE7).contains(code) { return true }
+
+        // 만드는 중인 한글: 자모와 지우기만 이어 가고, 나머지는 먼저 굳힌다.
+        let latinTyped = ArgoKeyMap.latin(key.keyCode, shift: shift)
+        let jamo: UInt16? = (koreanInput && !cmd && !ctrl && !alt)
+            ? latinTyped.flatMap { $0.first }.flatMap { ArgoHangulComposer.jamo(forLatin: $0) }
+            : nil
+        if let jamo {
+            composeJamo(jamo)
+            return true
+        }
+        if key.keyCode == .keyboardDeleteOrBackspace, !cmd, !alt, composingRange != nil {
+            composeBackspace()
+            return true
+        }
+        endComposition()
+
         let pageLines = max(1, Int(textView.bounds.height / max(1, font.lineHeight * 1.25)) - 2)
 
         switch key.keyCode {
@@ -1337,12 +1408,65 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
             return true
         }
 
+        // 글자: 키 자리에서 얻은 미국 배열 글자를 쓴다. ⌥ 를 누르고 치면
+        // 한글 상태에서도 영문이 들어간다.
+        if let t = latinTyped {
+            typeCharacter(t)
+            return true
+        }
+        // 숫자판 같은 그 밖의 키는 시스템이 준 글자를 쓴다.
         let chars = key.characters
         guard !chars.isEmpty else { return false }
         // 보이지 않는 제어 글자는 넣지 않는다.
         if chars.unicodeScalars.allSatisfy({ CharacterSet.controlCharacters.contains($0) }) { return false }
         typeCharacter(chars)
         return true
+    }
+
+    // MARK: 한글 조합
+
+    private func toggleInputLanguage() {
+        endComposition()
+        koreanInput.toggle()
+        flash(koreanInput ? "한글 입력" : "영문 입력")
+    }
+
+    private func composeJamo(_ jamo: UInt16) {
+        let settled = hangul.input(jamo)
+        let text = settled + hangul.composing
+        let target = composingRange ?? selection ?? NSRange(location: cursor, length: 0)
+        replace(target, with: text, coalesce: true)
+        markComposing()
+    }
+
+    private func composeBackspace() {
+        guard let range = composingRange else { return }
+        _ = hangul.deleteBackward()
+        replace(range, with: hangul.composing, coalesce: true)
+        markComposing()
+    }
+
+    /// 만드는 중인 글자 자리를 다시 잡고 밑줄을 긋는다.
+    private func markComposing() {
+        let len = (hangul.composing as NSString).length
+        guard hangul.isComposing, len > 0, cursor >= len else {
+            composingRange = nil
+            hangul.reset()
+            return
+        }
+        let r = NSRange(location: cursor - len, length: len)
+        composingRange = r
+        storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: r)
+    }
+
+    /// 조합을 끝낸다. 글자는 이미 들어가 있으므로 밑줄만 걷는다.
+    private func endComposition() {
+        guard let r = composingRange else { hangul.reset(); return }
+        if NSMaxRange(r) <= storage.length {
+            storage.removeAttribute(.underlineStyle, range: r)
+        }
+        composingRange = nil
+        hangul.reset()
     }
 }
 

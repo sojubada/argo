@@ -772,3 +772,187 @@ enum ArgoMarkdown {
         return a
     }
 }
+
+// MARK: - 한글 조합 (두벌식)
+
+/// 두벌식 키 입력을 한글 음절로 조합한다.
+///
+/// tvOS 는 블루투스 키보드에 한글 입력기를 주지 않는다. 시스템의 한글 자판은
+/// 전체 화면 입력 창 안에만 있고, 그 밖에서는 자모가 낱낱이 오거나 영문
+/// 글자만 온다. 그래서 초성·중성·종성을 여기서 모아 음절로 접는다.
+///
+/// TV-safari(BrowserHangulComposer.m)의 것을 그대로 옮겼다. 시스템을 건드리지
+/// 않는 유니코드 한글 영역의 셈일 뿐이다.
+struct ArgoHangulComposer {
+    private static let base: UInt32 = 0xAC00
+    private static let cho: [UInt16] = [
+        0x3131, 0x3132, 0x3134, 0x3137, 0x3138, 0x3139, 0x3141, 0x3142, 0x3143,
+        0x3145, 0x3146, 0x3147, 0x3148, 0x3149, 0x314A, 0x314B, 0x314C, 0x314D, 0x314E]
+    private static let jung: [UInt16] = [
+        0x314F, 0x3150, 0x3151, 0x3152, 0x3153, 0x3154, 0x3155, 0x3156, 0x3157,
+        0x3158, 0x3159, 0x315A, 0x315B, 0x315C, 0x315D, 0x315E, 0x315F, 0x3160,
+        0x3161, 0x3162, 0x3163]
+    /// 0 번은 '받침 없음'.
+    private static let jong: [UInt16] = [
+        0x0000, 0x3131, 0x3132, 0x3133, 0x3134, 0x3135, 0x3136, 0x3137, 0x3139,
+        0x313A, 0x313B, 0x313C, 0x313D, 0x313E, 0x313F, 0x3140, 0x3141, 0x3142,
+        0x3144, 0x3145, 0x3146, 0x3147, 0x3148, 0x314A, 0x314B, 0x314C, 0x314D, 0x314E]
+    private static let vowelPairs: [(UInt16, UInt16, UInt16)] = [
+        (0x3157, 0x314F, 0x3158), (0x3157, 0x3150, 0x3159), (0x3157, 0x3163, 0x315A),
+        (0x315C, 0x3153, 0x315D), (0x315C, 0x3154, 0x315E), (0x315C, 0x3163, 0x315F),
+        (0x3161, 0x3163, 0x3162)]
+    private static let finalPairs: [(UInt16, UInt16, UInt16)] = [
+        (0x3131, 0x3145, 0x3133), (0x3134, 0x3148, 0x3135), (0x3134, 0x314E, 0x3136),
+        (0x3139, 0x3131, 0x313A), (0x3139, 0x3141, 0x313B), (0x3139, 0x3142, 0x313C),
+        (0x3139, 0x3145, 0x313D), (0x3139, 0x314C, 0x313E), (0x3139, 0x314D, 0x313F),
+        (0x3139, 0x314E, 0x3140), (0x3142, 0x3145, 0x3144)]
+
+    private var choIndex = -1
+    private var jungIndex = -1
+    private var jongIndex = 0
+
+    var isComposing: Bool { choIndex >= 0 || jungIndex >= 0 }
+
+    /// 미국 배열 글자 → 두벌식 자모. 자모가 없는 키면 nil.
+    static func jamo(forLatin c: Character) -> UInt16? {
+        switch c {
+        case "q": return 0x3142; case "Q": return 0x3143
+        case "w": return 0x3148; case "W": return 0x3149
+        case "e": return 0x3137; case "E": return 0x3138
+        case "r": return 0x3131; case "R": return 0x3132
+        case "t": return 0x3145; case "T": return 0x3146
+        case "y", "Y": return 0x315B
+        case "u", "U": return 0x3155
+        case "i", "I": return 0x3151
+        case "o": return 0x3150; case "O": return 0x3152
+        case "p": return 0x3154; case "P": return 0x3156
+        case "a", "A": return 0x3141
+        case "s", "S": return 0x3134
+        case "d", "D": return 0x3147
+        case "f", "F": return 0x3139
+        case "g", "G": return 0x314E
+        case "h", "H": return 0x3157
+        case "j", "J": return 0x3153
+        case "k", "K": return 0x314F
+        case "l", "L": return 0x3163
+        case "z", "Z": return 0x314B
+        case "x", "X": return 0x314C
+        case "c", "C": return 0x314A
+        case "v", "V": return 0x314D
+        case "b", "B": return 0x3160
+        case "n", "N": return 0x315C
+        case "m", "M": return 0x3161
+        default: return nil
+        }
+    }
+
+    private static func str(_ u: UInt16) -> String {
+        guard let s = UnicodeScalar(UInt32(u)) else { return "" }
+        return String(Character(s))
+    }
+
+    /// 지금 만드는 중인 글자. 화면의 커서 자리에 보인다.
+    var composing: String {
+        if choIndex >= 0 && jungIndex >= 0 {
+            let v = Self.base + UInt32((choIndex * 21 + jungIndex) * 28 + jongIndex)
+            return UnicodeScalar(v).map { String(Character($0)) } ?? ""
+        }
+        if choIndex >= 0 { return Self.str(Self.cho[choIndex]) }
+        if jungIndex >= 0 { return Self.str(Self.jung[jungIndex]) }
+        return ""
+    }
+
+    mutating func reset() { choIndex = -1; jungIndex = -1; jongIndex = 0 }
+
+    mutating func flush() -> String {
+        let t = composing
+        reset()
+        return t
+    }
+
+    /// 자모 하나를 넣는다. 다 만들어져 굳은 글자를 돌려준다(대개 빈 글).
+    mutating func input(_ j: UInt16) -> String {
+        Self.jung.contains(j) ? inputVowel(j) : inputConsonant(j)
+    }
+
+    private mutating func inputConsonant(_ j: UInt16) -> String {
+        let asCho = Self.cho.firstIndex(of: j)
+        let asJong = Self.jong.firstIndex(of: j)
+
+        if choIndex < 0 && jungIndex < 0 {
+            if let c = asCho { choIndex = c; return "" }
+            return Self.str(j)
+        }
+        // 초성만 있는데 또 자음: 앞의 것은 홀로 선다(ㄱㄴㄷ).
+        if jungIndex < 0 {
+            let settled = flush()
+            if let c = asCho { choIndex = c; return settled }
+            return settled + Self.str(j)
+        }
+        // 모음이 있으면 받침이 되려 한다.
+        if jongIndex == 0 {
+            if let k = asJong, k > 0, choIndex >= 0 { jongIndex = k; return "" }
+        } else if let combined = Self.finalPairs.first(where: { $0.0 == Self.jong[jongIndex] && $0.1 == j })?.2,
+                  let k = Self.jong.firstIndex(of: combined), k > 0 {
+            jongIndex = k
+            return ""
+        }
+        let settled = flush()
+        if let c = asCho { choIndex = c; return settled }
+        return settled + Self.str(j)
+    }
+
+    private mutating func inputVowel(_ j: UInt16) -> String {
+        guard let v = Self.jung.firstIndex(of: j) else { return "" }
+
+        // 받침 뒤의 모음은 그 받침을 데려간다: 간 + ㅏ = 가나.
+        if jongIndex > 0 {
+            let current = Self.jong[jongIndex]
+            var moved = current
+            if let pair = Self.finalPairs.first(where: { $0.2 == current }) {
+                jongIndex = Self.jong.firstIndex(of: pair.0) ?? 0
+                moved = pair.1
+            } else {
+                jongIndex = 0
+            }
+            let settled = flush()
+            if let c = Self.cho.firstIndex(of: moved) { choIndex = c }
+            jungIndex = v
+            return settled
+        }
+        if jungIndex >= 0 {
+            if let combined = Self.vowelPairs.first(where: { $0.0 == Self.jung[jungIndex] && $0.1 == j })?.2,
+               let k = Self.jung.firstIndex(of: combined) {
+                jungIndex = k
+                return ""
+            }
+            let settled = flush()
+            jungIndex = v
+            return settled
+        }
+        jungIndex = v
+        return ""
+    }
+
+    /// 만드는 중인 글자에서 자모 하나를 뺀다. 만드는 중이 아니었으면 false.
+    mutating func deleteBackward() -> Bool {
+        if jongIndex > 0 {
+            if let pair = Self.finalPairs.first(where: { $0.2 == Self.jong[jongIndex] }) {
+                jongIndex = Self.jong.firstIndex(of: pair.0) ?? 0
+            } else {
+                jongIndex = 0
+            }
+            return true
+        }
+        if jungIndex >= 0 {
+            if let pair = Self.vowelPairs.first(where: { $0.2 == Self.jung[jungIndex] }) {
+                jungIndex = Self.jung.firstIndex(of: pair.0) ?? -1
+            } else {
+                jungIndex = -1
+            }
+            return true
+        }
+        if choIndex >= 0 { choIndex = -1; return true }
+        return false
+    }
+}

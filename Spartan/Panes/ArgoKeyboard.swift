@@ -248,8 +248,7 @@ final class ArgoHostingController: UIHostingController<ContentView> {
             return i == input && f == flags
         }) else { return }
 
-        NotificationCenter.default.post(name: ArgoCommand.notification,
-                                        object: matched.rawValue)
+        ArgoCommandPoster.post(matched)
     }
 
     // MARK: - 글자 입력 점프
@@ -296,8 +295,28 @@ final class ArgoHostingController: UIHostingController<ContentView> {
                 break
             }
 
-            // 수정키가 걸린 입력은 단축키 쪽이 처리한다.
-            guard mods.isEmpty, chars.count == 1 else { continue }
+            // 수정키가 걸린 입력은 단축키 쪽이 처리한다. 다만 입력 언어가
+            // 한국어면 UIKeyCommand 가 맞지 않아 여기로 떨어진다 — 키 자리로
+            // 미국 배열 글자를 얻어 단축키 표에서 다시 찾는다.
+            if !mods.isEmpty {
+                let shifted = ArgoKeyMap.latin(key.keyCode, shift: false)
+                if let input = shifted,
+                   let found = allCommands.first(where: { c in
+                       guard !ArgoCommand.pressOnly.contains(c) else { return false }
+                       let (i, f) = ArgoCommand.binding(for: c)
+                       return i == input && f == mods
+                   }) {
+                    command = found
+                } else if key.keyCode == .keyboardUpArrow, mods == .command {
+                    command = .goUp
+                } else if key.keyCode == .keyboardTab, mods == .alternate {
+                    command = .switchPane
+                } else if key.keyCode == .keyboardReturnOrEnter, mods == .command {
+                    command = .rename
+                }
+                continue
+            }
+            guard chars.count == 1 else { continue }
 
             // 스페이스는 고르기다. 포커스 엔진으로 넘기지 않는다 —
             // 넘기면 포커스된 줄이 눌려서 파일이 열린다.
@@ -315,8 +334,7 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         }
 
         if let command {
-            NotificationCenter.default.post(name: ArgoCommand.notification,
-                                            object: command.rawValue)
+            ArgoCommandPoster.post(command)
         }
         if toggledSelection {
             NotificationCenter.default.post(name: ArgoSelectToggle.notification, object: nil)
@@ -369,4 +387,53 @@ enum ArgoTextEntry {
     /// 경로 칸에 포커스가 있는 채로 찾기 시트가 뜰 수 있다.
     static func begin() { depth += 1 }
     static func end()   { depth = max(0, depth - 1) }
+}
+
+/// 키 자리(HID 번호) → 미국 배열 글자.
+///
+/// 시스템 입력 언어가 한국어면 key.characters 가 'ㄴ' 처럼 자모로 온다.
+/// 그러면 ⌘S 가 '⌘ㄴ' 이 되어 단축키가 하나도 맞지 않고, 편집기에는 조합되지
+/// 않은 자모가 낱낱이 들어갔다. 키 자리는 입력 언어와 상관없이 같으므로,
+/// 단축키와 글자 입력을 모두 키 자리에서 읽는다.
+enum ArgoKeyMap {
+    private static let digits = Array("1234567890")
+    private static let digitsShifted = Array("!@#$%^&*()")
+    // 0x2D 부터 키 자리 순서. 0x32 는 미국 배열에 없는 자리라 '\' 로 둔다.
+    private static let punct = Array("-=[]\\\;'`,./")
+    private static let punctShifted = Array("_+{}||:\"~<>?")
+
+    static func latin(_ code: UIKeyboardHIDUsage, shift: Bool) -> String? {
+        let v = code.rawValue
+        switch v {
+        case 0x04...0x1D:
+            let base = Int((shift ? "A" : "a").unicodeScalars.first!.value)
+            guard let u = UnicodeScalar(base + (v - 0x04)) else { return nil }
+            return String(Character(u))
+        case 0x1E...0x27:
+            return String((shift ? digitsShifted : digits)[v - 0x1E])
+        case 0x2C:
+            return " "
+        case 0x2D...0x38:
+            let table = shift ? punctShifted : punct
+            let i = v - 0x2D
+            return i < table.count ? String(table[i]) : nil
+        default:
+            return nil
+        }
+    }
+}
+
+/// 두 갈래로 같은 단축키가 들어올 때 한 번만 쓰게 한다.
+///
+/// UIKeyCommand 가 맞으면 그쪽으로, 입력 언어 때문에 맞지 않으면 pressesBegan
+/// 에서 키 자리로 다시 찾는다. 같은 누름이 양쪽에서 잡히는 일이 있어도
+/// ⌘2 가 두 번 돌아 두 칸이 켰다 꺼지면 안 된다.
+enum ArgoCommandPoster {
+    private static var last: (ArgoCommand, Date)?
+
+    static func post(_ command: ArgoCommand) {
+        if let l = last, l.0 == command, Date().timeIntervalSince(l.1) < 0.25 { return }
+        last = (command, Date())
+        NotificationCenter.default.post(name: ArgoCommand.notification, object: command.rawValue)
+    }
 }
