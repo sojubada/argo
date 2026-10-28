@@ -32,6 +32,7 @@
 		72436CFA1BCC40A8916B0111 /* ArgoKeyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */; };
 		7DC2B9A2DF864CC38941F00C /* KeyboardHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B38B012B684A9C928BE9AF /* KeyboardHelpView.swift */; };
 		75EDB716ECC14EA794E3CF38 /* PaneTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */; };
+		C2B2B1036D504FA8B906F1ED /* ArgoLocale.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6385437A364748A88715895B /* ArgoLocale.swift */; };
 		9307D3732DF24AE197059F9D /* ArgoTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60740246B0EA4EAC8E9BB33A /* ArgoTextField.swift */; };
 		367BEC69AE4748E797D5890E /* ExplorerTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = DECA29446B5F4C498827BE61 /* ExplorerTools.swift */; };
 		76A281EAD2594E03B012BE85 /* PrintProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 891E5DD5390D449FBBA34DE0 /* PrintProbe.m */; };
@@ -153,6 +154,7 @@
 		B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoKeyboard.swift; sourceTree = "<group>"; };
 		A4B38B012B684A9C928BE9AF /* KeyboardHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHelpView.swift; sourceTree = "<group>"; };
 		1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneTransfer.swift; sourceTree = "<group>"; };
+		6385437A364748A88715895B /* ArgoLocale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoLocale.swift; sourceTree = "<group>"; };
 		60740246B0EA4EAC8E9BB33A /* ArgoTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoTextField.swift; sourceTree = "<group>"; };
 		DECA29446B5F4C498827BE61 /* ExplorerTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerTools.swift; sourceTree = "<group>"; };
 		891E5DD5390D449FBBA34DE0 /* PrintProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PrintProbe.m; sourceTree = "<group>"; };
@@ -192,6 +194,7 @@
 		F83F47D12A43782E00A4C47F /* CommandRunner.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandRunner.swift; sourceTree = "<group>"; };
 		F84430612A43EF290042BAB5 /* Pogo-BridgingHeader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Pogo-BridgingHeader.h"; sourceTree = "<group>"; };
 		F845C82929F4D77C0025AC0A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		F48FF29CC2E34A9CA22F1986 /* ko */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ko; path = ko.lproj/Localizable.strings; sourceTree = "<group>"; };
 		F845C82E29F6247A0025AC0A /* EThree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EThree.swift; sourceTree = "<group>"; };
 		F853AB2B29DBCB1A006EA2D5 /* Spartan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spartan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F853AB2E29DBCB1A006EA2D5 /* SpartanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpartanApp.swift; sourceTree = "<group>"; };
@@ -328,6 +331,7 @@
 			children = (
 				9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */,
 				1A0CCD80911E42CB81C6F5A9 /* PaneTransfer.swift */,
+				6385437A364748A88715895B /* ArgoLocale.swift */,
 				60740246B0EA4EAC8E9BB33A /* ArgoTextField.swift */,
 				DECA29446B5F4C498827BE61 /* ExplorerTools.swift */,
 				B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */,
@@ -639,6 +643,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				ko,
 				Base,
 			);
 			mainGroup = F853AB2229DBCB1A006EA2D5;
@@ -727,6 +732,7 @@
 				72436CFA1BCC40A8916B0111 /* ArgoKeyboard.swift in Sources */,
 				7DC2B9A2DF864CC38941F00C /* KeyboardHelpView.swift in Sources */,
 				75EDB716ECC14EA794E3CF38 /* PaneTransfer.swift in Sources */,
+				C2B2B1036D504FA8B906F1ED /* ArgoLocale.swift in Sources */,
 				9307D3732DF24AE197059F9D /* ArgoTextField.swift in Sources */,
 				367BEC69AE4748E797D5890E /* ExplorerTools.swift in Sources */,
 						76A281EAD2594E03B012BE85 /* PrintProbe.m in Sources */,
@@ -815,6 +821,7 @@
 			isa = PBXVariantGroup;
 			children = (
 				F845C82929F4D77C0025AC0A /* en */,
+				F48FF29CC2E34A9CA22F1986 /* ko */,
 			);
 			name = Localizable.strings;
 			sourceTree = "<group>";

@@ -170,8 +170,8 @@ enum ArgoOfficeConverter {
         let note = noted > 0 ? " — " + (String(bytes: scratch[0..<noted], encoding: .utf8) ?? "") : ""
 
         ArgoDiag.log("convert", "\((path as NSString).lastPathComponent) "
-                               + "\(input.count) → \(outLen)바이트, "
-                               + String(format: "%.2f초", Date().timeIntervalSince(started))
+                               + LF("{0} → {1}바이트, ", input.count, outLen)
+                               + String(format: L("%.2f초"), Date().timeIntervalSince(started))
                                + note)
         return dest
     }

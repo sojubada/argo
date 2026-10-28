@@ -128,7 +128,7 @@ final class ArgoKeyFieldView: UIControl {
         label.frame = CGRect(x: offset, y: (h - label.bounds.height) / 2,
                              width: max(label.bounds.width, 1), height: label.bounds.height)
         caret.frame = CGRect(x: offset + caretX, y: (h - font.lineHeight) / 2, width: 3, height: font.lineHeight)
-        modeLabel.text = ArgoInputMode.korean ? "한" : "EN"
+        modeLabel.text = ArgoInputMode.korean ? L("한") : "EN"
     }
 
     private func applyColors(focused: Bool) {
@@ -390,13 +390,13 @@ final class ArgoKeyFieldView: UIControl {
             tf.autocorrectionType = .no
             tf.autocapitalizationType = .none
         }
-        alert.addAction(UIAlertAction(title: "확인", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: L("확인"), style: .default) { [weak self, weak alert] _ in
             guard let self else { return }
             let t = alert?.textFields?.first?.text ?? ""
             self.setText(t, cursor: (t as NSString).length)
             self.onCommit?()
         })
-        alert.addAction(UIAlertAction(title: "취소", style: .cancel))
+        alert.addAction(UIAlertAction(title: L("취소"), style: .cancel))
         top.present(alert, animated: true)
     }
 }

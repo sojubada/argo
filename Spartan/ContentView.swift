@@ -1305,7 +1305,7 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .fileGuardBlocked)) { note in
                 if let reason = note.object as? String {
-                    alertTitle = "작업 차단됨"
+                    alertTitle = L("작업 차단됨")
                     alertMsg = reason
                     showAlert = true
                 }
@@ -1362,7 +1362,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Button(action: { transfer.cancel() }) {
-                        Text(transfer.isCancelling ? "멈추는 중…" : "취소")
+                        Text(transfer.isCancelling ? L("멈추는 중…") : L("취소"))
                     }
                     .disabled(transfer.isCancelling)
                 }
@@ -1540,7 +1540,7 @@ struct ContentView: View {
             if (path as NSString).pathExtension.lowercased() == "xls" {
                 presentWebOfficeReader(path)
             } else {
-                presentCannotOpen(path, reason: "아직 지원하지 않는 형식입니다.")
+                presentCannotOpen(path, reason: L("아직 지원하지 않는 형식입니다."))
             }
             return
         }
@@ -1571,7 +1571,7 @@ struct ContentView: View {
                     // 변환을 깨뜨리는 문서를 만들면, 살균하지 않고 DOM 에
                     // 꽂는 렌더러로 건너갈 수 있었습니다. 이 앱은 샌드박스
                     // 밖에서 / 를 읽고 씁니다. 못 여는 편이 낫습니다.
-                    presentCannotOpen(path, reason: "문서를 읽지 못했습니다.")
+                    presentCannotOpen(path, reason: L("문서를 읽지 못했습니다."))
                     return
                 }
                 let vc = ArgoPDFReaderController()
@@ -1599,10 +1599,10 @@ struct ContentView: View {
         let name = (path as NSString).lastPathComponent
         ArgoDiag.log("open", "거부 \(name) — \(reason)")
         guard let top = AirDropBridge.topViewController() else { return }
-        let alert = UIAlertController(title: "이 문서는 열 수 없습니다",
+        let alert = UIAlertController(title: L("이 문서는 열 수 없습니다"),
                                       message: "\(name)\n\n\(reason)",
                                       preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "확인", style: .default))
+        alert.addAction(UIAlertAction(title: L("확인"), style: .default))
         top.present(alert, animated: true)
     }
 
@@ -1886,8 +1886,8 @@ struct ContentView: View {
         // 치다가 지우려고 ⌫ 를 눌러도 같은 일이 났다.
         let targets = currentTargets
         guard !targets.isEmpty else {
-            alertTitle = "삭제할 항목이 없습니다"
-            alertMsg = "먼저 항목을 고르십시오."
+            alertTitle = L("삭제할 항목이 없습니다")
+            alertMsg = L("먼저 항목을 고르십시오.")
             showAlert = true
             return
         }
@@ -1897,13 +1897,13 @@ struct ContentView: View {
         // 목록에 보이는 것을 지우는 자리이지, 발밑을 지우는 자리가 아니다.
         // 한 번 이렇게 지워지면 되돌릴 길이 없다.
         if let bad = targetUnderfoot(targets) {
-            refuseUnderfoot(bad, verb: "지울")
+            refuseUnderfoot(bad, verb: L("지울"))
             return
         }
         // 관문을 먼저 지난다. 막히면 왜 막혔는지 말해 준다 —
         // 조용히 아무 일도 안 일어나는 것이 가장 나쁘다.
         if case .failure(let err) = FileGuard.authorize(action: "batch_delete", paths: targets) {
-            alertTitle = "삭제가 차단되었습니다"
+            alertTitle = L("삭제가 차단되었습니다")
             alertMsg = err.localizedDescription
             showAlert = true
             return
@@ -1915,8 +1915,8 @@ struct ContentView: View {
 
     /// 줄을 대상으로 하는 단축키를 눌렀는데 포커스된 줄이 없을 때.
     func noFocusedRow() {
-        alertTitle = "대상이 없습니다"
-        alertMsg = "목록에서 줄을 하나 고른 뒤 다시 누르십시오."
+        alertTitle = L("대상이 없습니다")
+        alertMsg = L("목록에서 줄을 하나 고른 뒤 다시 누르십시오.")
         showAlert = true
     }
 
@@ -1992,7 +1992,7 @@ struct ContentView: View {
                 clipboardPaste()
             },
             canPaste: { !clipboard.isEmpty },
-            pasteLabel: { "여기에 붙여넣기 — " + clipboard.summary },
+            pasteLabel: { L("여기에 붙여넣기 — ") + clipboard.summary },
             hasOtherPane: { dualPaneEnabled },
             sendToOtherPane: { index, move in
                 guard focusItem(index) != nil else { return }
@@ -2070,9 +2070,9 @@ struct ContentView: View {
 
     /// 발밑을 다루려 할 때 알린다.
     func refuseUnderfoot(_ path: String, verb: String) {
-        alertTitle = "이 폴더는 \(verb) 수 없습니다"
+        alertTitle = LF("이 폴더는 {0} 수 없습니다", verb)
         alertMsg = (path as NSString).lastPathComponent
-            + "\n\n지금 보고 있는 폴더이거나 그 윗폴더입니다. 윗폴더로 올라가서 하십시오."
+            + L("\n\n지금 보고 있는 폴더이거나 그 윗폴더입니다. 윗폴더로 올라가서 하십시오.")
         showAlert = true
         ArgoDiag.log("target", "거부(\(verb)) — 현재 폴더/윗폴더 \(path)")
     }
@@ -2080,13 +2080,13 @@ struct ContentView: View {
     func clipboardTake(mode: ClipboardMode) {
         let targets = currentTargets
         guard !targets.isEmpty else {
-            alertTitle = "고른 항목이 없습니다"
-            alertMsg = "파일을 길게 눌러 고르거나 여러 개 고르기를 켜십시오."
+            alertTitle = L("고른 항목이 없습니다")
+            alertMsg = L("파일을 길게 눌러 고르거나 여러 개 고르기를 켜십시오.")
             showAlert = true
             return
         }
         if let bad = targetUnderfoot(targets) {
-            refuseUnderfoot(bad, verb: mode == .move ? "잘라낼" : "복사할")
+            refuseUnderfoot(bad, verb: mode == .move ? L("잘라낼") : L("복사할"))
             return
         }
         clipboard.take(targets, mode: mode)
@@ -2106,7 +2106,7 @@ struct ContentView: View {
                      destination: destination,
                      move: move,
                      onBlocked: { reason in
-                        alertTitle = move ? "이동이 차단되었습니다" : "복사가 차단되었습니다"
+                        alertTitle = move ? L("이동이 차단되었습니다") : L("복사가 차단되었습니다")
                         alertMsg = reason
                         showAlert = true
                      },
@@ -2119,14 +2119,14 @@ struct ContentView: View {
                             clipboard.clear()
                         }
                         if !failed.isEmpty {
-                            alertTitle = "일부를 옮기지 못했습니다"
-                            alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
+                            alertTitle = L("일부를 옮기지 못했습니다")
+                            alertMsg = LF("{0}개 완료, {1}개 실패\n", done, failed.count) + failed.prefix(5).joined(separator: "\n")
                             showAlert = true
                         } else if cancelled {
                             // 쓰다 만 것은 지웠다. 끝난 것은 남아 있다는 것을 알려야
                             // 반쯤 된 상태를 찾아 헤매지 않는다.
-                            alertTitle = "취소했습니다"
-                            alertMsg = "\(done)개는 끝났고, 하던 것은 지웠습니다."
+                            alertTitle = L("취소했습니다")
+                            alertMsg = LF("{0}개는 끝났고, 하던 것은 지웠습니다.", done)
                             showAlert = true
                         }
                      })
@@ -2164,13 +2164,13 @@ struct ContentView: View {
     func copySelectionToOtherPane(move: Bool) {
         let sources = currentTargets
         guard !sources.isEmpty else {
-            alertTitle = "복사할 항목이 없습니다"
-            alertMsg = "먼저 항목을 고르십시오."
+            alertTitle = L("복사할 항목이 없습니다")
+            alertMsg = L("먼저 항목을 고르십시오.")
             showAlert = true
             return
         }
         if let bad = targetUnderfoot(sources) {
-            refuseUnderfoot(bad, verb: move ? "옮길" : "복사할")
+            refuseUnderfoot(bad, verb: move ? L("옮길") : L("복사할"))
             return
         }
 
@@ -2182,7 +2182,7 @@ struct ContentView: View {
                      destination: destination,
                      move: move,
                      onBlocked: { reason in
-                        alertTitle = move ? "이동이 차단되었습니다" : "복사가 차단되었습니다"
+                        alertTitle = move ? L("이동이 차단되었습니다") : L("복사가 차단되었습니다")
                         alertMsg = reason
                         showAlert = true
                      },
@@ -2191,14 +2191,14 @@ struct ContentView: View {
                         if move { sourcePane.updateFiles() }
                         sourcePane.multiSelect = false
                         if !failed.isEmpty {
-                            alertTitle = "일부를 옮기지 못했습니다"
-                            alertMsg = "\(done)개 완료, \(failed.count)개 실패\n" + failed.prefix(5).joined(separator: "\n")
+                            alertTitle = L("일부를 옮기지 못했습니다")
+                            alertMsg = LF("{0}개 완료, {1}개 실패\n", done, failed.count) + failed.prefix(5).joined(separator: "\n")
                             showAlert = true
                         } else if cancelled {
                             // 쓰다 만 것은 지웠다. 끝난 것은 남아 있다는 것을 알려야
                             // 반쯤 된 상태를 찾아 헤매지 않는다.
-                            alertTitle = "취소했습니다"
-                            alertMsg = "\(done)개는 끝났고, 하던 것은 지웠습니다."
+                            alertTitle = L("취소했습니다")
+                            alertMsg = LF("{0}개는 끝났고, 하던 것은 지웠습니다.", done)
                             showAlert = true
                         }
                      })
@@ -2211,27 +2211,27 @@ struct ContentView: View {
         guard transfer.bytesTotal > 0 else { return count }
         let done = ByteCountFormatter.string(fromByteCount: transfer.bytesDone, countStyle: .file)
         let all = ByteCountFormatter.string(fromByteCount: transfer.bytesTotal, countStyle: .file)
-        return done + " / " + all + " · " + count + "개"
+        return done + " / " + all + " · " + count + L("개")
     }
 
     /// 마지막 이동·이름 변경을 되돌린다.
     func undoLastAction() {
         guard transfer.canUndo else {
-            alertTitle = "되돌릴 작업이 없습니다"
-            alertMsg = "이동과 이름 바꾸기만 되돌릴 수 있습니다."
+            alertTitle = L("되돌릴 작업이 없습니다")
+            alertMsg = L("이동과 이름 바꾸기만 되돌릴 수 있습니다.")
             showAlert = true
             return
         }
         transfer.undoLast(onBlocked: { reason in
-            alertTitle = "되돌리기가 차단되었습니다"
+            alertTitle = L("되돌리기가 차단되었습니다")
             alertMsg = reason
             showAlert = true
         }, onFinish: { ok in
             leftPane.updateFiles()
             rightPane.updateFiles()
             if !ok {
-                alertTitle = "되돌리지 못했습니다"
-                alertMsg = "원래 자리에 같은 이름이 있거나 경로가 사라졌습니다."
+                alertTitle = L("되돌리지 못했습니다")
+                alertMsg = L("원래 자리에 같은 이름이 있거나 경로가 사라졌습니다.")
                 showAlert = true
             }
         })

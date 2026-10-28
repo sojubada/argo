@@ -132,7 +132,7 @@ struct CompressFileView: View {
                 let dest = directory + destPath
                 let comp = selectedCompType
                 let tarComp = selectedTarCompType
-                runner.run("압축하는 중", work: {
+                runner.run(L("압축하는 중"), work: {
                     if multiple {
                         try Compression.compressFiles(listOfFiles: names, directory: dir, destination: dest, compType: comp, tarCompType: tarComp)
                     } else {
@@ -211,7 +211,7 @@ struct UncompressFileView: View {
                 // 뒷줄에서 돈다. 공간 검사는 FileGuard 가 헤더를 훑으며 이미 한다.
                 let archive = filePath + fileName
                 let dest = extractFilePath
-                runner.run("압축을 푸는 중", work: {
+                runner.run(L("압축을 푸는 중"), work: {
                     try Compression.uncompressFile(filePath: archive,
                                                    destination: dest,
                                                    compType: Compression.archiveType(filePath: archive))

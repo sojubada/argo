@@ -379,7 +379,7 @@ class RootHelperActs {
                 OperationLog.record(action: label, path: path, destination: destination)
                 return true
             }
-            lastError = "작업이 끝났지만 결과를 확인하지 못했습니다."
+            lastError = L("작업이 끝났지만 결과를 확인하지 못했습니다.")
         } catch {
             lastError = error.localizedDescription
         }
@@ -401,7 +401,7 @@ class RootHelperActs {
     @discardableResult
     class func rm(_ filePath: String) -> Bool {
         guard checkAuth(action: "rm", paths: [filePath]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
         return attempt("DELETE", path: filePath, helperArgs: ["rm", filePath],
                        verify: { !exists(filePath) }) {
@@ -414,10 +414,10 @@ class RootHelperActs {
     @discardableResult
     class func mv(_ filePath: String, _ fileDest: String) -> Bool {
         guard checkAuth(action: "mv", paths: [filePath, fileDest]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
         if exists(fileDest), lexical(fileDest) != lexical(filePath) {
-            lastError = "같은 이름이 이미 있습니다."; return false
+            lastError = L("같은 이름이 이미 있습니다."); return false
         }
         return attempt("MOVE", path: filePath, destination: fileDest,
                        helperArgs: ["mv", filePath, fileDest],
@@ -429,10 +429,10 @@ class RootHelperActs {
     @discardableResult
     class func cp(_ filePath: String, _ fileDest: String) -> Bool {
         guard checkAuth(action: "cp", paths: [filePath, fileDest]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
         if exists(fileDest) {
-            lastError = "같은 이름이 이미 있습니다."; return false
+            lastError = L("같은 이름이 이미 있습니다."); return false
         }
         return attempt("COPY", path: filePath, destination: fileDest,
                        helperArgs: ["cp", filePath, fileDest],
@@ -446,9 +446,9 @@ class RootHelperActs {
     @discardableResult
     class func touch(_ filePath: String) -> Bool {
         guard checkAuth(action: "touch", paths: [filePath]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
-        if exists(filePath) { lastError = "같은 이름이 이미 있습니다."; return false }
+        if exists(filePath) { lastError = L("같은 이름이 이미 있습니다."); return false }
         return attempt("TOUCH", path: filePath, helperArgs: ["tf", filePath],
                        verify: { exists(filePath) }) {
             guard fileManager.createFile(atPath: filePath, contents: nil) else {
@@ -460,12 +460,12 @@ class RootHelperActs {
     @discardableResult
     class func mkdir(_ filePath: String) -> Bool {
         guard checkAuth(action: "mkdir", paths: [filePath]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
         var isDir: ObjCBool = false
         if fileManager.fileExists(atPath: filePath, isDirectory: &isDir) {
             if isDir.boolValue { return true }
-            lastError = "같은 이름의 파일이 있습니다."; return false
+            lastError = L("같은 이름의 파일이 있습니다."); return false
         }
         return attempt("MKDIR", path: filePath, helperArgs: ["td", filePath],
                        verify: { fileManager.fileExists(atPath: filePath) }) {
@@ -478,9 +478,9 @@ class RootHelperActs {
     @discardableResult
     class func ln(_ filePath: String, _ fileDest: String) -> Bool {
         guard checkAuth(action: "ln", paths: [filePath, fileDest]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
-        if exists(filePath) { lastError = "같은 이름이 이미 있습니다."; return false }
+        if exists(filePath) { lastError = L("같은 이름이 이미 있습니다."); return false }
         return attempt("SYMLINK", path: filePath, destination: fileDest,
                        helperArgs: ["ts", filePath, fileDest],
                        verify: { exists(filePath) }) {
@@ -492,7 +492,7 @@ class RootHelperActs {
     @discardableResult
     class func chmod(_ filePath: String, _ perms: Int) -> Bool {
         guard checkAuth(action: "chmod", paths: [filePath]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
         return attempt("CHMOD", path: "\(filePath) to \(perms)",
                        helperArgs: ["ch", filePath, String(perms)],
@@ -513,7 +513,7 @@ class RootHelperActs {
     @discardableResult
     class func mvtemp(_ filePath: String) -> Bool {
         guard checkAuth(action: "mvtemp", paths: [filePath]) else {
-            lastError = "안전장치가 막았습니다."; return false
+            lastError = L("안전장치가 막았습니다."); return false
         }
         defer { try? fileManager.removeItem(atPath: tempPath) }
         let ok = attempt("REPLACE", path: filePath,
@@ -651,11 +651,11 @@ struct NotJailbrokenView: View {
 /// 가리키게 된다.
 func invalidFileNameReason(_ raw: String) -> String? {
     let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    if name.isEmpty { return "이름이 비어 있습니다." }
-    if name == "." || name == ".." { return "쓸 수 없는 이름입니다." }
-    if name.contains("/") { return "이름에 / 를 쓸 수 없습니다." }
-    if name.contains("\u{0}") { return "쓸 수 없는 글자가 들어 있습니다." }
-    if name.utf8.count > 255 { return "이름이 너무 깁니다." }
+    if name.isEmpty { return L("이름이 비어 있습니다.") }
+    if name == "." || name == ".." { return L("쓸 수 없는 이름입니다.") }
+    if name.contains("/") { return L("이름에 / 를 쓸 수 없습니다.") }
+    if name.contains("\u{0}") { return L("쓸 수 없는 글자가 들어 있습니다.") }
+    if name.utf8.count > 255 { return L("이름이 너무 깁니다.") }
     return nil
 }
 
@@ -682,7 +682,7 @@ func runFileBatch(names: [String],
     }
     var isDir: ObjCBool = false
     guard fileManager.fileExists(atPath: dest, isDirectory: &isDir), isDir.boolValue else {
-        return (names.count, "받을 폴더가 없습니다: " + dest)
+        return (names.count, L("받을 폴더가 없습니다: ") + dest)
     }
 
     var failed = 0
@@ -692,7 +692,7 @@ func runFileBatch(names: [String],
         let ok = op(trimSlash(source + name), trimSlash(dest + target))
         if !ok {
             failed += 1
-            if reason == nil { reason = name + " — " + (RootHelperActs.lastError ?? "알 수 없는 이유") }
+            if reason == nil { reason = name + " — " + (RootHelperActs.lastError ?? L("알 수 없는 이유")) }
         }
     }
     return (failed, reason)

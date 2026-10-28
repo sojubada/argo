@@ -54,14 +54,14 @@ enum FileGuard {
             let itemName = (path as NSString).lastPathComponent
 
             if risk == .forbidden {
-                let err = GuardError.forbidden("시스템 폴더 — 쓰기가 차단됩니다: '\(itemName)'")
+                let err = GuardError.forbidden(LF("시스템 폴더 — 쓰기가 차단됩니다: '{0}'", itemName))
                 if notifyOnBlock {
                     reportBlocked(err.localizedDescription)
                 }
                 return .failure(err)
             }
             if safeMode && risk == .caution {
-                let err = GuardError.safeModeActive("안전 모드 — 안전 구역 밖의 쓰기가 차단됩니다: '\(itemName)'")
+                let err = GuardError.safeModeActive(LF("안전 모드 — 안전 구역 밖의 쓰기가 차단됩니다: '{0}'", itemName))
                 if notifyOnBlock {
                     reportBlocked(err.localizedDescription)
                 }
@@ -103,7 +103,7 @@ enum FileGuard {
             if count == 1 {
                 finalMessage = first
             } else {
-                finalMessage = "\(count)개 작업이 차단되었습니다.\n(\(first))"
+                finalMessage = LF("{0}개 작업이 차단되었습니다.\n({1})", count, first)
             }
             NotificationCenter.default.post(name: .fileGuardBlocked, object: finalMessage)
         }
@@ -144,11 +144,11 @@ enum FileGuard {
         let destPrefix = resolvedDest.hasSuffix("/") ? resolvedDest : (resolvedDest + "/")
 
         guard let cPath = archivePath.cString(using: .utf8) else {
-            return refuseUncheckable("경로를 읽을 수 없습니다")
+            return refuseUncheckable(L("경로를 읽을 수 없습니다"))
         }
 
         guard let archive = archive_read_new() else {
-            return refuseUncheckable("검사기를 준비할 수 없습니다")
+            return refuseUncheckable(L("검사기를 준비할 수 없습니다"))
         }
         defer {
             archive_read_close(archive)
@@ -159,7 +159,7 @@ enum FileGuard {
         archive_read_support_filter_all(archive)
 
         guard archive_read_open_filename(archive, cPath, 10240) == ARCHIVE_OK else {
-            return refuseUncheckable("압축 파일을 열 수 없습니다")
+            return refuseUncheckable(L("압축 파일을 열 수 없습니다"))
         }
 
         // 헤더를 어차피 훑으므로 풀었을 때의 크기를 같이 센다 — 공짜다.
@@ -178,7 +178,7 @@ enum FileGuard {
 
                 // 1. 절대 경로 항목 차단
                 if entryName.hasPrefix("/") {
-                    let msg = "압축 해제 차단 — 절대 경로 항목이 포함되어 있습니다: \(entryName)"
+                    let msg = LF("압축 해제 차단 — 절대 경로 항목이 포함되어 있습니다: {0}", entryName)
                     reportBlocked(msg)
                     return .failure(.forbidden(msg))
                 }
@@ -189,7 +189,7 @@ enum FileGuard {
                 let standardizedWithSlash = standardized.hasSuffix("/") ? standardized : (standardized + "/")
 
                 if standardized != resolvedDest && !standardizedWithSlash.hasPrefix(destPrefix) {
-                    let msg = "압축 해제 차단 (Zip Slip) — 대상 폴더 밖으로 벗어나는 경로입니다: \(entryName)"
+                    let msg = LF("압축 해제 차단 (Zip Slip) — 대상 폴더 밖으로 벗어나는 경로입니다: {0}", entryName)
                     reportBlocked(msg)
                     return .failure(.forbidden(msg))
                 }
@@ -198,15 +198,15 @@ enum FileGuard {
                 //    심볼릭 링크(AE_IFLNK)와 하드링크는 libarchive에서 서로 다른 필드로 들어오므로
                 //    둘 다 봐야 한다. 하드링크만 빠뜨리면 같은 방법으로 빠져나갈 수 있다.
                 let links: [(String, UnsafePointer<CChar>?)] = [
-                    ("심볼릭 링크", archive_entry_symlink(currentEntry)),
-                    ("하드링크", archive_entry_hardlink(currentEntry))
+                    (L("심볼릭 링크"), archive_entry_symlink(currentEntry)),
+                    (L("하드링크"), archive_entry_hardlink(currentEntry))
                 ]
                 for (kind, ptr) in links {
                     guard let ptr = ptr else { continue }
                     let linkTarget = String(cString: ptr)
                     if linkTarget.isEmpty { continue }
                     if linkTarget.hasPrefix("/") {
-                        let msg = "압축 해제 차단 — 외부 절대 경로를 가리키는 \(kind)가 있습니다: \(entryName) -> \(linkTarget)"
+                        let msg = LF("압축 해제 차단 — 외부 절대 경로를 가리키는 {0}가 있습니다: {1} -> {2}", kind, entryName, linkTarget)
                         reportBlocked(msg)
                         return .failure(.forbidden(msg))
                     }
@@ -214,7 +214,7 @@ enum FileGuard {
                     let resolvedTarget = ((linkParent as NSString).appendingPathComponent(linkTarget) as NSString).standardizingPath
                     let resolvedTargetSlash = resolvedTarget.hasSuffix("/") ? resolvedTarget : (resolvedTarget + "/")
                     if resolvedTarget != resolvedDest && !resolvedTargetSlash.hasPrefix(destPrefix) {
-                        let msg = "압축 해제 차단 — 대상 폴더 밖을 가리키는 \(kind)가 있습니다: \(entryName) -> \(linkTarget)"
+                        let msg = LF("압축 해제 차단 — 대상 폴더 밖을 가리키는 {0}가 있습니다: {1} -> {2}", kind, entryName, linkTarget)
                         reportBlocked(msg)
                         return .failure(.forbidden(msg))
                     }
@@ -231,14 +231,14 @@ enum FileGuard {
         // ARCHIVE_EOF(1)로 끝났을 때만 '전부 검사했다'고 말할 수 있다.
         // ARCHIVE_WARN(-20)/ARCHIVE_FATAL(-30)로 끊기면 뒤쪽 항목은 보지 못한 것이므로 막는다.
         guard readStatus == ARCHIVE_EOF else {
-            return refuseUncheckable("압축 파일이 손상되어 검사를 끝내지 못했습니다")
+            return refuseUncheckable(L("압축 파일이 손상되어 검사를 끝내지 못했습니다"))
         }
 
         // 공간이 모자라면 시작하지 않는다. 반쯤 풀린 상태가 가장 수습하기 어렵다.
         if totalUncompressed > 0 {
             if case .failure(let err) = checkFreeSpace(needed: totalUncompressed,
                                                        at: resolvedDest,
-                                                       what: "압축을 풀기") {
+                                                       what: L("압축을 풀기")) {
                 return .failure(err)
             }
         }
@@ -266,8 +266,8 @@ enum FileGuard {
 
         let f = ByteCountFormatter()
         f.countStyle = .file
-        let msg = "\(what)에 약 \(f.string(fromByteCount: withMargin)) 가 필요하지만 "
-                + "남은 공간은 \(f.string(fromByteCount: free)) 입니다."
+        let msg = LF("{0}에 약 {1} 가 필요하지만 ", what, f.string(fromByteCount: withMargin))
+                + LF("남은 공간은 {0} 입니다.", f.string(fromByteCount: free))
         reportBlocked(msg)
         return .failure(.notEnoughSpace(msg))
     }
@@ -286,7 +286,7 @@ enum FileGuard {
         guard total > 0 else { return .success(()) }
 
         let parent = (destination as NSString).deletingLastPathComponent
-        return checkFreeSpace(needed: total, at: parent, what: "압축하기")
+        return checkFreeSpace(needed: total, at: parent, what: L("압축하기"))
     }
 
     /// 파일이면 크기, 폴더면 아래 전부의 합.
@@ -316,7 +316,7 @@ enum FileGuard {
     /// 검사는 libarchive, 해제는 minizip이라 둘의 해석이 갈리는 파일 하나로 검사를 통째로
     /// 우회할 수 있다. 보안 검사는 실패하면 닫혀야 한다.
     private static func refuseUncheckable(_ reason: String) -> Result<Void, GuardError> {
-        let msg = "압축 해제 차단 — \(reason). 검사할 수 없는 압축 파일은 풀지 않습니다."
+        let msg = LF("압축 해제 차단 — {0}. 검사할 수 없는 압축 파일은 풀지 않습니다.", reason)
         reportBlocked(msg)
         return .failure(.forbidden(msg))
     }

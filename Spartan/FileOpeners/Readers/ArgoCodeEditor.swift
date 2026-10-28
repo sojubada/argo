@@ -333,10 +333,10 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         language = ArgoTextKind.language(for: filePath)
         let size = ((try? FileManager.default.attributesOfItem(atPath: filePath)[.size]) as? NSNumber)?.intValue ?? 0
         if size > Self.maxEditableBytes {
-            readOnlyReason = "파일이 커서(\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))) 편집할 수 없습니다. 읽기 화면을 쓰십시오."
+            readOnlyReason = LF("파일이 커서({0}) 편집할 수 없습니다. 읽기 화면을 쓰십시오.", ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
         }
         guard let data = FileManager.default.contents(atPath: filePath) else {
-            readOnlyReason = "파일을 열 수 없습니다."
+            readOnlyReason = L("파일을 열 수 없습니다.")
             setText("")
             return
         }
@@ -346,7 +346,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
             codec = decoded.1
             setText(decoded.0)
         } else {
-            readOnlyReason = "글자로 읽을 수 없는 파일입니다."
+            readOnlyReason = L("글자로 읽을 수 없는 파일입니다.")
             setText("")
         }
         indentUnit = ArgoTextKind.indentUnit(for: storage.string, language: language)
@@ -774,7 +774,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
                 return (open + " " + joined + " " + close).components(separatedBy: "\n")
             }
         } else {
-            flash("이 형식에는 주석이 없습니다")
+            flash(L("이 형식에는 주석이 없습니다"))
         }
     }
 
@@ -818,7 +818,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     private func undo() {
         endComposition()
-        guard let e = undoStack.popLast() else { flash("되돌릴 것이 없습니다"); return }
+        guard let e = undoStack.popLast() else { flash(L("되돌릴 것이 없습니다")); return }
         apply(range: e.range, text: e.oldText)
         redoStack.append(e)
         cursor = e.cursorBefore
@@ -829,7 +829,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     private func redo() {
         endComposition()
-        guard let e = redoStack.popLast() else { flash("다시 할 것이 없습니다"); return }
+        guard let e = redoStack.popLast() else { flash(L("다시 할 것이 없습니다")); return }
         let r = NSRange(location: e.range.location, length: (e.oldText as NSString).length)
         apply(range: r, text: e.newText)
         undoStack.append(e)
@@ -865,11 +865,11 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
             ArgoTextClipboard.isWholeLine = true
             if cut { deleteLines() }
         }
-        flash(cut ? "잘라냈습니다" : "복사했습니다")
+        flash(cut ? L("잘라냈습니다") : L("복사했습니다"))
     }
 
     private func paste() {
-        guard let t = ArgoTextClipboard.text, !t.isEmpty else { flash("붙일 것이 없습니다"); return }
+        guard let t = ArgoTextClipboard.text, !t.isEmpty else { flash(L("붙일 것이 없습니다")); return }
         if ArgoTextClipboard.isWholeLine && selection == nil {
             let start = lineRange(lineOf(cursor)).location
             let col = cursor - start
@@ -912,7 +912,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
                             range: NSRange(location: 0, length: s.length))
             }
         }
-        guard r.location != NSNotFound else { flash("‘\(needle)’ 없음"); return }
+        guard r.location != NSNotFound else { flash(LF("‘{0}’ 없음", needle)); return }
 
         // 모든 자리를 옅게 칠해 둔다. 몇 개인지도 알린다.
         clearFindHits()
@@ -939,9 +939,9 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         let s = ns.mutableCopy() as! NSMutableString
         let count = s.replaceOccurrences(of: needle, with: replacement, options: .caseInsensitive,
                                          range: NSRange(location: 0, length: s.length))
-        guard count > 0 else { flash("‘\(needle)’ 없음"); return }
+        guard count > 0 else { flash(LF("‘{0}’ 없음", needle)); return }
         replace(NSRange(location: 0, length: ns.length), with: s as String, cursorAfter: min(cursor, s.length))
-        flash("\(count)군데 바꿨습니다")
+        flash(LF("{0}군데 바꿨습니다", count))
     }
 
     // MARK: 입력 창 (한글은 여기서)
@@ -962,15 +962,15 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
                 run(alert?.textFields?.map { $0.text ?? "" } ?? [])
             })
         }
-        alert.addAction(UIAlertAction(title: "취소", style: .cancel))
+        alert.addAction(UIAlertAction(title: L("취소"), style: .cancel))
         present(alert, animated: true)
     }
 
     @objc private func insertTextPrompt() {
         endComposition()
-        ask(title: "글 넣기", message: "커서 자리에 넣습니다. 한글도 여기서 칠 수 있습니다.",
-            fields: [("넣을 글", "")],
-            actions: [("넣기", { [weak self] v in
+        ask(title: L("글 넣기"), message: L("커서 자리에 넣습니다. 한글도 여기서 칠 수 있습니다."),
+            fields: [(L("넣을 글"), "")],
+            actions: [(L("넣기"), { [weak self] v in
                 guard let self, let t = v.first, !t.isEmpty else { return }
                 self.insert(t, coalesce: false)
             })])
@@ -980,8 +980,8 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         endComposition()
         let line = lineOf(cursor)
         let r = lineRange(line)
-        ask(title: "\(line + 1)번 줄 고치기", fields: [("줄 내용", ns.substring(with: r))],
-            actions: [("바꾸기", { [weak self] v in
+        ask(title: LF("{0}번 줄 고치기", line + 1), fields: [(L("줄 내용"), ns.substring(with: r))],
+            actions: [(L("바꾸기"), { [weak self] v in
                 guard let self, let t = v.first else { return }
                 self.replace(r, with: t)
             })])
@@ -989,11 +989,11 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     @objc private func findPrompt() {
         endComposition()
-        ask(title: "찾기 · 바꾸기", message: "대소문자는 가리지 않습니다. 다음은 ⌘G, 이전은 ⌘⇧G.",
-            fields: [("찾을 글", lastFind), ("바꿀 글 (모두 바꾸기만)", "")],
+        ask(title: L("찾기 · 바꾸기"), message: L("대소문자는 가리지 않습니다. 다음은 ⌘G, 이전은 ⌘⇧G."),
+            fields: [(L("찾을 글"), lastFind), (L("바꿀 글 (모두 바꾸기만)"), "")],
             actions: [
-                ("찾기", { [weak self] v in self?.find(v.first ?? "") }),
-                ("모두 바꾸기", { [weak self] v in
+                (L("찾기"), { [weak self] v in self?.find(v.first ?? "") }),
+                (L("모두 바꾸기"), { [weak self] v in
                     guard v.count == 2 else { return }
                     self?.replaceAll(v[0], with: v[1])
                 })
@@ -1002,8 +1002,8 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     @objc private func gotoLinePrompt() {
         endComposition()
-        ask(title: "줄로 가기", message: "1 ~ \(lineStarts.count)", fields: [("줄 번호", "")],
-            actions: [("가기", { [weak self] v in
+        ask(title: L("줄로 가기"), message: "1 ~ \(lineStarts.count)", fields: [(L("줄 번호"), "")],
+            actions: [(L("가기"), { [weak self] v in
                 guard let self, let n = Int((v.first ?? "").trimmingCharacters(in: .whitespaces)) else { return }
                 let line = max(0, min(self.lineStarts.count - 1, n - 1))
                 self.moveCursor(to: self.lineRange(line).location, extend: false)
@@ -1020,20 +1020,20 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         endComposition()
         if let why = readOnlyReason { flash(why); return }
         if case .failure(let err) = FileGuard.authorize(action: "write_text", paths: [filePath], notifyOnBlock: false) {
-            alert("저장이 막혔습니다", err.localizedDescription)
+            alert(L("저장이 막혔습니다"), err.localizedDescription)
             return
         }
         guard let data = codec.encode(storage.string) else {
             // 원래 인코딩에 없는 글자(예: Latin-1 파일에 한글)가 들어갔다.
-            let a = UIAlertController(title: "\(codec.label) 로는 저장할 수 없습니다",
-                                      message: "이 인코딩에 없는 글자가 들어 있습니다. UTF-8 로 바꿔 저장할까요?",
+            let a = UIAlertController(title: LF("{0} 로는 저장할 수 없습니다", codec.label),
+                                      message: L("이 인코딩에 없는 글자가 들어 있습니다. UTF-8 로 바꿔 저장할까요?"),
                                       preferredStyle: .alert)
-            a.addAction(UIAlertAction(title: "UTF-8 로 저장", style: .default) { [weak self] _ in
+            a.addAction(UIAlertAction(title: L("UTF-8 로 저장"), style: .default) { [weak self] _ in
                 self?.codec.encoding = .utf8
                 self?.updateStatus()
                 self?.save(then: then)
             })
-            a.addAction(UIAlertAction(title: "취소", style: .cancel))
+            a.addAction(UIAlertAction(title: L("취소"), style: .cancel))
             present(a, animated: true)
             return
         }
@@ -1058,22 +1058,22 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         if ok {
             OperationLog.record(action: "EDIT_TEXT", path: filePath)
             dirty = false
-            flash("저장했습니다")
+            flash(L("저장했습니다"))
             onSaved?()
             then?()
         } else {
-            alert("저장하지 못했습니다", "원본은 그대로입니다.\n" + (why ?? ""))
+            alert(L("저장하지 못했습니다"), L("원본은 그대로입니다.\n") + (why ?? ""))
         }
     }
 
     @objc private func closeRequested() {
         guard dirty else { close(); return }
-        let a = UIAlertController(title: "저장하지 않은 고침이 있습니다", message: nil, preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "저장하고 닫기", style: .default) { [weak self] _ in
+        let a = UIAlertController(title: L("저장하지 않은 고침이 있습니다"), message: nil, preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: L("저장하고 닫기"), style: .default) { [weak self] _ in
             self?.save(then: { self?.close() })
         })
-        a.addAction(UIAlertAction(title: "버리고 닫기", style: .destructive) { [weak self] _ in self?.close() })
-        a.addAction(UIAlertAction(title: "계속 편집", style: .cancel))
+        a.addAction(UIAlertAction(title: L("버리고 닫기"), style: .destructive) { [weak self] _ in self?.close() })
+        a.addAction(UIAlertAction(title: L("계속 편집"), style: .cancel))
         present(a, animated: true)
     }
 
@@ -1087,7 +1087,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     private func alert(_ title: String, _ message: String) {
         let a = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "확인", style: .default))
+        a.addAction(UIAlertAction(title: L("확인"), style: .default))
         present(a, animated: true)
     }
 
@@ -1107,17 +1107,17 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     private func updateTitle() {
         let name = (filePath as NSString).lastPathComponent
-        titleLabel.text = (dirty ? "● " : "") + name + (readOnlyReason != nil ? "  (읽기만)" : "")
+        titleLabel.text = (dirty ? "● " : "") + name + (readOnlyReason != nil ? L("  (읽기만)") : "")
     }
 
     private func updateStatus() {
         let line = lineOf(cursor)
         let col = cursor - lineStarts[line] + 1
-        var parts = [koreanInput ? "한" : "EN", "\(line + 1):\(col)"]
-        if let sel = selection { parts.append("\(sel.length)자 선택") }
-        parts.append(language == .plain ? "텍스트" : language.rawValue)
+        var parts = [koreanInput ? L("한") : "EN", "\(line + 1):\(col)"]
+        if let sel = selection { parts.append(LF("{0}자 선택", sel.length)) }
+        parts.append(language == .plain ? L("텍스트") : language.rawValue)
         parts.append(codec.label)
-        parts.append(indentUnit == "\t" ? "탭" : "공백 \(indentUnit.count)")
+        parts.append(indentUnit == "\t" ? L("탭") : LF("공백 {0}", indentUnit.count))
         if let f = flashText { parts.insert(f, at: 0) }
         statusLabel.text = parts.joined(separator: "  ·  ")
     }
@@ -1126,16 +1126,16 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
 
     private func buildToolbar() {
         let items: [(String, Selector)] = [
-            ("저장", #selector(saveTapped)),
-            ("글 넣기", #selector(insertTextPrompt)),
-            ("줄 고치기", #selector(editLinePrompt)),
-            ("찾기", #selector(findPrompt)),
-            ("줄로 가기", #selector(gotoLinePrompt)),
-            ("되돌리기", #selector(undoTapped)),
-            ("주석", #selector(commentTapped)),
-            ("글자 크기", #selector(cycleFontSize)),
-            ("단축키", #selector(showKeys)),
-            ("닫기", #selector(closeRequested)),
+            (L("저장"), #selector(saveTapped)),
+            (L("글 넣기"), #selector(insertTextPrompt)),
+            (L("줄 고치기"), #selector(editLinePrompt)),
+            (L("찾기"), #selector(findPrompt)),
+            (L("줄로 가기"), #selector(gotoLinePrompt)),
+            (L("되돌리기"), #selector(undoTapped)),
+            (L("주석"), #selector(commentTapped)),
+            (L("글자 크기"), #selector(cycleFontSize)),
+            (L("단축키"), #selector(showKeys)),
+            (L("닫기"), #selector(closeRequested)),
         ]
         let buttons: [UIView] = items.map { title, sel in
             let b = ArgoBarButton.make(title: title)
@@ -1177,7 +1177,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func showKeys() {
-        alert("편집기 단축키", """
+        alert(L("편집기 단축키"), L("""
         ⌘S 저장 · ⌘Z 되돌리기 · ⌘⇧Z 다시 하기 · Esc 닫기
         ⌘F 찾기·바꾸기 · ⌘G / ⌘⇧G 다음·이전 · ⌘L 줄로 가기
         ⌘A 전체 · ⌘C ⌘X ⌘V (선택 없으면 줄 단위)
@@ -1190,7 +1190,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
         ⌘E 글 넣기 · ⌘⇧E 줄 고치기 · ⌘+ ⌘- 글자 크기
 
         리모컨: 방향키 커서 · 가운데 도구 모음 · 재생 글 넣기 · 메뉴 닫기
-        """)
+        """))
     }
 
     private func setToolbar(interactive: Bool) {
@@ -1434,7 +1434,7 @@ final class ArgoCodeEditorController: UIViewController, UITextViewDelegate {
     private func toggleInputLanguage() {
         endComposition()
         koreanInput.toggle()
-        flash(koreanInput ? "한글 입력" : "영문 입력")
+        flash(koreanInput ? L("한글 입력") : L("영문 입력"))
     }
 
     private func composeJamo(_ jamo: UInt16) {

@@ -23,8 +23,8 @@ enum ClipboardMode {
 
     var label: String {
         switch self {
-        case .copy: return "복사"
-        case .move: return "이동"
+        case .copy: return L("복사")
+        case .move: return L("이동")
         }
     }
 }
@@ -43,7 +43,7 @@ final class ArgoClipboard: ObservableObject {
         guard !isEmpty else { return "" }
         let name = (paths[0] as NSString).lastPathComponent
         if paths.count == 1 { return "\(name) \(mode.label)" }
-        return "\(name) 외 \(paths.count - 1)개 \(mode.label)"
+        return LF("{0} 외 {1}개 {2}", name, paths.count - 1, mode.label)
     }
 
     func take(_ newPaths: [String], mode: ClipboardMode) {

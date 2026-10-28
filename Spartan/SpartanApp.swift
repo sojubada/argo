@@ -40,6 +40,9 @@ struct SpartanApp: App {
 	//someday... over the rainbow...
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // 화면 언어를 가장 먼저 정한다. 처음 켜면 영어다.
+        ArgoLocale.install()
+
         
         if UserDefaults.settings.string(forKey: "tvapothecary") == nil {
             UserDefaults.settings.set(randomString(length: 24), forKey: "tvapothecary")

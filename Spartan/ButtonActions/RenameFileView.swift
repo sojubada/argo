@@ -58,7 +58,7 @@ struct RenameFileView: View {
             onRenamed?(from, to)
             isPresented = false
         } else {
-            error = "이름을 바꾸지 못했습니다. " + (RootHelperActs.lastError ?? "")
+            error = L("이름을 바꾸지 못했습니다. ") + (RootHelperActs.lastError ?? "")
         }
     }
 }

@@ -69,7 +69,7 @@ final class AirDropState: ObservableObject {
             if !success {
                 // 모드가 2(모두)로 올라오지 않았습니다. 켜진 것처럼 보이게 두면
                 // 아이폰에서 안 보이는 이유를 알 길이 없습니다.
-                self.lastFailure = "AirDrop 을 켜지 못했습니다 (모드 \(mode)). 다시 시도해 보십시오."
+                self.lastFailure = LF("AirDrop 을 켜지 못했습니다 (모드 {0}). 다시 시도해 보십시오.", mode)
             }
         }
     }
@@ -77,6 +77,6 @@ final class AirDropState: ObservableObject {
     /// 툴바에 보여 줄 짧은 글. 켜져 있을 때만 씁니다.
     var countdownLabel: String {
         guard isReceiving else { return "" }
-        return "\(Int(remaining.rounded()))초"
+        return LF("{0}초", Int(remaining.rounded()))
     }
 }

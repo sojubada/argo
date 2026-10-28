@@ -310,7 +310,7 @@ final class TrashManager: ObservableObject {
 
     func restore(_ entry: TrashEntry) -> TrashRestoreResult {
         if entry.isLegacy || entry.originalPath.isEmpty {
-            return .failed("원래 위치를 알 수 없습니다.")
+            return .failed(L("원래 위치를 알 수 없습니다."))
         }
 
         let sourcePath = entry.storedPath
@@ -319,7 +319,7 @@ final class TrashManager: ObservableObject {
             currentIndexed.removeAll { $0.id == entry.id }
             saveIndexedEntries(currentIndexed)
             reload()
-            return .failed("휴지통에 해당 항목이 없습니다.")
+            return .failed(L("휴지통에 해당 항목이 없습니다."))
         }
 
         let targetOriginal = normalizePath(entry.originalPath)
@@ -343,7 +343,7 @@ final class TrashManager: ObservableObject {
         }
 
         guard robustMove(from: sourcePath, to: finalPath) else {
-            return .failed("복원 이동 실패: \(finalPath)")
+            return .failed(LF("복원 이동 실패: {0}", finalPath))
         }
 
         let uuidDir = "\(Self.itemsRootPath)/\(entry.id)"

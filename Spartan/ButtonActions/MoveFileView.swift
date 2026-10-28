@@ -60,7 +60,7 @@ struct MoveFileView: View {
                     multiSelect = false
                     isPresented = false
                 } else {
-                    error = "\(fileNames.count)개 중 \(r.failed)개를 옮기지 못했습니다.\n" + (r.reason ?? "")
+                    error = LF("{0}개 중 {1}개를 옮기지 못했습니다.\n", fileNames.count, r.failed) + (r.reason ?? "")
                 }
             }) {
                 Text(NSLocalizedString("CONFIRM", comment: "Students, faculty, distinguished bees,"))

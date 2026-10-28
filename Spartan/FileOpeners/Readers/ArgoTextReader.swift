@@ -151,7 +151,7 @@ final class ArgoTextReaderController: UIViewController {
     private func loadFile() {
         let url = URL(fileURLWithPath: filePath)
         guard let handle = try? FileHandle(forReadingFrom: url) else {
-            apply(text: "파일을 열 수 없습니다.\n\(filePath)")
+            apply(text: LF("파일을 열 수 없습니다.\n{0}", filePath))
             return
         }
         defer { try? handle.close() }
@@ -173,7 +173,7 @@ final class ArgoTextReaderController: UIViewController {
         if let text = decode(data) {
             apply(text: text)
         } else {
-            apply(text: "글자로 읽을 수 없는 파일입니다. 헥스 편집기로 열어 보십시오.")
+            apply(text: L("글자로 읽을 수 없는 파일입니다. 헥스 편집기로 열어 보십시오."))
         }
     }
 
@@ -208,7 +208,7 @@ final class ArgoTextReaderController: UIViewController {
     private func apply(text: String) {
         var body = text
         if truncated {
-            body += "\n\n--- 여기까지만 읽었습니다 (8MB 상한) ---"
+            body += L("\n\n--- 여기까지만 읽었습니다 (8MB 상한) ---")
         }
         lineCount = body.reduce(into: 1) { n, c in if c == "\n" { n += 1 } }
         rawText = body
@@ -226,7 +226,7 @@ final class ArgoTextReaderController: UIViewController {
         } else {
             textView.attributedText = styled(rawText)
         }
-        renderToggle?.setTitle(showRendered ? "원문" : "꾸며 보기", for: .normal)
+        renderToggle?.setTitle(showRendered ? L("원문") : L("꾸며 보기"), for: .normal)
     }
 
     @objc private func toggleRendered() {
@@ -304,20 +304,20 @@ final class ArgoTextReaderController: UIViewController {
         statusLabel.font = ArgoTheme.fontMonoBody()
         statusLabel.textColor = ArgoTheme.textSecondary()
 
-        let top = ArgoBarButton.make(title: "처음")
+        let top = ArgoBarButton.make(title: L("처음"))
         top.addTarget(self, action: #selector(goTop), for: .primaryActionTriggered)
-        let bottom = ArgoBarButton.make(title: "끝")
+        let bottom = ArgoBarButton.make(title: L("끝"))
         bottom.addTarget(self, action: #selector(goBottom), for: .primaryActionTriggered)
-        let size = ArgoBarButton.make(title: "글자 크기")
+        let size = ArgoBarButton.make(title: L("글자 크기"))
         size.addTarget(self, action: #selector(cycleFontSize), for: .primaryActionTriggered)
-        let edit = ArgoBarButton.make(title: "편집")
+        let edit = ArgoBarButton.make(title: L("편집"))
         edit.addTarget(self, action: #selector(editNow), for: .primaryActionTriggered)
-        let close = ArgoBarButton.make(title: "닫기")
+        let close = ArgoBarButton.make(title: L("닫기"))
         close.addTarget(self, action: #selector(closeNow), for: .primaryActionTriggered)
 
         var items: [UIView] = [top, bottom, statusLabel, size]
         if isMarkdown {
-            let toggle = ArgoBarButton.make(title: "원문")
+            let toggle = ArgoBarButton.make(title: L("원문"))
             toggle.addTarget(self, action: #selector(toggleRendered), for: .primaryActionTriggered)
             renderToggle = toggle
             items.append(toggle)
@@ -347,7 +347,7 @@ final class ArgoTextReaderController: UIViewController {
     private func updateStatus() {
         let maxY = max(1, textView.contentSize.height - textView.bounds.height)
         let percent = Int((textView.contentOffset.y / maxY * 100).rounded())
-        statusLabel.text = "\(min(100, max(0, percent)))%  ·  \(lineCount)줄  ·  \(Int(fontSize))pt"
+        statusLabel.text = LF("{0}%  ·  {1}줄  ·  {2}pt", min(100, max(0, percent)), lineCount, Int(fontSize))
     }
 
     /// 선택 버튼. 도구 모음을 띄우고 포커스를 넘긴다.

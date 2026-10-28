@@ -64,10 +64,10 @@ struct TextView: View {
 				}) {
 					HStack(spacing: 8) {
 						Image(systemName: readOnly ? "doc.plaintext" : "pencil")
-						Text(readOnly ? "읽기 — 줄 접힘" : "편집 — 한 줄씩")
+						Text(readOnly ? L("읽기 — 줄 접힘") : L("편집 — 한 줄씩"))
 					}
 				}
-				Text("\(fileContents.count)줄")
+				Text(LF("{0}줄", fileContents.count))
 					.font(.caption)
 					.foregroundColor(.secondary)
 			}
@@ -117,7 +117,7 @@ struct TextView: View {
 							// 실패해도 원본이 남는다. 전에는 지운 뒤에 옮기다 실패하면
 							// 편집한 것도 원본도 다 없어졌다.
 							if !RootHelperActs.mvtemp(fullPath) {
-								errorString = "저장하지 못했습니다. 원본은 그대로입니다.\n" + (RootHelperActs.lastError ?? "")
+								errorString = L("저장하지 못했습니다. 원본은 그대로입니다.\n") + (RootHelperActs.lastError ?? "")
 								errorShow = true
 								return
 							}

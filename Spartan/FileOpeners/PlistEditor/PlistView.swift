@@ -133,7 +133,7 @@ struct PlistView: View {
 			}
 			// 원본을 먼저 지우지 않는다. mvtemp 가 바꿔 끼운다.
 			if !RootHelperActs.mvtemp(fullPath) {
-				errorString = "저장하지 못했습니다. 원본은 그대로입니다."
+				errorString = L("저장하지 못했습니다. 원본은 그대로입니다.")
 				errorShow = true
 			}
 		} else {

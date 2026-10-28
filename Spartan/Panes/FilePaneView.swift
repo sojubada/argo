@@ -207,10 +207,10 @@ struct FilePaneView: View {
                 // 길게 누른 의미가 없다.
                 if let menu = menu {
                     Button(action: { onFocus(); menu.copy(index) }) {
-                        Text("복사")
+                        Text(L("복사"))
                     }
                     Button(action: { onFocus(); menu.cut(index) }) {
-                        Text("잘라내기")
+                        Text(L("잘라내기"))
                     }
                     if menu.canPaste() {
                         Button(action: { onFocus(); menu.paste() }) {
@@ -219,32 +219,32 @@ struct FilePaneView: View {
                     }
                     if menu.hasOtherPane() {
                         Button(action: { onFocus(); menu.sendToOtherPane(index, false) }) {
-                            Text("반대 칸으로 복사")
+                            Text(L("반대 칸으로 복사"))
                         }
                         Button(action: { onFocus(); menu.sendToOtherPane(index, true) }) {
-                            Text("반대 칸으로 이동")
+                            Text(L("반대 칸으로 이동"))
                         }
                     }
                     if menu.canAirDrop(index) {
                         Button(action: { onFocus(); menu.airDrop(index) }) {
-                            Text("AirDrop 으로 보내기")
+                            Text(L("AirDrop 으로 보내기"))
                         }
                     }
                     Button(action: { onFocus(); menu.rename(index) }) {
-                        Text("이름 바꾸기")
+                        Text(L("이름 바꾸기"))
                     }
                     Button(action: { onFocus(); menu.info(index) }) {
-                        Text("정보")
+                        Text(L("정보"))
                     }
                     Button(action: { onFocus(); menu.delete(index) }) {
-                        Text("삭제")
+                        Text(L("삭제"))
                     }
                     Button(action: { onFocus(); menu.more(index) }) {
-                        Text("더보기…")
+                        Text(L("더보기…"))
                     }
                 }
                 // tvOS 컨텍스트 메뉴는 버튼을 눌러야 닫힌다. 다른 방법이 없다.
-                Button("닫기", action: { })
+                Button(L("닫기"), action: { })
             }
         } else {
             Button(action: {

@@ -45,10 +45,10 @@ struct UndoableAction {
     var describe: String {
         let name = items.count == 1
             ? "'" + (items[0].to as NSString).lastPathComponent + "'"
-            : "\(items.count)개"
+            : LF("{0}개", items.count)
         switch kind {
-        case .move:   return "\(name) 이동을 되돌립니다"
-        case .rename: return "\(name) 이름 변경을 되돌립니다"
+        case .move:   return LF("{0} 이동을 되돌립니다", name)
+        case .rename: return LF("{0} 이름 변경을 되돌립니다", name)
         }
     }
 }
@@ -108,7 +108,7 @@ final class PaneTransfer: ObservableObject {
              onFinish: @escaping (Int, [String], Bool) -> Void) {
 
         guard !isRunning else {
-            onBlocked("앞의 작업이 아직 끝나지 않았습니다.")
+            onBlocked(L("앞의 작업이 아직 끝나지 않았습니다."))
             return
         }
 
@@ -126,8 +126,8 @@ final class PaneTransfer: ObservableObject {
         }
         let dest = bare(destination)
         if let inside = sources.first(where: { dest == bare($0) || dest.hasPrefix(bare($0) + "/") }) {
-            onBlocked("‘\((inside as NSString).lastPathComponent)’ 을(를) 그 자신의 안으로 "
-                      + (move ? "옮길" : "복사할") + " 수 없습니다.")
+            onBlocked(LF("‘{0}’ 을(를) 그 자신의 안으로 ", (inside as NSString).lastPathComponent)
+                      + (move ? L("옮길") : L("복사할")) + L(" 수 없습니다."))
             return
         }
 
@@ -164,7 +164,7 @@ final class PaneTransfer: ObservableObject {
             // 진행률이 무엇의 몇 분의 몇인지 알 수 없다.
             var totalBytes: Int64 = 0
             if !move {
-                DispatchQueue.main.async { self.currentName = "크기를 세는 중…" }
+                DispatchQueue.main.async { self.currentName = L("크기를 세는 중…") }
                 for source in sources {
                     if self.cancelRequested { break }
                     totalBytes += PaneTransfer.treeSize(source)
@@ -425,7 +425,7 @@ final class PaneTransfer: ObservableObject {
     func undoLast(onBlocked: @escaping (String) -> Void,
                   onFinish: @escaping (Bool) -> Void) {
         guard !isRunning else {
-            onBlocked("복사·이동이 끝난 뒤에 되돌리십시오.")
+            onBlocked(L("복사·이동이 끝난 뒤에 되돌리십시오."))
             onFinish(false)
             return
         }

@@ -71,41 +71,41 @@ enum ArgoCommand: String {
     /// 이 화면이 없으면 단축키를 알 길이 자체가 없다.
     var title: String {
         switch self {
-        case .refresh:           return "새로 읽기"
-        case .goUp:              return "한 칸 위로"
-        case .goBack:            return "뒤로"
-        case .goForward:         return "앞으로"
-        case .toggleDualPane:    return "두 칸 켜고 끄기"
-        case .switchPane:        return "반대 칸으로"
-        case .clipboardCopy:     return "복사"
-        case .clipboardCut:      return "잘라내기"
-        case .clipboardPaste:    return "붙여넣기 (이 폴더에)"
-        case .copyToOtherPane:   return "반대 칸으로 바로 복사"
-        case .moveToOtherPane:   return "반대 칸으로 바로 이동"
-        case .syncPanes:         return "반대 칸을 이 폴더로"
-        case .toggleMultiSelect: return "여러 개 고르기"
-        case .selectAll:         return "전부 고르기"
-        case .deleteSelection:   return "휴지통으로 (⌦ 또는 ⌘⌦)"
-        case .rename:            return "이름 바꾸기"
-        case .fileInfo:          return "정보 보기"
-        case .newFolder:         return "새 폴더"
-        case .newFile:           return "새 파일"
-        case .compress:          return "압축"
-        case .extractArchive:    return "압축 풀기"
-        case .toggleHidden:      return "숨긴 항목 보기"
-        case .sortByName:        return "이름순"
-        case .sortBySize:        return "크기순"
-        case .sortByDate:        return "날짜순"
-        case .sortByKind:        return "종류순"
-        case .reverseSort:       return "정렬 뒤집기"
-        case .focusPathField:    return "경로로 이동"
-        case .filterList:        return "걸러보기 (이름·확장자)"
-        case .search:            return "찾기"
-        case .showHelp:          return "단축키 도움말"
-        case .goHome:            return "미디어 폴더로"
-        case .goRoot:            return "최상위로 (⌘⌫ 도 같음)"
-        case .undo:              return "되돌리기 (이동·이름)"
-        case .goBackOrUp:        return "이전 폴더로 (기록이 없으면 위로)"
+        case .refresh:           return L("새로 읽기")
+        case .goUp:              return L("한 칸 위로")
+        case .goBack:            return L("뒤로")
+        case .goForward:         return L("앞으로")
+        case .toggleDualPane:    return L("두 칸 켜고 끄기")
+        case .switchPane:        return L("반대 칸으로")
+        case .clipboardCopy:     return L("복사")
+        case .clipboardCut:      return L("잘라내기")
+        case .clipboardPaste:    return L("붙여넣기 (이 폴더에)")
+        case .copyToOtherPane:   return L("반대 칸으로 바로 복사")
+        case .moveToOtherPane:   return L("반대 칸으로 바로 이동")
+        case .syncPanes:         return L("반대 칸을 이 폴더로")
+        case .toggleMultiSelect: return L("여러 개 고르기")
+        case .selectAll:         return L("전부 고르기")
+        case .deleteSelection:   return L("휴지통으로 (⌦ 또는 ⌘⌦)")
+        case .rename:            return L("이름 바꾸기")
+        case .fileInfo:          return L("정보 보기")
+        case .newFolder:         return L("새 폴더")
+        case .newFile:           return L("새 파일")
+        case .compress:          return L("압축")
+        case .extractArchive:    return L("압축 풀기")
+        case .toggleHidden:      return L("숨긴 항목 보기")
+        case .sortByName:        return L("이름순")
+        case .sortBySize:        return L("크기순")
+        case .sortByDate:        return L("날짜순")
+        case .sortByKind:        return L("종류순")
+        case .reverseSort:       return L("정렬 뒤집기")
+        case .focusPathField:    return L("경로로 이동")
+        case .filterList:        return L("걸러보기 (이름·확장자)")
+        case .search:            return L("찾기")
+        case .showHelp:          return L("단축키 도움말")
+        case .goHome:            return L("미디어 폴더로")
+        case .goRoot:            return L("최상위로 (⌘⌫ 도 같음)")
+        case .undo:              return L("되돌리기 (이동·이름)")
+        case .goBackOrUp:        return L("이전 폴더로 (기록이 없으면 위로)")
         }
     }
 
@@ -185,13 +185,13 @@ enum ArgoCommand: String {
 
     /// 도움말 화면의 묶음.
     static let groups: [(String, [ArgoCommand])] = [
-        ("이동", [.goBackOrUp, .goUp, .goBack, .goForward, .goHome, .goRoot, .focusPathField, .refresh]),
-        ("복사·이동", [.clipboardCopy, .clipboardCut, .clipboardPaste]),
-        ("두 칸", [.toggleDualPane, .switchPane, .copyToOtherPane, .moveToOtherPane, .syncPanes]),
-        ("고르기", [.toggleMultiSelect, .selectAll]),
-        ("파일", [.newFolder, .newFile, .rename, .fileInfo, .deleteSelection, .compress, .extractArchive, .undo]),
-        ("보기", [.toggleHidden, .sortByName, .sortBySize, .sortByDate, .sortByKind, .reverseSort, .search, .filterList]),
-        ("도움말", [.showHelp])
+        (L("이동"), [.goBackOrUp, .goUp, .goBack, .goForward, .goHome, .goRoot, .focusPathField, .refresh]),
+        (L("복사·이동"), [.clipboardCopy, .clipboardCut, .clipboardPaste]),
+        (L("두 칸"), [.toggleDualPane, .switchPane, .copyToOtherPane, .moveToOtherPane, .syncPanes]),
+        (L("고르기"), [.toggleMultiSelect, .selectAll]),
+        (L("파일"), [.newFolder, .newFile, .rename, .fileInfo, .deleteSelection, .compress, .extractArchive, .undo]),
+        (L("보기"), [.toggleHidden, .sortByName, .sortBySize, .sortByDate, .sortByKind, .reverseSort, .search, .filterList]),
+        (L("도움말"), [.showHelp])
     ]
 }
 

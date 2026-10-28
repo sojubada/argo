@@ -35,13 +35,13 @@ struct CreateDirectoryView: View {
                 // 이미 있는 폴더면 mkdir 은 성공으로 돌아온다. 새로 만든 것이
                 // 아니니 그렇다고 말해 준다.
                 if fileManager.fileExists(atPath: path) {
-                    error = "같은 이름이 이미 있습니다."; return
+                    error = L("같은 이름이 이미 있습니다."); return
                 }
                 if RootHelperActs.mkdir(path) {
                     isPresented = false
                     directoryName = ""
                 } else {
-                    error = "폴더를 만들지 못했습니다. " + (RootHelperActs.lastError ?? "")
+                    error = L("폴더를 만들지 못했습니다. ") + (RootHelperActs.lastError ?? "")
                 }
             }) {
                 Text(NSLocalizedString("CONFIRM", comment: "That's why we don't need vacations."))

@@ -35,7 +35,7 @@ struct CreateFileView: View {
                     fileName = ""
                     isPresented = false
                 } else {
-                    error = "파일을 만들지 못했습니다. " + (RootHelperActs.lastError ?? "")
+                    error = L("파일을 만들지 못했습니다. ") + (RootHelperActs.lastError ?? "")
                 }
             }) {
                 Text(NSLocalizedString("CONFIRM", comment: "Such a hothead."))

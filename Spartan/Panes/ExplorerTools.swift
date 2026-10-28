@@ -78,8 +78,8 @@ enum PathResolveError: Error {
 
     var message: String {
         switch self {
-        case .empty:            return "경로를 입력하십시오."
-        case .missing(let p):   return "없는 경로입니다: " + p
+        case .empty:            return L("경로를 입력하십시오.")
+        case .missing(let p):   return L("없는 경로입니다: ") + p
         }
     }
 }
@@ -98,14 +98,14 @@ struct GoToPathView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("경로로 이동")
+            Text(L("경로로 이동"))
                 .font(.title2)
 
             ArgoTextField("/var/mobile/Media/", text: $text, onCommit: go)
                 .disableAutocorrection(true)
                 .textInputAutocapitalization(.never)
 
-            Text("~ 는 /var/mobile 입니다. / 없이 치면 지금 폴더 안에서 찾습니다. 대소문자는 틀려도 맞춰 갑니다.")
+            Text(L("~ 는 /var/mobile 입니다. / 없이 치면 지금 폴더 안에서 찾습니다. 대소문자는 틀려도 맞춰 갑니다."))
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -117,8 +117,8 @@ struct GoToPathView: View {
             }
 
             HStack(spacing: 40) {
-                Button("이동", action: go)
-                Button("취소") { isPresented = false }
+                Button(L("이동"), action: go)
+                Button(L("취소")) { isPresented = false }
             }
         }
         .padding(40)
@@ -153,25 +153,25 @@ struct FilterListView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("걸러보기")
+            Text(L("걸러보기"))
                 .font(.title2)
 
-            ArgoTextField("이름 일부, .mp4, *.log …", text: $text, onCommit: apply)
+            ArgoTextField(L("이름 일부, .mp4, *.log …"), text: $text, onCommit: apply)
                 .disableAutocorrection(true)
                 .textInputAutocapitalization(.never)
 
-            Text("빈칸이나 쉼표로 여러 개를 주면 어느 하나라도 맞는 항목을 보여 줍니다. 다른 폴더로 가면 풀립니다.")
+            Text(L("빈칸이나 쉼표로 여러 개를 주면 어느 하나라도 맞는 항목을 보여 줍니다. 다른 폴더로 가면 풀립니다."))
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 40) {
-                Button("적용", action: apply)
-                Button("풀기") {
+                Button(L("적용"), action: apply)
+                Button(L("풀기")) {
                     isPresented = false
                     onApply("")
                 }
-                Button("취소") { isPresented = false }
+                Button(L("취소")) { isPresented = false }
             }
         }
         .padding(40)
@@ -201,23 +201,23 @@ struct FolderSizeRow: View {
         VStack(spacing: 8) {
             switch counter.state {
             case .idle:
-                Button("폴더 용량 계산") { counter.start(path) }
+                Button(L("폴더 용량 계산")) { counter.start(path) }
             case .running:
                 HStack(spacing: 12) {
                     ProgressView()
-                    Text("세는 중 — " + counter.summary)
+                    Text(L("세는 중 — ") + counter.summary)
                 }
-                Button("멈추기") { counter.stop() }
+                Button(L("멈추기")) { counter.stop() }
             case .done:
-                Text("폴더 용량: " + counter.summary)
+                Text(L("폴더 용량: ") + counter.summary)
                 if counter.unreadable > 0 {
-                    Text("읽지 못한 곳 \(counter.unreadable)개는 빠졌습니다")
+                    Text(LF("읽지 못한 곳 {0}개는 빠졌습니다", counter.unreadable))
                         .font(.caption)
                         .foregroundColor(.orange)
                 }
             case .stopped:
-                Text("멈춤 — 여기까지 " + counter.summary)
-                Button("다시 계산") { counter.start(path) }
+                Text(L("멈춤 — 여기까지 ") + counter.summary)
+                Button(L("다시 계산")) { counter.start(path) }
             }
         }
         .onDisappear { counter.stop() }
@@ -245,7 +245,7 @@ final class FolderSizeCounter: ObservableObject {
 
     var summary: String {
         let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-        return "\(size) (파일 \(files)개, 폴더 \(folders)개)"
+        return LF("{0} (파일 {1}개, 폴더 {2}개)", size, files, folders)
     }
 
     func start(_ path: String) {

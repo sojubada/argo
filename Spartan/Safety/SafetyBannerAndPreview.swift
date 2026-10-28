@@ -48,7 +48,7 @@ struct BatchDeletePreview: View {
             Color.black.opacity(0.85).edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 20) {
-                Text("지울 것 \(files.count)개")
+                Text(LF("지울 것 {0}개", files.count))
                     .font(.largeTitle)
                     .foregroundColor(.red)
                 
@@ -59,7 +59,7 @@ struct BatchDeletePreview: View {
                                 .foregroundColor(.white)
                         }
                         if files.count > 10 {
-                            Text("...외 \(files.count - 10)개")
+                            Text(LF("...외 {0}개", files.count - 10))
                                 .foregroundColor(.gray)
                         }
                     }
@@ -67,15 +67,15 @@ struct BatchDeletePreview: View {
                 .frame(maxHeight: 300)
                 
                 if cautionCount > 0 {
-                    Text("⚠️ \(cautionCount)개가 주의 구역에 있습니다")
+                    Text(LF("⚠️ {0}개가 주의 구역에 있습니다", cautionCount))
                         .foregroundColor(.orange)
                 }
                 
                 HStack(spacing: 40) {
-                    Button("취소", action: onCancel)
+                    Button(L("취소"), action: onCancel)
                         .focused($focus, equals: .cancel)
                     Button(action: onConfirm) {
-                        Text("휴지통으로 / 삭제")
+                        Text(L("휴지통으로 / 삭제"))
                             .foregroundColor(.red)
                     }
                     .focused($focus, equals: .confirm)

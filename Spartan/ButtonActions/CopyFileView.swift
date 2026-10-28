@@ -60,7 +60,7 @@ struct CopyFileView: View {
                         multiSelect = false
                         isPresented = false
                     } else {
-                        error = "\(fileNames.count)개 중 \(r.failed)개를 복사하지 못했습니다.\n" + (r.reason ?? "")
+                        error = LF("{0}개 중 {1}개를 복사하지 못했습니다.\n", fileNames.count, r.failed) + (r.reason ?? "")
                     }
                 }) {
                     Text(NSLocalizedString("CONFIRM", comment: "And begins your career at Honex Industries!"))

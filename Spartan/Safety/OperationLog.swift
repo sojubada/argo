@@ -77,7 +77,7 @@ enum OperationLog {
         if let nl = tail.firstIndex(of: 0x0A), nl + 1 < tail.count {
             kept = tail.subdata(in: (nl + 1)..<tail.count)
         }
-        let header = "--- 이전 기록은 용량 상한으로 잘렸습니다 ---\n".data(using: .utf8) ?? Data()
+        let header = L("--- 이전 기록은 용량 상한으로 잘렸습니다 ---\n").data(using: .utf8) ?? Data()
         try? (header + kept).write(to: URL(fileURLWithPath: targetPath), options: .atomic)
     }
 

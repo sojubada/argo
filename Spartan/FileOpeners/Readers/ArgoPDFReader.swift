@@ -41,10 +41,10 @@ enum PDFFitMode: Int, CaseIterable {
 
     var label: String {
         switch self {
-        case .fitWidth:       return "가로 꽉 참"
-        case .fitHeight:      return "세로 꽉 참"
-        case .twoPage:        return "두 쪽 좌우"
-        case .twoPageStacked: return "두 쪽 상하"
+        case .fitWidth:       return L("가로 꽉 참")
+        case .fitHeight:      return L("세로 꽉 참")
+        case .twoPage:        return L("두 쪽 좌우")
+        case .twoPageStacked: return L("두 쪽 상하")
         }
     }
 
@@ -267,17 +267,17 @@ final class ArgoPDFReaderController: UIViewController {
 
         guard let provider = CGDataProvider(url: URL(fileURLWithPath: documentPath) as CFURL),
               let doc = CGPDFDocument(provider) else {
-            showFailure("이 PDF 를 열 수 없습니다. 파일이 손상되었거나 암호가 걸려 있습니다.")
+            showFailure(L("이 PDF 를 열 수 없습니다. 파일이 손상되었거나 암호가 걸려 있습니다."))
             return
         }
         if doc.isEncrypted && !doc.unlockWithPassword("") {
-            showFailure("암호가 걸린 PDF 입니다.")
+            showFailure(L("암호가 걸린 PDF 입니다."))
             return
         }
         document = doc
         pageCount = doc.numberOfPages
         guard pageCount > 0 else {
-            showFailure("쪽이 없는 PDF 입니다.")
+            showFailure(L("쪽이 없는 PDF 입니다."))
             return
         }
         currentPage = 1
@@ -340,7 +340,7 @@ final class ArgoPDFReaderController: UIViewController {
             pages.append((page, shown, box, kind, rotation))
         }
         guard !pages.isEmpty else {
-            showPageProblem("이 쪽의 크기를 읽을 수 없습니다.")
+            showPageProblem(L("이 쪽의 크기를 읽을 수 없습니다."))
             return
         }
 
@@ -434,12 +434,12 @@ final class ArgoPDFReaderController: UIViewController {
 
         if Self.isBlank(image) {
             let first = pages[0]
-            let detail = String(format: "쪽 %.0f×%.0f · 회전 %d · %@ · 그린 크기 %.0f×%.0f @%.0fx",
+            let detail = String(format: L("쪽 %.0f×%.0f · 회전 %d · %@ · 그린 크기 %.0f×%.0f @%.0fx"),
                                 first.box.width, first.box.height, first.rotation,
                                 first.boxKind == .cropBox ? "cropBox" : "mediaBox",
                                 size.width, size.height, format.scale)
-            showPageProblem("이 쪽에서 그려진 것이 없습니다.\n"
-                            + "원래 빈 쪽이거나, 이 기기가 그리지 못하는 내용입니다.\n\n"
+            showPageProblem(L("이 쪽에서 그려진 것이 없습니다.\n")
+                            + L("원래 빈 쪽이거나, 이 기기가 그리지 못하는 내용입니다.\n\n")
                             + detail)
         } else {
             hidePageProblem()
@@ -660,22 +660,22 @@ final class ArgoPDFReaderController: UIViewController {
     private func buildToolbar() {
         statusLabel.font = ArgoTheme.fontMonoBody()
         statusLabel.textColor = ArgoTheme.textSecondary()
-        statusLabel.text = "여는 중…"
+        statusLabel.text = L("여는 중…")
 
-        let prev = ArgoBarButton.make(title: "◀ 이전")
+        let prev = ArgoBarButton.make(title: L("◀ 이전"))
         prev.addTarget(self, action: #selector(prevPage), for: .primaryActionTriggered)
-        let next = ArgoBarButton.make(title: "다음 ▶")
+        let next = ArgoBarButton.make(title: L("다음 ▶"))
         next.addTarget(self, action: #selector(nextPage), for: .primaryActionTriggered)
 
         fitButton = ArgoBarButton.make(title: fitMode.label)
         fitButton.addTarget(self, action: #selector(cycleFit), for: .primaryActionTriggered)
 
-        let first = ArgoBarButton.make(title: "처음")
+        let first = ArgoBarButton.make(title: L("처음"))
         first.addTarget(self, action: #selector(goFirst), for: .primaryActionTriggered)
-        let last = ArgoBarButton.make(title: "끝")
+        let last = ArgoBarButton.make(title: L("끝"))
         last.addTarget(self, action: #selector(goLast), for: .primaryActionTriggered)
 
-        let close = ArgoBarButton.make(title: "닫기")
+        let close = ArgoBarButton.make(title: L("닫기"))
         close.addTarget(self, action: #selector(closeNow), for: .primaryActionTriggered)
 
         toolbar = UIStackView(arrangedSubviews: [prev, next, statusLabel,
@@ -798,7 +798,7 @@ final class ArgoPDFReaderController: UIViewController {
         let box = ArgoSurfaceView.makeSurface()
 
         let head = UILabel()
-        head.text = "PDF 를 열 수 없습니다"
+        head.text = L("PDF 를 열 수 없습니다")
         head.font = ArgoTheme.fontTitle()
         head.textColor = ArgoTheme.textPrimary()
         head.textAlignment = .center
@@ -812,7 +812,7 @@ final class ArgoPDFReaderController: UIViewController {
         why.textAlignment = .center
         why.translatesAutoresizingMaskIntoConstraints = false
 
-        let back = ArgoBarButton.make(title: "파일 목록으로")
+        let back = ArgoBarButton.make(title: L("파일 목록으로"))
         back.isPrimary = true
         back.addTarget(self, action: #selector(closeNow), for: .primaryActionTriggered)
 

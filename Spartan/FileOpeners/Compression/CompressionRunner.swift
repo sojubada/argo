@@ -33,7 +33,7 @@ final class CompressionRunner: ObservableObject {
 
     func requestCancel() {
         cancelRequested = true
-        message = "현재 파일을 마치는 중입니다…"
+        message = L("현재 파일을 마치는 중입니다…")
     }
 
     /// 뒷줄에서 돌리고 끝나면 메인에서 알린다.
@@ -86,14 +86,14 @@ struct CompressionProgressView: View {
                 .truncationMode(.middle)
 
             // 큰 파일은 몇 분이 걸린다. 멈춘 것이 아니라고 말해 둔다.
-            Text("큰 파일은 몇 분이 걸릴 수 있습니다. 화면을 끄지 마십시오.")
+            Text(L("큰 파일은 몇 분이 걸릴 수 있습니다. 화면을 끄지 마십시오."))
                 .font(.caption)
                 .foregroundColor(Theme.textDisabled)
                 .multilineTextAlignment(.center)
 
             if !runner.cancelRequested {
                 Button(action: { runner.requestCancel() }) {
-                    Text("취소")
+                    Text(L("취소"))
                 }
             }
         }

@@ -274,7 +274,7 @@ static NSString *sLastInboxFingerprint = nil;
 + (NSString *)inboxFingerprint {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *root = [self inboxPath];
-    if (![fm fileExistsAtPath:root]) { return @"없음"; }
+    if (![fm fileExistsAtPath:root]) { return NSLocalizedString(@"없음", nil); }
 
     unsigned long long total = 0;
     NSUInteger count = 0;
@@ -296,7 +296,7 @@ static NSString *sLastInboxFingerprint = nil;
                         completion:(void (^)(NSError * _Nullable))completion {
     if (![self isAvailable] || path.length == 0) {
         if (completion) { completion([NSError errorWithDomain:@"Argo" code:1 userInfo:@{
-            NSLocalizedDescriptionKey: @"이 기기에서는 AirDrop 을 쓸 수 없습니다."
+            NSLocalizedDescriptionKey: NSLocalizedString(@"이 기기에서는 AirDrop 을 쓸 수 없습니다.", nil)
         }]); }
         return;
     }
@@ -304,7 +304,7 @@ static NSString *sLastInboxFingerprint = nil;
     BOOL isDir = NO;
     if (![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] || isDir) {
         if (completion) { completion([NSError errorWithDomain:@"Argo" code:2 userInfo:@{
-            NSLocalizedDescriptionKey: @"폴더는 보낼 수 없습니다. 먼저 압축하십시오."
+            NSLocalizedDescriptionKey: NSLocalizedString(@"폴더는 보낼 수 없습니다. 먼저 압축하십시오.", nil)
         }]); }
         return;
     }
@@ -313,7 +313,7 @@ static NSString *sLastInboxFingerprint = nil;
     UIViewController *host = [self topViewController];
     if (!cls || !host) {
         if (completion) { completion([NSError errorWithDomain:@"Argo" code:3 userInfo:@{
-            NSLocalizedDescriptionKey: @"보내기 화면을 열 수 없습니다."
+            NSLocalizedDescriptionKey: NSLocalizedString(@"보내기 화면을 열 수 없습니다.", nil)
         }]); }
         return;
     }
@@ -335,7 +335,7 @@ static NSString *sLastInboxFingerprint = nil;
         [host presentViewController:sharing animated:YES completion:nil];
     } @catch (NSException *e) {
         if (completion) { completion([NSError errorWithDomain:@"Argo" code:4 userInfo:@{
-            NSLocalizedDescriptionKey: e.reason ?: @"보내기에 실패했습니다."
+            NSLocalizedDescriptionKey: e.reason ?: NSLocalizedString(@"보내기에 실패했습니다.", nil)
         }]); }
     }
 }

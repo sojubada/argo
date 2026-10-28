@@ -592,7 +592,7 @@ enum ArgoMarkdown {
             a.addAttribute(.paragraphStyle, value: para(), range: NSRange(location: 0, length: a.length))
             appendLine(a)
         }
-        if out.length == 0 { out.append(NSAttributedString(string: "(빈 문서)", attributes: baseAttrs)) }
+        if out.length == 0 { out.append(NSAttributedString(string: L("(빈 문서)"), attributes: baseAttrs)) }
         return out
     }
 
@@ -728,7 +728,7 @@ enum ArgoMarkdown {
         }
         // 그림: 글로만 알린다.
         apply("!\\[([^\\]]*)\\]\\([^)]*\\)") { a, r, inner in
-            a.replaceCharacters(in: r, with: NSAttributedString(string: "[그림: \(inner)]", attributes: [
+            a.replaceCharacters(in: r, with: NSAttributedString(string: LF("[그림: {0}]", inner), attributes: [
                 .font: font, .foregroundColor: ArgoCodeColors.dim
             ]))
         }

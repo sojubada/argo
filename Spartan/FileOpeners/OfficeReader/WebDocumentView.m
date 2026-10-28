@@ -187,12 +187,12 @@
         NSArray<NSNumber *> *steps = @[ @1.0, @1.25, @1.5, @2.0 ];
         self.fitIndex = (self.fitIndex + 1) % steps.count;
         double s = steps[self.fitIndex].doubleValue;
-        title = (s == 1.0) ? @"글자 보통"
-                           : [NSString stringWithFormat:@"글자 %d%%", (int)(s * 100)];
+        title = (s == 1.0) ? NSLocalizedString(@"글자 보통", nil)
+                           : [NSString stringWithFormat:NSLocalizedString(@"글자 %d%%", nil), (int)(s * 100)];
         js = [NSString stringWithFormat:@"argoNav.read(%g);argoNav.label()", s];
     } else {
         NSArray<NSString *> *modes  = @[ @"", @"w", @"h" ];
-        NSArray<NSString *> *titles = @[ @"원래 크기", @"가로 꽉 참", @"세로 꽉 참" ];
+        NSArray<NSString *> *titles = @[ NSLocalizedString(@"원래 크기", nil), NSLocalizedString(@"가로 꽉 참", nil), NSLocalizedString(@"세로 꽉 참", nil) ];
         self.fitIndex = (self.fitIndex + 1) % modes.count;
         title = titles[self.fitIndex];
         js = [NSString stringWithFormat:@"argoNav.fit('%@');argoNav.label()",
@@ -229,7 +229,7 @@
     [self.spinner startAnimating];
 
     UILabel *what = [[UILabel alloc] init];
-    what.text = @"문서를 여는 중";
+    what.text = NSLocalizedString(@"문서를 여는 중", nil);
     what.font = [ArgoTheme fontTitle];
     what.textColor = [ArgoTheme textPrimary];
     what.textAlignment = NSTextAlignmentCenter;
@@ -283,10 +283,10 @@
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.font = [ArgoTheme fontMonoBody];
     self.statusLabel.textColor = [ArgoTheme textSecondary];
-    self.statusLabel.text = @"여는 중…";
+    self.statusLabel.text = NSLocalizedString(@"여는 중…", nil);
 
-    NSString *prevTitle = self.isSheet ? @"◀ 이전 시트" : @"◀ 이전";
-    NSString *nextTitle = self.isSheet ? @"다음 시트 ▶" : @"다음 ▶";
+    NSString *prevTitle = self.isSheet ? NSLocalizedString(@"◀ 이전 시트", nil) : NSLocalizedString(@"◀ 이전", nil);
+    NSString *nextTitle = self.isSheet ? NSLocalizedString(@"다음 시트 ▶", nil) : NSLocalizedString(@"다음 ▶", nil);
     self.prevButton  = [self barButton:prevTitle action:@selector(goPrev)];
     self.nextButton  = [self barButton:nextTitle action:@selector(goNext)];
 
@@ -294,13 +294,13 @@
                              self.prevButton, self.nextButton, self.statusLabel, nil];
 
     // 맞춤은 자주 쓰므로 설정 안에 묻지 않습니다. PDF 뷰어와 같은 자리입니다.
-    self.fitButton = [self barButton:(self.isProse ? @"글자 보통" : @"원래 크기")
+    self.fitButton = [self barButton:(self.isProse ? NSLocalizedString(@"글자 보통", nil) : NSLocalizedString(@"원래 크기", nil))
                           action:@selector(cycleFit)];
     [items addObject:self.fitButton];
 
     // 나머지는 전부 설정 하나로 모았습니다. 명세의 '버튼을 흩뿌리지 말 것'입니다.
-    [items addObject:[self barButton:@"설정" action:@selector(showPanel)]];
-    [items addObject:[self barButton:@"닫기" action:@selector(closeNow)]];
+    [items addObject:[self barButton:NSLocalizedString(@"설정", nil) action:@selector(showPanel)]];
+    [items addObject:[self barButton:NSLocalizedString(@"닫기", nil) action:@selector(closeNow)]];
 
     self.toolbar = [[UIStackView alloc] initWithArrangedSubviews:items];
     self.toolbar.axis = UILayoutConstraintAxisHorizontal;
@@ -399,7 +399,7 @@
     ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     UILabel *head = [[UILabel alloc] init];
-    head.text = @"문서 설정";
+    head.text = NSLocalizedString(@"문서 설정", nil);
     head.font = [ArgoTheme fontTitle];
     head.textColor = [ArgoTheme textPrimary];
     head.translatesAutoresizingMaskIntoConstraints = NO;
@@ -407,7 +407,7 @@
     NSMutableArray *rows = [NSMutableArray array];
 
     ArgoBarButton *night = [ArgoBarButton barButtonWithTitle:
-                            self.isNight ? @"주간 보기로" : @"야간 보기로"];
+                            self.isNight ? NSLocalizedString(@"주간 보기로", nil) : NSLocalizedString(@"야간 보기로", nil)];
     [night addTarget:self action:@selector(panelToggleNight)
     forControlEvents:UIControlEventPrimaryActionTriggered];
     [rows addObject:night];
@@ -415,18 +415,18 @@
     if (self.isDeck) {
         // pptx-preview는 슬라이드 마스터를 그리지 않아, 밝은 글자를 쓰는
         // 테마는 칠하지 않은 바탕에서 글자가 사라집니다.
-        ArgoBarButton *paint = [ArgoBarButton barButtonWithTitle:@"슬라이드 배경 칠하기"];
+        ArgoBarButton *paint = [ArgoBarButton barButtonWithTitle:NSLocalizedString(@"슬라이드 배경 칠하기", nil)];
         [paint addTarget:self action:@selector(panelTogglePaint)
         forControlEvents:UIControlEventPrimaryActionTriggered];
         [rows addObject:paint];
     }
 
-    ArgoBarButton *info = [ArgoBarButton barButtonWithTitle:@"문서 정보"];
+    ArgoBarButton *info = [ArgoBarButton barButtonWithTitle:NSLocalizedString(@"문서 정보", nil)];
     [info addTarget:self action:@selector(panelShowInfo)
    forControlEvents:UIControlEventPrimaryActionTriggered];
     [rows addObject:info];
 
-    ArgoBarButton *close = [ArgoBarButton barButtonWithTitle:@"닫기"];
+    ArgoBarButton *close = [ArgoBarButton barButtonWithTitle:NSLocalizedString(@"닫기", nil)];
     close.isPrimary = YES;
     [close addTarget:self action:@selector(hidePanel)
     forControlEvents:UIControlEventPrimaryActionTriggered];
@@ -474,7 +474,7 @@
     // 패널 버튼이 하나도 안 눌리던 두 번째 원인입니다.
     [self.view layoutIfNeeded];
     [ArgoDiagLog log:@"panel"
-             message:[NSString stringWithFormat:@"열림 버튼수=%lu",
+             message:[NSString stringWithFormat:NSLocalizedString(@"열림 버튼수=%lu", nil),
                       (unsigned long)box.subviews.count]];
 
     [self setNeedsFocusUpdate];
@@ -506,9 +506,9 @@
     NSByteCountFormatter *bytes = [[NSByteCountFormatter alloc] init];
     bytes.countStyle = NSByteCountFormatterCountStyleFile;
     NSString *size = attrs[NSFileSize]
-        ? [bytes stringFromByteCount:[attrs[NSFileSize] longLongValue]] : @"알 수 없음";
+        ? [bytes stringFromByteCount:[attrs[NSFileSize] longLongValue]] : NSLocalizedString(@"알 수 없음", nil);
 
-    NSString *when = @"알 수 없음";
+    NSString *when = NSLocalizedString(@"알 수 없음", nil);
     if (attrs[NSFileModificationDate]) {
         NSDateFormatter *df = [[NSDateFormatter alloc] init];
         df.dateFormat = @"yyyy-MM-dd HH:mm";
@@ -516,9 +516,9 @@
     }
 
     NSString *body = [NSString stringWithFormat:
-                      @"파일명\n%@\n\n형식\n%@\n\n크기\n%@\n\n수정\n%@\n\n상태\n%@",
+                      NSLocalizedString(@"파일명\n%@\n\n형식\n%@\n\n크기\n%@\n\n수정\n%@\n\n상태\n%@", nil),
                       path.lastPathComponent ?: @"",
-                      [self ext].length > 0 ? [[self ext] uppercaseString] : @"없음",
+                      [self ext].length > 0 ? [[self ext] uppercaseString] : NSLocalizedString(@"없음", nil),
                       size, when,
                       self.statusLabel.text ?: @""];
 
@@ -527,7 +527,7 @@
     ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     UILabel *head = [[UILabel alloc] init];
-    head.text = @"문서 정보";
+    head.text = NSLocalizedString(@"문서 정보", nil);
     head.font = [ArgoTheme fontTitle];
     head.textColor = [ArgoTheme textPrimary];
     head.translatesAutoresizingMaskIntoConstraints = NO;
@@ -539,7 +539,7 @@
     detail.textColor = [ArgoTheme textSecondary];
     detail.translatesAutoresizingMaskIntoConstraints = NO;
 
-    ArgoBarButton *close = [ArgoBarButton barButtonWithTitle:@"닫기"];
+    ArgoBarButton *close = [ArgoBarButton barButtonWithTitle:NSLocalizedString(@"닫기", nil)];
     close.isPrimary = YES;
     [close addTarget:self action:@selector(hidePanel)
     forControlEvents:UIControlEventPrimaryActionTriggered];
@@ -579,7 +579,7 @@
     // 패널 버튼이 하나도 안 눌리던 두 번째 원인입니다.
     [self.view layoutIfNeeded];
     [ArgoDiagLog log:@"panel"
-             message:[NSString stringWithFormat:@"열림 버튼수=%lu",
+             message:[NSString stringWithFormat:NSLocalizedString(@"열림 버튼수=%lu", nil),
                       (unsigned long)box.subviews.count]];
     [self setNeedsFocusUpdate];
     [self updateFocusIfNeeded];
@@ -668,7 +668,7 @@
     dlopen("/System/Library/Frameworks/WebKit.framework/WebKit", RTLD_NOW);
     Class cfgClass = NSClassFromString(@"WKWebViewConfiguration");
     Class wkClass  = NSClassFromString(@"WKWebView");
-    if (!cfgClass || !wkClass) { [self showError:@"이 기기에서 WebKit을 찾지 못했습니다."]; return; }
+    if (!cfgClass || !wkClass) { [self showError:NSLocalizedString(@"이 기기에서 WebKit을 찾지 못했습니다.", nil)]; return; }
 
     id cfg = [[cfgClass alloc] init];
     @try { [[cfg valueForKey:@"preferences"] setValue:@YES
@@ -680,7 +680,7 @@
     CGRect frame = self.view.bounds;
     id (*create)(id, SEL, CGRect, id) = (id (*)(id, SEL, CGRect, id))objc_msgSend;
     id web = create([wkClass alloc], @selector(initWithFrame:configuration:), frame, cfg);
-    if (!web) { [self showError:@"웹뷰를 만들지 못했습니다."]; return; }
+    if (!web) { [self showError:NSLocalizedString(@"웹뷰를 만들지 못했습니다.", nil)]; return; }
 
     self.webView = web;
     [web performSelector:@selector(setNavigationDelegate:) withObject:self];
@@ -698,7 +698,7 @@
     NSString *ext = [self ext];
     NSArray *scripts = [ArgoWebDocumentShell scriptsForExtension:ext];
     if (scripts.count == 0) { [self showError:
-        [NSString stringWithFormat:@".%@ 형식은 아직 지원하지 않습니다.", ext]]; return; }
+        [NSString stringWithFormat:NSLocalizedString(@".%@ 형식은 아직 지원하지 않습니다.", nil), ext]]; return; }
 
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:
@@ -709,7 +709,7 @@
     NSMutableString *tags = [NSMutableString string];
     for (NSString *n in scripts) {
         NSString *src = [[NSBundle mainBundle] pathForResource:n ofType:@"js" inDirectory:@"webdoc"];
-        if (!src) { [self showError:[NSString stringWithFormat:@"%@.js 가 없습니다.", n]]; return; }
+        if (!src) { [self showError:[NSString stringWithFormat:NSLocalizedString(@"%@.js 가 없습니다.", nil), n]]; return; }
         [fm copyItemAtPath:src
                     toPath:[dir stringByAppendingPathComponent:[n stringByAppendingString:@".js"]]
                      error:nil];
@@ -734,7 +734,7 @@
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSData *doc = [NSData dataWithContentsOfFile:path];
         if (!doc) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [self showError:@"파일을 읽지 못했습니다."]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ [self showError:NSLocalizedString(@"파일을 읽지 못했습니다.", nil)]; });
             return;
         }
         NSString *dataJS = [NSString stringWithFormat:@"window.__argoDoc=\"%@\";",
@@ -761,13 +761,13 @@
     [self showError:error.localizedDescription];
 }
 - (void)webViewWebContentProcessDidTerminate:(id)webView {
-    [self showError:@"문서가 너무 커서 표시하지 못했습니다."];
+    [self showError:NSLocalizedString(@"문서가 너무 커서 표시하지 못했습니다.", nil)];
 }
 
 // renderAsync resolves after the navigation does, so the page is asked
 // until it says it is finished rather than assumed to be.
 - (void)pollReady:(int)attempt {
-    if (attempt > 80) { [self showError:@"여는 데 너무 오래 걸립니다."]; return; }
+    if (attempt > 80) { [self showError:NSLocalizedString(@"여는 데 너무 오래 걸립니다.", nil)]; return; }
     // A plain separator, because a universal character name may not
     // refer to a control character in an Objective-C literal.
     [self js:@"window.__argoState+'@@'+(window.__argoInfo||'')+'@@'+(window.__argoErr||'')"
@@ -780,7 +780,7 @@
             [self showStatus:parts.count > 1 ? parts[1] : @""];
             [self setToolbarVisible:YES animated:YES];
         } else if ([state isEqualToString:@"error"]) {
-            [self showError:parts.count > 2 ? parts[2] : @"알 수 없는 오류"];
+            [self showError:parts.count > 2 ? parts[2] : NSLocalizedString(@"알 수 없는 오류", nil)];
         } else {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{ [self pollReady:attempt + 1]; });
@@ -801,14 +801,14 @@
 
 - (void)showError:(NSString *)message {
     [self hideLoadingView];
-    self.statusLabel.text = @"열지 못했습니다";
+    self.statusLabel.text = NSLocalizedString(@"열지 못했습니다", nil);
     [self setToolbarVisible:YES animated:YES];
     if (self.errorView) { return; }
 
     ArgoSurfaceView *box = [ArgoSurfaceView makeSurface];
 
     UILabel *head = [[UILabel alloc] init];
-    head.text = @"문서를 열 수 없습니다";
+    head.text = NSLocalizedString(@"문서를 열 수 없습니다", nil);
     head.font = [ArgoTheme fontTitle];
     head.textColor = [ArgoTheme textPrimary];
     head.textAlignment = NSTextAlignmentCenter;
@@ -817,7 +817,7 @@
     // 원인을 그대로 보여줍니다. 렌더러가 내놓은 말이 거칠어도
     // '알 수 없는 오류'보다 쓸모 있습니다.
     UILabel *why = [[UILabel alloc] init];
-    why.text = message.length > 0 ? message : @"원인을 알 수 없습니다.";
+    why.text = message.length > 0 ? message : NSLocalizedString(@"원인을 알 수 없습니다.", nil);
     why.numberOfLines = 0;
     why.font = [ArgoTheme fontCaption];
     why.textColor = [ArgoTheme textSecondary];
@@ -833,12 +833,12 @@
     name.translatesAutoresizingMaskIntoConstraints = NO;
 
     // 복구 경로를 줍니다. 막다른 화면으로 두지 않습니다.
-    ArgoBarButton *retry = [ArgoBarButton barButtonWithTitle:@"다시 시도"];
+    ArgoBarButton *retry = [ArgoBarButton barButtonWithTitle:NSLocalizedString(@"다시 시도", nil)];
     retry.isPrimary = YES;
     [retry addTarget:self action:@selector(retryRender)
     forControlEvents:UIControlEventPrimaryActionTriggered];
 
-    ArgoBarButton *back = [ArgoBarButton barButtonWithTitle:@"파일 목록으로"];
+    ArgoBarButton *back = [ArgoBarButton barButtonWithTitle:NSLocalizedString(@"파일 목록으로", nil)];
     [back addTarget:self action:@selector(closeNow)
    forControlEvents:UIControlEventPrimaryActionTriggered];
 
@@ -894,7 +894,7 @@
         [self.loadingView.centerYAnchor constraintEqualToAnchor:g.centerYAnchor],
         [self.loadingView.widthAnchor constraintEqualToConstant:760],
     ]];
-    self.statusLabel.text = @"여는 중…";
+    self.statusLabel.text = NSLocalizedString(@"여는 중…", nil);
     [self prepareWebViewAndRender];
 }
 

@@ -36,10 +36,10 @@ enum SortKey: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .name: return "이름"
-        case .size: return "크기"
-        case .date: return "날짜"
-        case .kind: return "종류"
+        case .name: return L("이름")
+        case .size: return L("크기")
+        case .date: return L("날짜")
+        case .kind: return L("종류")
         }
     }
 
@@ -270,8 +270,8 @@ final class FilePaneModel: ObservableObject {
         } catch {
             print("[FilePane] \(directory) 를 읽지 못했습니다: \(error.localizedDescription)")
             readError = fileManager.fileExists(atPath: directory)
-                ? "이 폴더를 읽을 수 없습니다. 권한이 없을 수 있습니다."
-                : "이 폴더가 없습니다. 지워졌거나 이름이 바뀌었을 수 있습니다."
+                ? L("이 폴더를 읽을 수 없습니다. 권한이 없을 수 있습니다.")
+                : L("이 폴더가 없습니다. 지워졌거나 이름이 바뀌었을 수 있습니다.")
         }
         return out
     }
@@ -363,8 +363,8 @@ final class FilePaneModel: ObservableObject {
         guard currentDirRisk != .safe else { return }
         bannerRisk = currentDirRisk
         bannerMsg = currentDirRisk == .caution
-            ? "주의 — 시스템에 영향을 줄 수 있습니다"
-            : "시스템 폴더 — 쓰기가 차단됩니다"
+            ? L("주의 — 시스템에 영향을 줄 수 있습니다")
+            : L("시스템 폴더 — 쓰기가 차단됩니다")
         withAnimation { showBanner = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             withAnimation { self?.showBanner = false }

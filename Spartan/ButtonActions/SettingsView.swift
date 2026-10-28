@@ -25,6 +25,10 @@ struct SettingsView: View {
     
     @State var test = 0.0
 
+    // 화면 언어
+    @State private var languagePre = ArgoLocale.current
+    @State private var showLanguageRestart = false
+
     var body: some View {
 		ScrollView {
 			Text(NSLocalizedString("SETTINGS", comment: "But choose carefully because you'll stay in the job you pick for the rest of your life."))
@@ -36,6 +40,35 @@ struct SettingsView: View {
                     CreditsView()
                 })
 			
+			// 화면 언어. 두 언어로 같이 적는다 — 읽지 못하는 언어로 바뀌어도
+			// 되돌릴 단추를 찾을 수 있어야 한다.
+			Button(action: {
+				let codes = ArgoLocale.supported.map { $0.code }
+				let i = codes.firstIndex(of: languagePre) ?? 0
+				languagePre = codes[(i + 1) % codes.count]
+				ArgoLocale.current = languagePre
+				showLanguageRestart = true
+			}) {
+				HStack {
+					Image(systemName: "globe")
+					Text("Language · 언어: " + (ArgoLocale.supported.first(where: { $0.code == languagePre })?.name ?? languagePre))
+				}
+			}
+			.alert(isPresented: $showLanguageRestart) {
+				Alert(
+					title: Text(L("다시 켜면 모든 화면에 적용됩니다")),
+					message: Text(L("지금 끄고 다시 켜시겠습니까?")),
+					primaryButton: .default(Text(L("지금 끄기")), action: {
+						let app = UIApplication.shared
+						let suspend = Selector(("suspend"))
+						if app.responds(to: suspend) { _ = app.perform(suspend) }
+						DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { exit(0) }
+					}),
+					secondaryButton: .cancel(Text(L("나중에")))
+				)
+			}
+			Text(" ")
+
 			StepperTV(value: $logWindowFontSizePre, isHorizontal: true) {
 				UserDefaults.settings.set(logWindowFontSizePre, forKey: "logWindowFontSize")
 				UserDefaults.settings.synchronize()
@@ -68,7 +101,7 @@ struct SettingsView: View {
                 HStack {
                     Image(systemName: safeModeEnabledPre ? "checkmark.shield.fill" : "shield.slash")
                         .foregroundColor(safeModeEnabledPre ? .green : .red)
-                    Text("안전 모드 (시스템 쓰기 차단)")
+                    Text(L("안전 모드 (시스템 쓰기 차단)"))
                         .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
                             view.scaledFont(name: "BotW Sheikah Regular", size: 40)
                         }
@@ -76,13 +109,13 @@ struct SettingsView: View {
             }
             .alert(isPresented: $showSafeModeWarning) {
                 Alert(
-                    title: Text("안전 모드를 끄시겠습니까?"),
-                    message: Text("시스템 파일을 바꿀 수 있게 됩니다. 애플TV가 부팅하지 못할 수 있습니다."),
-                    primaryButton: .destructive(Text("끄기"), action: {
+                    title: Text(L("안전 모드를 끄시겠습니까?")),
+                    message: Text(L("시스템 파일을 바꿀 수 있게 됩니다. 애플TV가 부팅하지 못할 수 있습니다.")),
+                    primaryButton: .destructive(Text(L("끄기")), action: {
                         safeModeEnabledPre = false
                         UserDefaults.settings.set(false, forKey: "safeModeEnabled")
                     }),
-                    secondaryButton: .cancel(Text("유지"))
+                    secondaryButton: .cancel(Text(L("유지")))
                 )
             }
             
@@ -91,7 +124,7 @@ struct SettingsView: View {
             }) {
                 HStack {
                     Image(systemName: "doc.text.magnifyingglass")
-                    Text("작업 기록 보기")
+                    Text(L("작업 기록 보기"))
                 }
             }
             .sheet(isPresented: $showView[5]) {
@@ -160,7 +193,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "stethoscope")
 						.frame(width: 50, height: 50)
-					Text("Lab ① WebKit 탐침 — 확인 완료")
+					Text(L("Lab ① WebKit 탐침 — 확인 완료"))
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
@@ -177,7 +210,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "doc.viewfinder")
 						.frame(width: 50, height: 50)
-					Text("Lab ② 문서 렌더링 탐침 — 확인 완료")
+					Text(L("Lab ② 문서 렌더링 탐침 — 확인 완료"))
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
@@ -194,7 +227,7 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: "printer")
 						.frame(width: 50, height: 50)
-					Text("Lab ③ 인쇄 파이프라인 탐침")
+					Text(L("Lab ③ 인쇄 파이프라인 탐침"))
 						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 						}
@@ -213,7 +246,7 @@ struct SettingsView: View {
 			Button(action: {
 				guard !probeRunning else { return }
 				probeRunning = true
-				probeStatus  = "실행 중…"
+				probeStatus  = L("실행 중…")
 				Task {
 					let summary = await MediaFolderProbe.run()
 					await MainActor.run {
@@ -231,7 +264,7 @@ struct SettingsView: View {
 							.frame(width: 50, height: 50)
 					}
 					VStack(alignment: .leading, spacing: 8) {
-						Text("Lab ④ media 폴더 PDF 비교 탐침 ← 지금 이것")
+						Text(L("Lab ④ media 폴더 PDF 비교 탐침 ← 지금 이것"))
 							.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
 							}
