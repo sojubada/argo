@@ -655,3 +655,7 @@
 "노을" = "Ember";
 "보랏빛" = "Orchid";
 "황금빛" = "Gold";
+
+/* ---- Argo: fonts ---- */
+" 외 {0}개" = " and {0} more";
+"없는 글꼴을 비슷한 글꼴로 그렸습니다: {0}" = "Missing fonts were drawn with similar ones: {0}";

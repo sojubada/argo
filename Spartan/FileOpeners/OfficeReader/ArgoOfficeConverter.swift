@@ -27,7 +27,7 @@ enum ArgoOfficeConverter {
     /// xlsx 도 들어왔습니다. 빼 두었던 이유는 넓은 시트를 엑셀 인쇄하듯
     /// 열 묶음별로 쪼개서 화면으로 따라 읽을 수가 없었기 때문인데, 이제는
     /// 쪽을 시트 폭에 맞춰 늘리고 행만 넘깁니다.
-    static let handled: Set<String> = ["docx", "pptx", "xlsx", "hwp", "hwpx"]
+    static let handled: Set<String> = ["docx", "pptx", "xlsx", "xls", "hwp", "hwpx"]
 
     /// 직전 변환이 사용자에게 알릴 것을 남겼으면 그 한 줄. 없으면 nil.
     ///
@@ -52,58 +52,10 @@ enum ArgoOfficeConverter {
 
     // MARK: 폰트
 
-    private static var fontsReady = false
-
-    /// 한글이 빈칸으로 나오지 않게 폰트를 먹입니다.
-    ///
-    /// tvOS 에는 fontconfig 가 없고, 변환기가 들고 있는 시스템 폰트 탐색도
-    /// 여기서는 돌지 않습니다. 대신 기기에 있는 폰트를 우리가 읽어 넘깁니다.
-    /// 사용자가 따로 넣어 둔 폰트도 같은 길로 들어옵니다.
+    /// 예전 입구. 이제 글꼴은 문서마다 ArgoFontLibrary.prepare 가 고른다.
+    /// 폰트 폴더만 미리 만들어 둔다.
     static func registerFonts() {
-        guard !fontsReady else { return }
-        fontsReady = true
-
-        var candidates = [
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-            "/System/Library/Fonts/Core/AppleSDGothicNeo.ttc",
-            "/System/Library/Fonts/CoreAddition/AppleSDGothicNeo.ttc",
-            "/System/Library/Fonts/Core/SFUI.ttf",
-            "/System/Library/Fonts/LanguageSupport/AppleSDGothicNeo.ttc",
-        ]
-
-        // 앱에 넣어 둔 한글 글꼴.
-        //
-        // 기기에 있는 것은 AppleSDGothicNeo 한 벌뿐인데, 그 한 벌로는 굵게
-        // 쓴 글을 굵게 그릴 수가 없습니다 — 굵은 자형이 따로 있어야 고를 수
-        // 있습니다. 굵기를 갖춘 한 가족을 들고 다닙니다.
-        for name in ["Pretendard-Regular", "Pretendard-Bold"] {
-            if let path = Bundle.main.path(forResource: name, ofType: "ttf") {
-                candidates.append(path)
-            }
-        }
-
-        // 사용자가 직접 넣는 자리. 기기에 없는 글꼴이 필요할 때 쓸 수 있게
-        // 둡니다 — 파일 탐색기로 넣고 바로 쓰면 됩니다.
-        let userDir = "/var/mobile/Media/Argo/fonts"
-        if let found = try? FileManager.default.contentsOfDirectory(atPath: userDir) {
-            candidates += found
-                .filter { ["ttf", "ttc", "otf"].contains(($0 as NSString).pathExtension.lowercased()) }
-                .map { userDir + "/" + $0 }
-        }
-
-        var loaded = 0
-        for path in candidates {
-            guard FileManager.default.fileExists(atPath: path),
-                  let data = FileManager.default.contents(atPath: path) else { continue }
-            let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
-            let ok = data.withUnsafeBytes { raw -> Int32 in
-                guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return -1 }
-                return argoconv_register_font(name, base, data.count)
-            }
-            if ok == ARGOCONV_OK { loaded += 1 }
-            ArgoDiag.log("font", "\(name) \(data.count)바이트 → \(ok == ARGOCONV_OK ? "등록" : "실패")")
-        }
-        ArgoDiag.log("font", "등록한 폰트 \(loaded)개")
+        ArgoFontLibrary.ensureFolder()
     }
 
     // MARK: 변환
@@ -126,6 +78,9 @@ enum ArgoOfficeConverter {
         // 한글 문서는 다른 길로 갑니다. hwpers 가 쪽마다 SVG 로 그리고
         // 그걸 PDF 로 옮깁니다 — 끝에 나오는 것은 똑같이 PDF 하나입니다.
         let isHangul = ["hwp", "hwpx"].contains((path as NSString).pathExtension.lowercased())
+
+        // 이 문서가 쓰는 글꼴을 폰트 폴더에서 찾아 넣는다. 없으면 닮은 것으로.
+        let swaps = ArgoFontLibrary.prepare(for: input, consumer: isHangul ? .hangul : .office)
 
         let code = input.withUnsafeBytes { raw -> Int32 in
             guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return ARGOCONV_BAD_ARGS }
@@ -153,7 +108,14 @@ enum ArgoOfficeConverter {
         }
         defer { argoconv_free(buffer, outLen) }
 
-        lastUserNotice = readUserNotice()
+        // 바꿔 넣은 글꼴이 있으면 알린다. 조용히 바꾸면 문서가 원래 그렇게 생긴 줄 안다.
+        var notices: [String] = []
+        if let n = readUserNotice() { notices.append(n) }
+        if !swaps.isEmpty {
+            let shown = swaps.prefix(3).joined(separator: ", ") + (swaps.count > 3 ? LF(" 외 {0}개", swaps.count - 3) : "")
+            notices.append(LF("없는 글꼴을 비슷한 글꼴로 그렸습니다: {0}", shown))
+        }
+        lastUserNotice = notices.isEmpty ? nil : notices.joined(separator: "  ·  ")
 
         let pdf = Data(bytes: buffer, count: outLen)
         let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension

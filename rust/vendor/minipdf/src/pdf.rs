@@ -843,6 +843,9 @@ fn font_preference(
     // 등록해 두어도 고를 길이 없어서, 굵게 쓴 제목이 보통 굵기로 나왔다.
     let style = font_style_penalty(&name, bold, italic);
     if let Some(preferred) = preferred_font {
+        // 중국어 이름처럼 대응표로 윈도우 파일 이름을 얻은 경우. 그 이름은
+        // 굵기를 이미 담고 있다(simhei 는 그 자체가 굵은 자형이다).
+        let mapped = matches!(preferred.trim(), "宋体" | "新宋体" | "黑体");
         let preferred = match preferred.trim() {
             "宋体" | "新宋体" => "simsun".to_owned(),
             "黑体" => "simhei".to_owned(),
@@ -871,11 +874,14 @@ fn font_preference(
             ("tcm_____", false, true) => "tcmi____",
             _ => preferred.as_str(),
         };
-        if name == preferred_variant {
+        // 요청한 글꼴 이름과 맞으면 굵기까지 본다. 문서마다 글꼴을
+        // "이름" 과 "이름 bold" 로 등록하므로, 굵게 쓴 글은 굵은 쪽이 이긴다.
+        // 윈도우 변형 이름(arialbd 처럼 이름이 이미 굵기를 담은 것)은 그대로 0.
+        if name == preferred_variant && (preferred_variant != preferred || mapped) {
             return 0;
         }
-        if name.starts_with(&preferred) {
-            return 1;
+        if name == preferred_variant || name.starts_with(&preferred) {
+            return if style == 0 { 0 } else { 1 };
         }
         if preferred == "stkaiti" && name.starts_with("simkai") {
             return 2;

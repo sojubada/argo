@@ -220,6 +220,8 @@ fn build_pdf(rendered: &hwpers::render::renderer::RenderResult) -> Result<Vec<u8
         let Some(svg) = rendered.to_svg(index) else {
             continue;
         };
+        // 문서가 원한 글꼴 이름을 실제로 넣은 글꼴 이름으로 바꾼다.
+        let svg = crate::fonts::apply_aliases(&svg);
         let Ok(tree) = usvg::Tree::from_str(&svg, &options) else {
             continue;
         };

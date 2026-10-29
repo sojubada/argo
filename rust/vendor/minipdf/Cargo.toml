@@ -22,6 +22,8 @@ rustybuzz = "0.20"
 subsetter = "=0.2.3"
 ttf-parser = "0.25"
 thiserror = "2"
+# 옛 엑셀(.xls, BIFF). 값과 시트만 읽는다 — 셀 색·테두리는 못 가져온다.
+calamine = { version = "0.37", default-features = false }
 unicode-bidi = "0.3"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 

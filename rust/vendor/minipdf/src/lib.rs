@@ -144,6 +144,17 @@ pub fn register_font(name: impl Into<String>, font_data: impl Into<Vec<u8>>) {
     pdf::clear_font_support_cache();
 }
 
+/// 등록한 글꼴을 모두 비운다. 문서마다 필요한 글꼴만 다시 넣으려고 쓴다 —
+/// 안 비우면 문서를 열 때마다 글꼴 바이트가 쌓인다.
+pub fn clear_fonts() {
+    if let Some(fonts) = REGISTERED_FONTS.get() {
+        if let Ok(mut fonts) = fonts.lock() {
+            fonts.clear();
+        }
+    }
+    pdf::clear_font_support_cache();
+}
+
 pub fn registered_fonts() -> Vec<RegisteredFont> {
     let Some(fonts) = REGISTERED_FONTS.get() else {
         return Vec::new();
@@ -204,6 +215,10 @@ pub fn convert_bytes_to_pdf_with_options(
     options: &ConversionOptions,
 ) -> Result<Vec<u8>> {
     clear_notices();
+    // 옛 오피스 형식은 ZIP 이 아니라 CFB(OLE) 다. 그중 엑셀만 읽는다.
+    if input.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+        return xlsx::convert_xls_bytes(input, options);
+    }
     match detect_office_format(input)? {
         OfficeFormat::Docx => docx::convert_docx_bytes(input, options),
         OfficeFormat::Xlsx => xlsx::convert_xlsx_bytes(input, options),

@@ -34,6 +34,19 @@ size_t argoconv_last_note(uint8_t *buffer, size_t cap);
 /// 사용자에게 보여 줄 알림을 담는다. 없으면 0.
 size_t argoconv_last_user_notice(uint8_t *buffer, size_t cap);
 
+/// 글꼴 파일의 얼굴들(이름·굵기·한글 여부)을 JSON 으로 담는다.
+/// 돌려준 값이 cap 보다 크면 아무것도 안 쓴 것 — 그 크기로 다시 부른다.
+size_t argoconv_font_faces(const uint8_t *data, size_t len, uint8_t *out, size_t cap);
+
+/// 문서가 쓰는 글꼴 이름들을 JSON 배열로 담는다. 크기 규칙은 위와 같다.
+size_t argoconv_doc_fonts(const uint8_t *data, size_t len, uint8_t *out, size_t cap);
+
+/// 등록한 글꼴과 이름 바꿈을 모두 비운다.
+int argoconv_clear_fonts(void);
+
+/// 한글 문서가 requested 글꼴을 원하면 actual 로 그린다.
+int argoconv_font_alias(const char *requested, const char *actual);
+
 /// argoconv_to_pdf 가 준 버퍼를 돌려준다.
 void argoconv_free(uint8_t *ptr, size_t len);
 

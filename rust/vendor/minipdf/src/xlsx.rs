@@ -2834,8 +2834,26 @@ fn xlsx_preferred_font(font_name: Option<&str>) -> Option<&'static str> {
         "palatinolinotype" => Some("bookos"),
         "twcenmt" => Some("tcm_____"),
         "verdana" => Some("verdana"),
-        _ => None,
+        "" => None,
+        // 표에 없는 이름도 넘긴다. 앱이 문서에 쓰인 글꼴을 그 이름으로
+        // 등록해 두므로(맑은 고딕, 함초롬바탕 …) 이름이 곧 열쇠다.
+        _ => font_name.map(|name| intern_font_name(name.trim())),
     }
+}
+
+/// 글꼴 이름을 'static 으로 붙잡아 둔다. 셀 모양이 Copy 라 String 을 못 담는다.
+/// 한 번 본 이름은 다시 만들지 않으니, 늘어나는 것은 서로 다른 글꼴 이름 수뿐이다.
+fn intern_font_name(name: &str) -> &'static str {
+    use std::sync::{Mutex, OnceLock};
+    static NAMES: OnceLock<Mutex<Vec<&'static str>>> = OnceLock::new();
+    let names = NAMES.get_or_init(|| Mutex::new(Vec::new()));
+    let mut names = names.lock().expect("font name lock poisoned");
+    if let Some(found) = names.iter().find(|n| n.eq_ignore_ascii_case(name)) {
+        return found;
+    }
+    let leaked: &'static str = Box::leak(name.to_lowercase().into_boxed_str());
+    names.push(leaked);
+    leaked
 }
 
 fn excel_max_digit_width(font_name: Option<&str>, size: f32) -> f32 {
@@ -3691,6 +3709,118 @@ fn column_index_from_ref(cell_ref: &str) -> Option<usize> {
             .checked_add(ch.to_ascii_uppercase() as usize - 'A' as usize + 1)?;
     }
     seen_letter.then_some(col.saturating_sub(1))
+}
+
+/// 옛 엑셀(.xls)을 PDF 로.
+///
+/// calamine 이 값·시트·병합 칸을 읽는다. 셀 색·테두리·열 너비는 못 가져와서,
+/// 쓰인 범위에 옅은 칸 선을 긋고 열 너비는 글 길이로 잡는다 — 선이 없으면 숫자가
+/// 어느 칸 것인지 따라 읽기 어렵다.
+pub(crate) fn convert_xls_bytes(input: &[u8], options: &ConversionOptions) -> Result<Vec<u8>> {
+    use calamine::{Data, Reader, Xls};
+
+    let mut workbook = Xls::new(Cursor::new(input.to_vec()))
+        .map_err(|error| crate::MiniPdfError::InvalidInput(format!("xls: {error}")))?;
+    let names = workbook.sheet_names().to_owned();
+    let grid = PdfColor::new(0.78, 0.78, 0.78);
+    let mut sheets = Vec::new();
+
+    for name in names {
+        let Ok(range) = workbook.worksheet_range(&name) else { continue };
+        let (start_row, start_col) = range.start().map(|(r, c)| (r as usize, c as usize)).unwrap_or((0, 0));
+        let mut rows: Vec<RowData> = Vec::new();
+        let mut widths: Vec<usize> = Vec::new();
+
+        for (offset, row) in range.rows().enumerate() {
+            let mut cells = Vec::with_capacity(start_col + row.len());
+            for _ in 0..start_col {
+                cells.push(CellData::default());
+            }
+            for (c, value) in row.iter().enumerate() {
+                let (text, numeric) = match value {
+                    Data::Empty => (String::new(), false),
+                    Data::String(s) => (s.clone(), false),
+                    Data::Int(i) => (i.to_string(), true),
+                    Data::Float(f) => (format_xls_number(*f), true),
+                    Data::Bool(b) => ((if *b { "TRUE" } else { "FALSE" }).to_owned(), false),
+                    Data::DateTime(d) => (format_excel_date_year_month_day(d.as_f64()), true),
+                    Data::DateTimeIso(s) | Data::DurationIso(s) => (s.clone(), false),
+                    Data::Error(e) => (format!("#{e:?}"), false),
+                };
+                let col = start_col + c;
+                let chars = text.chars().map(|ch| if ch.is_ascii() { 1 } else { 2 }).sum::<usize>();
+                if widths.len() <= col { widths.resize(col + 1, 0); }
+                widths[col] = widths[col].max(chars.min(60));
+                let mut style = CellStyle::default();
+                if numeric { style.horizontal_alignment = HorizontalAlignment::Right; }
+                cells.push(CellData { text, is_numeric: numeric, style });
+            }
+            rows.push(RowData { index: start_row + offset, height: ROW_HEIGHT, cells });
+        }
+
+        // 쓰인 범위에 칸 선.
+        let column_count = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+        for row in &mut rows {
+            while row.cells.len() < column_count { row.cells.push(CellData::default()); }
+            for cell in row.cells.iter_mut().skip(start_col) {
+                cell.style.borders = CellBorders {
+                    left: Some(grid), right: Some(grid), top: Some(grid), bottom: Some(grid),
+                    left_width: 0.5, right_width: 0.5, top_width: 0.5, bottom_width: 0.5,
+                    ..CellBorders::default()
+                };
+            }
+        }
+
+        let merges = workbook
+            .merge_cells_by_sheet_name(&name)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| MergeRange {
+                start_row: d.start.0 as usize,
+                start_col: d.start.1 as usize,
+                end_row: d.end.0 as usize,
+                end_col: d.end.1 as usize,
+            })
+            .collect::<Vec<_>>();
+
+        // 글자 수로 열 너비를 잡는다 (포인트). 너무 좁거나 넓지 않게 둔다.
+        let column_widths = (0..column_count)
+            .map(|c| {
+                let n = widths.get(c).copied().unwrap_or(0) as f32;
+                (n * 6.2 + 12.0).clamp(COL_WIDTH * 0.6, COL_WIDTH * 6.0)
+            })
+            .collect::<Vec<_>>();
+
+        if rows.is_empty() { continue; }
+        sheets.push(SheetData {
+            rows,
+            images: Vec::new(),
+            column_widths,
+            merges,
+            row_breaks: Vec::new(),
+            default_row_height: ROW_HEIGHT,
+            print_title_rows: None,
+            page_setup: SheetPageSetup::default(),
+            footer: None,
+        });
+    }
+
+    if sheets.is_empty() {
+        return Err(crate::MiniPdfError::InvalidInput("xls: 읽을 시트가 없습니다".to_owned()));
+    }
+    let mut doc = PdfDocument::new();
+    render_xlsx(&mut doc, &sheets, options.page_size, options.fit_sheet_width);
+    Ok(doc.to_bytes())
+}
+
+/// 엑셀 '일반' 형식처럼 숫자를 쓴다. 정수면 소수점 없이, 아니면 유효숫자 10자리.
+fn format_xls_number(value: f64) -> String {
+    if value.is_finite() && value.fract() == 0.0 && value.abs() < 1e15 {
+        return format!("{}", value as i64);
+    }
+    let s = format!("{:.10}", value);
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    s.to_owned()
 }
 
 fn render_xlsx(

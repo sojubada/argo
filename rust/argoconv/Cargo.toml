@@ -17,6 +17,10 @@ hwpers = { path = "../vendor/hwpers" }
 # 그 SVG 를 PDF 로 옮긴다. 둘 다 순수 Rust 라 tvOS 로 간다.
 svg2pdf = "0.13"
 pdf-writer = "0.12"
+# 글꼴 파일의 이름표를 읽는다 (폰트 폴더 색인).
+ttf-parser = "0.25"
+# 문서 안 XML 에서 글꼴 이름을 훑는다. minipdf 와 같은 판을 쓴다.
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 opt-level = "z"     # 크기 우선. 변환은 이미 0.1 초 안쪽이라 속도를 더 살 이유가 없다.
