@@ -59,9 +59,12 @@ def back_layer(name, t):
     glowimg = glowimg.filter(ImageFilter.GaussianBlur(S * 6))
     im.alpha_composite(glowimg)
 
+    # 별·반짝임은 따로 그려 겹친다. ImageDraw 로 반투명 색을 바로 찍으면 섞이지 않고
+    # 그 자리의 불투명도가 바뀐다 — tvOS 는 맨 뒤 층에 투명한 점이 있으면 거부한다.
+    over = Image.new("RGBA", (W, H))
     if stars:
         rnd = random.Random(name)
-        sd = ImageDraw.Draw(im)
+        sd = ImageDraw.Draw(over)
         for _ in range(140):
             x = rnd.randrange(W)
             y = rnd.randrange(int(horizon * 0.92))
@@ -70,15 +73,19 @@ def back_layer(name, t):
             sd.ellipse([x - rr, y - rr, x + rr, y + rr], fill=(255, 255, 255, a))
 
     # 바다 위 반짝임
-    rd = ImageDraw.Draw(im)
+    rd = ImageDraw.Draw(over)
     rnd = random.Random(name + "sea")
     for i in range(16):
         y = horizon + int((H - horizon) * (i / 16) ** 1.2) + S * 3
         half = int(W * (0.06 + 0.10 * rnd.random()) * (1 - i / 24))
         x0 = W // 2 - half + rnd.randrange(-S * 40, S * 40)
         rd.line([(x0, y), (x0 + half * 2, y)], fill=glow + (int(80 * (1 - i / 20)),), width=S * 2)
-    d.line([(0, horizon), (W, horizon)], fill=glow + (60,), width=S)
-    return im
+    rd.line([(0, horizon), (W, horizon)], fill=glow + (60,), width=S)
+    im.alpha_composite(over)
+    # 맨 뒤 층은 완전히 불투명해야 한다.
+    solid = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    solid.alpha_composite(im)
+    return solid
 
 
 def bezier(p0, p1, p2, n=60):
