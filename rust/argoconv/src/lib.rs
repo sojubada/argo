@@ -86,6 +86,20 @@ pub(crate) fn note(line: String) {
     }
 }
 
+/// 지금까지 적힌 줄을 꺼낸다(비어 있으면 None).
+pub(crate) fn take_note_text() -> Option<String> {
+    let mut slot = LAST_NOTE.lock().ok()?;
+    let line = std::mem::take(&mut *slot);
+    (!line.is_empty()).then_some(line)
+}
+
+/// 앞 단계가 남긴 줄을 지금 줄 앞에 붙인다.
+pub(crate) fn prepend_note(earlier: &str) {
+    if let Ok(mut slot) = LAST_NOTE.lock() {
+        *slot = if slot.is_empty() { earlier.to_owned() } else { format!("{earlier} / {}", *slot) };
+    }
+}
+
 /// 변환을 시작할 때 지난 줄을 지운다. 안 그러면 실패했을 때 앞 문서가
 /// 남긴 줄이 이 문서의 것인 양 로그에 찍힌다.
 pub(crate) fn clear_note() {

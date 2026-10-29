@@ -62,7 +62,53 @@ pub unsafe extern "C" fn argoconv_hwp_to_pdf(
     crate::clear_note();
     let bytes = slice::from_raw_parts(input, len);
     let (out_ptr, out_size) = (out, out_len);
-    guard(move || convert(bytes, out_ptr, out_size))
+
+    // 새 엔진(rhwp)을 먼저 쓴다. 패닉이나 실패는 여기서 삼키고 hwpers 로 넘어간다 —
+    // 낯선 문서 하나 때문에 원래 되던 문서까지 못 열게 해서는 안 된다.
+    #[cfg(feature = "rhwp")]
+    {
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| convert_rhwp(bytes)));
+        match attempt {
+            Ok(Ok(pdf)) => {
+                let mut boxed = pdf.into_boxed_slice();
+                *out_size = boxed.len();
+                *out_ptr = boxed.as_mut_ptr();
+                std::mem::forget(boxed);
+                return ARGOCONV_OK;
+            }
+            Ok(Err(reason)) => crate::note(format!("rhwp 실패, hwpers 로 다시 연다: {reason}")),
+            Err(_) => crate::note("rhwp 가 멈췄다, hwpers 로 다시 연다".to_owned()),
+        }
+    }
+
+    let earlier = crate::take_note_text();
+    let code = guard(move || convert(bytes, out_ptr, out_size));
+    if let Some(earlier) = earlier {
+        crate::prepend_note(&earlier);
+    }
+    code
+}
+
+/// rhwp 로 쪽마다 SVG 를 그려 PDF 로 묶는다.
+#[cfg(feature = "rhwp")]
+fn convert_rhwp(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let document = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| format!("{e}"))?;
+    let pages = document.page_count();
+    if pages == 0 {
+        return Err("쪽이 없다".to_owned());
+    }
+    let mut svgs = Vec::with_capacity(pages as usize);
+    let mut failed = 0u32;
+    for page in 0..pages {
+        match document.render_page_svg_native(page) {
+            Ok(svg) => svgs.push(svg),
+            Err(_) => failed += 1,
+        }
+    }
+    let total = svgs.len();
+    let pdf = pdf_from_svgs(svgs.into_iter()).map_err(|_| "PDF 로 못 옮겼다".to_owned())?;
+    crate::note(format!("rhwp 쪽 {total}장{}", if failed > 0 { format!(" (못 그린 쪽 {failed}장)") } else { String::new() }));
+    Ok(pdf)
 }
 
 /// 패닉을 잡는 바깥쪽과 실제 일을 나눕니다.
@@ -207,6 +253,11 @@ unsafe fn convert(bytes: &[u8], out: *mut *mut u8, out_len: *mut usize) -> c_int
 
 /// 쪽마다 SVG 를 XObject 로 넣고 한 PDF 로 묶습니다.
 fn build_pdf(rendered: &hwpers::render::renderer::RenderResult) -> Result<Vec<u8>, ()> {
+    pdf_from_svgs((0..rendered.pages.len()).filter_map(|index| rendered.to_svg(index)))
+}
+
+/// SVG 쪽들을 한 PDF 로.
+fn pdf_from_svgs(svgs: impl Iterator<Item = String>) -> Result<Vec<u8>, ()> {
     let options = font_options();
     let conversion = svg2pdf::ConversionOptions::default();
 
@@ -216,10 +267,7 @@ fn build_pdf(rendered: &hwpers::render::renderer::RenderResult) -> Result<Vec<u8
     let tree_id = alloc.bump();
     let mut page_ids: Vec<Ref> = Vec::new();
 
-    for index in 0..rendered.pages.len() {
-        let Some(svg) = rendered.to_svg(index) else {
-            continue;
-        };
+    for svg in svgs {
         // 문서가 원한 글꼴 이름을 실제로 넣은 글꼴 이름으로 바꾼다.
         let svg = crate::fonts::apply_aliases(&svg);
         let Ok(tree) = usvg::Tree::from_str(&svg, &options) else {

@@ -14,6 +14,9 @@ crate-type = ["staticlib"]
 minipdf = { path = "../vendor/minipdf" }
 # 한글 문서: hwp·hwpx 를 읽어 쪽마다 SVG 로 그린다.
 hwpers = { path = "../vendor/hwpers" }
+# 새 한글 엔진(MIT). 먼저 이것으로 그려 보고, 못 열면 hwpers 로 넘어간다.
+# 문제가 생기면 --no-default-features 로 빼고 지을 수 있다.
+rhwp = { path = "../vendor/rhwp", default-features = false, optional = true }
 # 그 SVG 를 PDF 로 옮긴다. 둘 다 순수 Rust 라 tvOS 로 간다.
 svg2pdf = "0.13"
 pdf-writer = "0.12"
@@ -21,6 +24,9 @@ pdf-writer = "0.12"
 ttf-parser = "0.25"
 # 문서 안 XML 에서 글꼴 이름을 훑는다. minipdf 와 같은 판을 쓴다.
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["rhwp"]
 
 [profile.release]
 opt-level = "z"     # 크기 우선. 변환은 이미 0.1 초 안쪽이라 속도를 더 살 이유가 없다.
