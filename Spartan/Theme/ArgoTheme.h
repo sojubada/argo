@@ -14,6 +14,11 @@
 
 @interface ArgoTheme : NSObject
 
+#pragma mark - 테마
+
+/// 지금 테마 번호 (0~5). 설정의 argoTheme.
++ (NSInteger)themeIndex;
+
 #pragma mark - 색
 
 /// 화면 바탕. 순검정이 아닌 짙은 차콜 — 순검정은 OLED에서 경계가 사라집니다.

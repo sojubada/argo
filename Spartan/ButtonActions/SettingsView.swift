@@ -184,11 +184,8 @@ struct SettingsView: View {
 				showView[2] = true
 			}) {
 				HStack {
-					Image(systemName: "pencil")
-					Text(NSLocalizedString("APPICON", comment: """
-					LET'S GO BABY LOVE THE [[METS]] HIT A HOME RUN BABY
-					1987 *CAN* HAPPEN AGAIN
-					"""))
+					Image(systemName: "paintpalette")
+					Text(L("테마 · 아이콘"))
 					.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
 						view.scaledFont(name: "BotW Sheikah Regular", size: 25)
 					}
@@ -413,97 +410,108 @@ struct SettingsView: View {
     }
 }
 
+/// 테마 · 아이콘 고르기.
+///
+/// 고르면 화면 색(바탕·포인트 색)과 앱 아이콘이 같이 바뀐다. 아이콘은 그 자리에서
+/// 바뀌고, 화면 색은 다시 켜야 모든 화면에 들어간다 — 이미 그려 둔 화면까지
+/// 다시 칠할 길이 없다.
 struct IconView: View {
-	var body: some View {
-		VStack {
-			Text(NSLocalizedString("APPICON_TITLE", comment: "But choose carefully because you'll stay in the job you pick for the rest of your life."))
-				.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-					view.scaledFont(name: "BotW Sheikah Regular", size: 60)
-				}
-				.font(.system(size: 60))
-			VStack {
-				HStack {
-					IconButton(iconName: "Alpha", creator: "WhitetailAni")
-					IconButton(iconName: "Megamind", creator: "WhitetailAni")
-					IconButton(iconName: "Terabyte", creator: "WhitetailAni")
-				}
-				HStack {
-                    IconButton(iconName: "Beta", creator: "WhitetailAni")
-					IconButton(iconName: "Summit", creator: "Noel Berry? Unsure")
-					IconButton(iconName: "Finda", creator: "JamesnLollify")
-				}
-			}
-		}
-	}
-}
-
-struct IconButton: View {
-	@State var iconName: String
-	@State var creator: String
+	@State private var current = ArgoTheme.themeIndex()
+	@State private var showRestart = false
+	@State private var iconError: String?
 
 	var body: some View {
-		Button(action: {
-			UIApplication.shared.setAlternateIconName(iconName) { error in
-				if let error = error {
-					print(error.localizedDescription)
-				}
-			}
-		}) {
-			VStack {
-				Image(uiImage: UIImage(named: iconName)!)
-					.resizable()
-					.cornerRadius(10)
-					.frame(width: 300, height: 180)
-				Text(iconName)
-						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-							view.scaledFont(name: "BotW Sheikah Regular", size: 30)
+		ScrollView {
+			VStack(spacing: 30) {
+				Text(L("테마 · 아이콘"))
+					.font(.system(size: 56, weight: .semibold))
+				Text(L("화면 바탕과 포인트 색, 앱 아이콘이 함께 바뀝니다."))
+					.foregroundColor(.secondary)
+				ForEach(0..<2, id: \.self) { row in
+					HStack(spacing: 40) {
+						ForEach(0..<3, id: \.self) { col in
+							themeButton(ArgoThemeChoice.all[row * 3 + col])
 						}
-				Text(creator)
-					.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-						view.scaledFont(name: "BotW Sheikah Regular", size: 25).foregroundColor(.gray)
 					}
-					.foregroundColor(.gray)
+				}
+				if let iconError {
+					Text(iconError).font(.caption).foregroundColor(.orange)
+				}
 			}
-			.frame(width: 350, height: 300)
+			.padding(40)
+		}
+		.alert(isPresented: $showRestart) {
+			Alert(
+				title: Text(L("다시 켜면 모든 화면에 적용됩니다")),
+				message: Text(L("지금 끄고 다시 켜시겠습니까?")),
+				primaryButton: .default(Text(L("지금 끄기")), action: {
+					let app = UIApplication.shared
+					let suspend = Selector(("suspend"))
+					if app.responds(to: suspend) { _ = app.perform(suspend) }
+					DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { exit(0) }
+				}),
+				secondaryButton: .cancel(Text(L("나중에")))
+			)
+		}
+	}
+
+	private func themeButton(_ t: ArgoThemeChoice) -> some View {
+		Button(action: { choose(t) }) {
+			VStack(spacing: 10) {
+				Image("ThemePreview-" + t.id)
+					.resizable()
+					.aspectRatio(400.0 / 240.0, contentMode: .fit)
+					.frame(width: 400)
+					.cornerRadius(14)
+				HStack(spacing: 8) {
+					if current == t.index {
+						Image(systemName: "checkmark.circle.fill")
+					}
+					Text(t.title)
+					Circle().fill(t.swatch).frame(width: 22, height: 22)
+				}
+			}
+			.padding(12)
+		}
+		.buttonStyle(.card)
+	}
+
+	private func choose(_ t: ArgoThemeChoice) {
+		guard t.index != current else { return }
+		UserDefaults.settings.set(t.index, forKey: "argoTheme")
+		current = t.index
+		iconError = nil
+		// 기본 테마는 주 아이콘으로 되돌린다.
+		guard UIApplication.shared.supportsAlternateIcons else {
+			showRestart = true
+			return
+		}
+		UIApplication.shared.setAlternateIconName(t.iconName) { error in
+			DispatchQueue.main.async {
+				if let error {
+					iconError = L("아이콘을 바꾸지 못했습니다: ") + error.localizedDescription
+				}
+				showRestart = true
+			}
 		}
 	}
 }
 
-func cacheFolder(_ directory: String) {
-    // 캐시 파일 이름을 못 읽으면 할 일이 없다.
-    guard let metaName = metadataName else { return }
+struct ArgoThemeChoice: Identifiable {
+	let index: Int
+	let id: String          // 미리보기·아이콘 이름의 뒷부분
+	let title: String
+	let swatch: Color
 
-    var masterFiles: [SpartanFile] = []
-    do {
-        let contents = try FileManager.default.contentsOfDirectory(atPath: directory)
-        var files: [String]
-        files = contents.map { file in
-            let filePath = "/" + directory + "/" + file
-            var isDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory)
-            return isDirectory.boolValue ? "\(file)/" : file
-        }
-        // 캐시 파일이 폴더에 있을 때만 뺀다.
-        //
-        // 전에는 files.firstIndex(of:)! 로 강제 언래핑했다. 캐시가 아직 없는
-        // 폴더에서는 nil 이 나와 뒷줄 스레드에서 트랩이 났다 — 실행 직후 종료의
-        // 원인이다. 원래 코드에서는 updateFiles 가 캐시 없는 폴더에서 먼저
-        // return 해 여기까지 오지 않았고, 그 구조가 사라지면서 드러났다.
-        if let metaIndex = files.firstIndex(of: metaName) {
-            files.remove(at: metaIndex)
-        }
-        for i in 0..<files.count {
-            masterFiles.append(SpartanFile(name: files[i], fullPath: directory + files[i], isSelected: false, fileType: FileInfo.yandereDevFileType(file: directory + files[i]), isLoadingFile: false))
-        }
-    } catch {
-        print(error)
-    }
-    let encoder = JSONEncoder()
-    do {
-        let encoded = try encoder.encode(masterFiles)
-        try encoded.write(to: URL(fileURLWithPath: tempPath))
-    } catch {
-        print("failed to save cached metadata: \(error)")
-    }
-    RootHelperActs.mvtemp(directory + metaName)
+	/// 다른 아이콘 이름. 기본(Midnight)은 nil — 주 아이콘이다.
+	var iconName: String? { index == 0 ? nil : "Theme" + id }
+
+	static let all: [ArgoThemeChoice] = [
+		ArgoThemeChoice(index: 0, id: "Midnight", title: L("한밤"), swatch: Color(red: 0.29, green: 0.69, blue: 0.78)),
+		ArgoThemeChoice(index: 1, id: "Ocean", title: L("바다"), swatch: Color(red: 0.38, green: 0.66, blue: 1.00)),
+		ArgoThemeChoice(index: 2, id: "Forest", title: L("숲"), swatch: Color(red: 0.40, green: 0.82, blue: 0.55)),
+		ArgoThemeChoice(index: 3, id: "Ember", title: L("노을"), swatch: Color(red: 1.00, green: 0.58, blue: 0.32)),
+		ArgoThemeChoice(index: 4, id: "Orchid", title: L("보랏빛"), swatch: Color(red: 0.78, green: 0.58, blue: 1.00)),
+		ArgoThemeChoice(index: 5, id: "Gold", title: L("황금빛"), swatch: Color(red: 0.95, green: 0.78, blue: 0.36)),
+	]
 }

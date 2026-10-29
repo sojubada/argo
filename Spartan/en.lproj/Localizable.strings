@@ -644,3 +644,14 @@
 "시스템 잠금이 걸린 항목이 안에 있는 폴더는 지울 수 없습니다. 끄려면 모험가판을 설치하십시오." = "Folders that contain system-locked items cannot be deleted. Install the Adventurer edition to turn this off.";
 "{0} — 안전 모드를 끌 수 있습니다. 켜 두면 잠긴 항목이 든 폴더는 지울 수 없습니다." = "{0} — safe mode can be turned off. While it is on, folders containing locked items cannot be deleted.";
 "저장한 연결이 없습니다. WebDAV, FTP 를 더할 수 있습니다." = "No saved connections. You can add WebDAV or FTP.";
+
+/* ---- Argo: themes ---- */
+"테마 · 아이콘" = "Theme · Icon";
+"화면 바탕과 포인트 색, 앱 아이콘이 함께 바뀝니다." = "Changes the screen background, accent colour and app icon together.";
+"아이콘을 바꾸지 못했습니다: " = "Could not change the icon: ";
+"한밤" = "Midnight";
+"바다" = "Ocean";
+"숲" = "Forest";
+"노을" = "Ember";
+"보랏빛" = "Orchid";
+"황금빛" = "Gold";
