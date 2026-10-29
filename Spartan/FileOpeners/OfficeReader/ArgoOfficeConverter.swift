@@ -27,7 +27,10 @@ enum ArgoOfficeConverter {
     /// xlsx 도 들어왔습니다. 빼 두었던 이유는 넓은 시트를 엑셀 인쇄하듯
     /// 열 묶음별로 쪼개서 화면으로 따라 읽을 수가 없었기 때문인데, 이제는
     /// 쪽을 시트 폭에 맞춰 늘리고 행만 넘깁니다.
-    static let handled: Set<String> = ["docx", "pptx", "xlsx", "xls", "hwp", "hwpx"]
+    ///
+    /// .doc 도 들어왔습니다. 옛 워드 바이너리를 읽어 docx 모양으로 옮긴 뒤
+    /// 같은 길로 그립니다.
+    static let handled: Set<String> = ["docx", "doc", "pptx", "xlsx", "xls", "hwp", "hwpx"]
 
     /// 직전 변환이 사용자에게 알릴 것을 남겼으면 그 한 줄. 없으면 nil.
     ///

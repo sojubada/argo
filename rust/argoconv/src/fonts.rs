@@ -189,6 +189,11 @@ fn document_fonts(bytes: &[u8]) -> Vec<String> {
                 }
             }
         }
+    } else if let names @ [_, ..] = minipdf::doc_font_names(bytes).as_slice() {
+        // 옛 워드(.doc): 글꼴 이름표
+        for name in names {
+            push(name);
+        }
     } else if let Ok(document) = hwpers::HwpReader::from_bytes(bytes) {
         for face in &document.doc_info.face_names {
             push(&face.font_name);

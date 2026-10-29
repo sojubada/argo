@@ -1176,6 +1176,7 @@ name = "minipdf"
 version = "0.7.0"
 dependencies = [
  "calamine",
+ "cfb 0.11.0",
  "chrono",
  "flate2",
  "image",
