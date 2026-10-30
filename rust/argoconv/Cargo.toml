@@ -7,7 +7,7 @@ edition = "2021"
 # tvOS 는 서드파티 동적 라이브러리를 싫어한다.
 [lib]
 name = "argoconv"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 # 벤더링한 사본을 쓴다. 슬라이드 제목이 사라지던 문제를 고쳤다.
@@ -24,6 +24,10 @@ pdf-writer = "0.12"
 ttf-parser = "0.25"
 # 문서 안 XML 에서 글꼴 이름을 훑는다. minipdf 와 같은 판을 쓴다.
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+# 발표 문서를 SVG 로 그리는 데 쓴다 (usvg 와 같은 판).
+roxmltree = "0.20"
+# 발표 문서 안의 BMP·TIFF 그림을 PNG 로.
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "tiff"] }
 
 [features]
 default = ["rhwp"]

@@ -6,9 +6,11 @@ fn main() {
         minipdf::register_font("Pretendard", bytes.clone());
         minipdf::register_font("Pretendard bold", bytes);
     }
+    if let Some(font) = args.get(4) {
+        minipdf::register_font("Pretendard bold", std::fs::read(font).expect("font"));
+    }
     let input = std::fs::read(&args[1]).expect("input");
     println!("fonts: {:?}", minipdf::doc_font_names(&input));
-    if let Ok(d) = minipdf::doc_to_docx(&input) { std::fs::write(format!("{}.docx", &args[2]), d).ok(); }
     let pdf = minipdf::convert_bytes_to_pdf(&input).expect("convert");
     std::fs::write(&args[2], pdf).expect("write");
     println!("stats: {:?}", minipdf::conversion_stats());

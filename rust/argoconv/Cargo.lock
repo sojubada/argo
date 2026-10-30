@@ -63,9 +63,11 @@ name = "argoconv"
 version = "0.1.0"
 dependencies = [
  "hwpers",
+ "image",
  "minipdf",
  "pdf-writer",
  "rhwp",
+ "roxmltree 0.20.0",
  "svg2pdf",
  "ttf-parser",
  "zip 2.6.1",

@@ -4,8 +4,9 @@
 //! tvOS 의 std 는 Tier 3 라 파일 메타데이터 쪽이 아직 비어 있고,
 //! 그 빈 곳을 아예 지나가지 않기 위해서다. 읽고 쓰는 일은 Swift 가 한다.
 
-mod fonts;
+pub mod fonts;
 mod hwp;
+mod slides;
 
 use std::panic;
 use std::sync::Mutex;
@@ -187,6 +188,27 @@ pub unsafe extern "C" fn argoconv_to_pdf(
     clear_note();
     let bytes = slice::from_raw_parts(input, len);
     let (out_ptr, out_size) = (out, out_len);
+    // 발표 문서는 새 렌더러(SVG 경로)로 먼저 그린다. 실패하면 예전 변환기로.
+    if slides::is_presentation_zip(bytes) || slides::ppt::is_ppt(bytes) {
+        let attempt = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            if slides::ppt::is_ppt(bytes) {
+                slides::ppt::convert(bytes)
+            } else {
+                slides::convert(bytes)
+            }
+        }));
+        match attempt {
+            Ok(Ok(pdf)) => {
+                let mut boxed = pdf.into_boxed_slice();
+                *out_size = boxed.len();
+                *out_ptr = boxed.as_mut_ptr();
+                std::mem::forget(boxed);
+                return ARGOCONV_OK;
+            }
+            Ok(Err(reason)) => note(format!("슬라이드 렌더러 실패, 예전 변환기로: {reason}")),
+            Err(_) => note("슬라이드 렌더러가 멈췄다, 예전 변환기로".to_owned()),
+        }
+    }
     guard(move || {
         // 시트는 한 쪽에 통째로 넣는다. 인쇄가 아니라 화면이므로 열이
         // 여러 쪽으로 쪼개지면 따라 읽을 수가 없다.
