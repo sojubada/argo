@@ -118,8 +118,27 @@ fn default_scheme() -> HashMap<String, Color> {
     .collect()
 }
 
+/// 묶음 안 좌표 → 쪽 좌표 (EMU). 파워포인트는 묶음을 늘여도 글자 크기와
+/// 선 굵기는 그대로 둔다 — SVG 의 scale 로 늘이면 글자까지 커진다.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GMap {
+    pub ox: f64,
+    pub oy: f64,
+    pub sx: f64,
+    pub sy: f64,
+}
+
+impl GMap {
+    pub const ID: GMap = GMap { ox: 0.0, oy: 0.0, sx: 1.0, sy: 1.0 };
+    pub fn apply(&self, x: Xfrm) -> Xfrm {
+        Xfrm { x: self.ox + x.x * self.sx, y: self.oy + x.y * self.sy, w: x.w * self.sx, h: x.h * self.sy, ..x }
+    }
+}
+
 /// 한 쪽을 그리는 동안의 둘레.
+#[derive(Clone)]
 pub(crate) struct Scope<'s, 'a, 'i> {
+    pub gmap: GMap,
     pub part: &'s str,
     pub rels: &'s HashMap<String, Rel>,
     pub palette: &'s Palette,
@@ -317,41 +336,56 @@ impl<'d, 'i> Renderer<'d, 'i> {
         }
     }
 
-    fn group(&mut self, svg: &mut Svg, n: Node<'d, 'i>, scope: &Scope<'_, 'd, 'i>, group_fill: Option<&Fill>)
-    {
+    fn group(&mut self, svg: &mut Svg, n: Node<'d, 'i>, scope: &Scope<'_, 'd, 'i>, group_fill: Option<&Fill>) {
         let pr = child(n, "grpSpPr");
         let xf = pr.and_then(|p| child(p, "xfrm"));
-        let x = read_xfrm(xf).unwrap_or_default();
+        let raw = read_xfrm(xf).unwrap_or_default();
         let (cox, coy, cw, ch) = xf
             .map(|xf| {
                 let o = child(xf, "chOff");
                 let e = child(xf, "chExt");
                 (
-                    o.and_then(|o| num(o, "x")).unwrap_or(x.x),
-                    o.and_then(|o| num(o, "y")).unwrap_or(x.y),
-                    e.and_then(|e| num(e, "cx")).unwrap_or(x.w),
-                    e.and_then(|e| num(e, "cy")).unwrap_or(x.h),
+                    o.and_then(|o| num(o, "x")).unwrap_or(raw.x),
+                    o.and_then(|o| num(o, "y")).unwrap_or(raw.y),
+                    e.and_then(|e| num(e, "cx")).unwrap_or(raw.w),
+                    e.and_then(|e| num(e, "cy")).unwrap_or(raw.h),
                 )
             })
             .unwrap_or((0.0, 0.0, 0.0, 0.0));
-        let sx = if cw > 0.0 { x.w / cw } else { 1.0 };
-        let sy = if ch > 0.0 { x.h / ch } else { 1.0 };
+        let x = scope.gmap.apply(raw);
+        let sx = if cw > 0.0 && raw.w > 0.0 { x.w / cw } else { scope.gmap.sx };
+        let sy = if ch > 0.0 && raw.h > 0.0 { x.h / ch } else { scope.gmap.sy };
         let own = pr.and_then(|p| fill::read_fill(p, scope.palette, None));
         let gf = match &own {
             Some(Fill::Group) | None => group_fill.cloned(),
             Some(other) => Some(other.clone()),
         };
-        let t = format!(
-            "{} scale({} {}) translate({} {})",
-            shape_transform(&x, true),
-            f(sx),
-            f(sy),
-            f(-cox / EMU),
-            f(-coy / EMU)
-        );
-        svg.body.push_str(&format!("<g transform=\"{t}\">"));
-        self.tree(svg, n, scope, gf.as_ref());
-        svg.body.push_str("</g>");
+        let mut inner = scope.clone();
+        inner.gmap = GMap { ox: x.x - cox * sx, oy: x.y - coy * sy, sx, sy };
+        // 돌리기·뒤집기만 SVG 변환으로 (크기는 위에서 좌표로 풀었다).
+        let (cx, cy) = ((x.x + x.w / 2.0) / EMU, (x.y + x.h / 2.0) / EMU);
+        let mut t = String::new();
+        if x.rot != 0.0 {
+            t.push_str(&format!("rotate({} {} {}) ", f(x.rot), f(cx), f(cy)));
+        }
+        if x.flip_h || x.flip_v {
+            t.push_str(&format!(
+                "translate({} {}) scale({} {}) translate({} {})",
+                f(cx),
+                f(cy),
+                if x.flip_h { -1 } else { 1 },
+                if x.flip_v { -1 } else { 1 },
+                f(-cx),
+                f(-cy)
+            ));
+        }
+        if t.is_empty() {
+            self.tree(svg, n, &inner, gf.as_ref());
+        } else {
+            svg.body.push_str(&format!("<g transform=\"{}\">", t.trim()));
+            self.tree(svg, n, &inner, gf.as_ref());
+            svg.body.push_str("</g>");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -370,7 +404,7 @@ impl<'d, 'i> Renderer<'d, 'i> {
         }
         let chain = chain(scope, sp);
         let xfrm = chain.iter().rev().find_map(|n| read_xfrm(sp_pr(*n).and_then(|p| child(p, "xfrm"))));
-        let Some(xf) = xfrm else { return };
+        let Some(xf) = xfrm.map(|x| scope.gmap.apply(x)) else { return };
         let (w, h) = (xf.w / EMU, xf.h / EMU);
 
         // 모양
@@ -642,7 +676,7 @@ impl<'d, 'i> Renderer<'d, 'i> {
             return;
         }
         let chain = chain(scope, pic);
-        let Some(xf) = chain.iter().rev().find_map(|n| read_xfrm(sp_pr(*n).and_then(|p| child(p, "xfrm")))) else { return };
+        let Some(xf) = chain.iter().rev().find_map(|n| read_xfrm(sp_pr(*n).and_then(|p| child(p, "xfrm")))).map(|x| scope.gmap.apply(x)) else { return };
         let Some(bf) = child(pic, "blipFill") else { return };
         let blip = fill::read_blip(bf);
         let (w, h) = (xf.w / EMU, xf.h / EMU);
@@ -750,7 +784,7 @@ impl<'d, 'i> Renderer<'d, 'i> {
             .iter()
             .rev()
             .find_map(|c| read_xfrm(child(*c, "xfrm")).or_else(|| read_xfrm(sp_pr(*c).and_then(|p| child(p, "xfrm")))));
-        let Some(xf) = xf else { return };
+        let Some(xf) = xf.map(|x| scope.gmap.apply(x)) else { return };
         let Some(data) = path_child(n, &["graphic", "graphicData"]) else { return };
         let uri = data.attribute("uri").unwrap_or("");
         let (w, h) = (xf.w / EMU, xf.h / EMU);
@@ -816,6 +850,7 @@ impl<'d, 'i> Renderer<'d, 'i> {
         let Some(tree) = doc.descendants().find(|d| d.tag_name().name() == "spTree") else { return };
         let rels = self.pkg.rels(&drawing);
         let inner = Scope {
+            gmap: GMap { ox: xf.x, oy: xf.y, sx: 1.0, sy: 1.0 },
             part: &drawing,
             rels: &rels,
             palette: scope.palette,
@@ -827,9 +862,7 @@ impl<'d, 'i> Renderer<'d, 'i> {
             skip_placeholders: false,
             slide_no: scope.slide_no,
         };
-        svg.body.push_str(&format!("<g transform=\"translate({} {})\">", f(xf.x / EMU), f(xf.y / EMU)));
         self.tree(svg, tree, &inner, None);
-        svg.body.push_str("</g>");
     }
 }
 

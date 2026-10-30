@@ -213,6 +213,7 @@ pub(crate) fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
             let bg_rels = pkg.rels(bg_part);
             if let Some(bg) = bg {
                 let scope = Scope {
+                    gmap: render::GMap::ID,
                     part: bg_part,
                     rels: &bg_rels,
                     palette: &palette,
@@ -232,6 +233,7 @@ pub(crate) fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
                 if show_master_layout {
                     if let Some(t) = master_tree {
                         let scope = Scope {
+                    gmap: render::GMap::ID,
                             part: &master_path,
                             rels: &mrels,
                             palette: &palette,
@@ -248,6 +250,7 @@ pub(crate) fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
                 }
                 if let Some(t) = layout_tree {
                     let scope = Scope {
+                    gmap: render::GMap::ID,
                         part: &layout_path,
                         rels: &lrels,
                         palette: &palette,
@@ -274,6 +277,7 @@ pub(crate) fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
         let mut svg = Svg::new("s");
         if let Some(t) = tree_of(Some(sroot)) {
             let scope = Scope {
+                    gmap: render::GMap::ID,
                 part: slide_path,
                 rels: &srels,
                 palette: &palette,
@@ -293,6 +297,10 @@ pub(crate) fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
             }
         }
         let svg_text = svg.finish(sw, sh);
+        #[cfg(not(any(target_os = "tvos", target_os = "ios")))]
+        if let Ok(dir) = std::env::var("ARGO_SVG_DUMP") {
+            let _ = std::fs::write(format!("{dir}/slide{slide_no:03}.svg"), &svg_text);
+        }
         let own = out.layer(&svg_text, &options);
         if own.is_none() {
             failed += 1;
