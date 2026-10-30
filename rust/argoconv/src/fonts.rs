@@ -189,6 +189,11 @@ fn document_fonts(bytes: &[u8]) -> Vec<String> {
                 }
             }
         }
+    } else if crate::slides::ppt::is_ppt(bytes) {
+        // 옛 파워포인트(.ppt): 글꼴 목록
+        for name in crate::slides::ppt::font_names(bytes) {
+            push(&name);
+        }
     } else if let names @ [_, ..] = minipdf::doc_font_names(bytes).as_slice() {
         // 옛 워드(.doc): 글꼴 이름표
         for name in names {

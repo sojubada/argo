@@ -242,7 +242,7 @@ class func isOfficeDoc(filePath: String) -> Bool {
         let officeExtensions: Set<String> = [
             "doc", "docx",
             "xls", "xlsx",
-            "ppt", "pptx",
+            "ppt", "pptx", "pptm", "pps", "ppsx",
             "hwp", "hwpx"
         ]
         return officeExtensions.contains(ext)

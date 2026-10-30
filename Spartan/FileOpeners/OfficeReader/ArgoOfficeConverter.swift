@@ -30,7 +30,9 @@ enum ArgoOfficeConverter {
     ///
     /// .doc 도 들어왔습니다. 옛 워드 바이너리를 읽어 docx 모양으로 옮긴 뒤
     /// 같은 길로 그립니다.
-    static let handled: Set<String> = ["docx", "doc", "pptx", "xlsx", "xls", "hwp", "hwpx"]
+    ///
+    /// 발표 문서는 새 렌더러(SVG 경로)가 그립니다. .ppt 도 같은 렌더러가 읽습니다.
+    static let handled: Set<String> = ["docx", "doc", "pptx", "pptm", "ppsx", "ppt", "pps", "xlsx", "xls", "hwp", "hwpx"]
 
     /// 직전 변환이 사용자에게 알릴 것을 남겼으면 그 한 줄. 없으면 nil.
     ///

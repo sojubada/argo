@@ -27,6 +27,9 @@ zip = { version = "2.2", default-features = false, features = ["deflate"] }
 # 발표 문서를 SVG 로 그리는 데 쓴다 (usvg 와 같은 판).
 roxmltree = "0.20"
 # 발표 문서 안의 BMP·TIFF 그림을 PNG 로.
+# 옛 파워포인트(.ppt): OLE 상자와 압축된 메타파일 그림.
+cfb = "0.11"
+flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "tiff"] }
 
 [features]

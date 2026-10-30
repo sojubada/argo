@@ -10,7 +10,7 @@ mod fill;
 mod fontbook;
 mod geom;
 mod metafile;
-mod package;
+pub(crate) mod package;
 pub(crate) mod ppt;
 mod render;
 mod svg;
@@ -35,6 +35,8 @@ pub(crate) fn is_presentation_zip(bytes: &[u8]) -> bool {
     found
 }
 
+const CONV: svg2pdf::ConversionOptions = svg2pdf::ConversionOptions { compress: true, raster_scale: 1.5, embed_text: true, pdfa: false };
+
 struct PdfOut {
     pdf: Pdf,
     alloc: Ref,
@@ -53,8 +55,10 @@ impl PdfOut {
     }
 
     fn layer(&mut self, svg: &str, options: &usvg::Options<'_>) -> Option<Ref> {
+
         let tree = usvg::Tree::from_str(svg, options).ok()?;
-        let (chunk, xobject) = svg2pdf::to_chunk(&tree, svg2pdf::ConversionOptions::default()).ok()?;
+        let (chunk, xobject) = svg2pdf::to_chunk(&tree, CONV).ok()?;
+
         let mut mapping = HashMap::new();
         let alloc = &mut self.alloc;
         chunk.renumber_into(&mut self.pdf, |old| *mapping.entry(old).or_insert_with(|| alloc.bump()));
@@ -104,7 +108,7 @@ pub(crate) fn convert(bytes: &[u8]) -> Result<Vec<u8>, String> {
     convert_package(&pkg)
 }
 
-fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
+pub(crate) fn convert_package(pkg: &Package) -> Result<Vec<u8>, String> {
     // XML 부분을 모두 읽어 둔다 (서로 가리키며 오간다).
     let mut texts: Vec<(String, String)> = Vec::new();
     for name in pkg_xml_names(pkg) {

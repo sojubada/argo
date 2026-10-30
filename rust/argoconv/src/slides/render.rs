@@ -601,31 +601,36 @@ impl<'d, 'i> Renderer<'d, 'i> {
         if !filled && !stroked {
             return;
         }
-        let mut attrs = String::new();
-        if s.blur > 0.5 {
-            let id = svg.id("s");
-            svg.defs.push_str(&format!(
-                "<filter id=\"{id}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"{}\"/></filter>",
-                f(s.blur / 2.5)
-            ));
-            attrs = format!(" filter=\"url(#{id})\"");
-        }
+        // 흐림 필터는 PDF 에서 그림으로 굽혀 느리다(쪽마다 수백 ms).
+        // 같은 모양을 조금씩 넓혀 옅게 여러 번 겹쳐 부드러운 가장자리를 흉내 낸다.
         let d: String = g.paths.iter().map(|p| Geometry::svg_d(&p.cmds)).collect();
-        let paint = if filled {
-            format!("fill=\"{}\" fill-opacity=\"{}\"", s.color.css(), f(s.color.a as f64))
+        let c = s.color.css();
+        let a = s.color.a as f64;
+        let mut body = String::new();
+        if s.blur > 0.5 {
+            let steps = 4;
+            for k in 0..steps {
+                let t = (steps - k) as f64 / steps as f64; // 1 → 바깥
+                let w = s.blur * t;
+                let op = a / (steps as f64 + 1.0);
+                if filled {
+                    body.push_str(&format!(
+                        "<path d=\"{d}\" fill=\"{c}\" fill-opacity=\"{}\" stroke=\"{c}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\"/>",
+                        f(op), f(op), f(w)
+                    ));
+                } else {
+                    body.push_str(&format!(
+                        "<path d=\"{d}\" fill=\"none\" stroke=\"{c}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linejoin=\"round\"/>",
+                        f(op), f(line.width + w)
+                    ));
+                }
+            }
+        } else if filled {
+            body = format!("<path d=\"{d}\" fill=\"{c}\" fill-opacity=\"{}\"/>", f(a));
         } else {
-            format!(
-                "fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\"",
-                s.color.css(),
-                f(s.color.a as f64),
-                f(line.width)
-            )
-        };
-        svg.body.push_str(&format!(
-            "<g transform=\"translate({} {})\"{attrs}><path d=\"{d}\" {paint}/></g>",
-            f(s.dx),
-            f(s.dy)
-        ));
+            body = format!("<path d=\"{d}\" fill=\"none\" stroke=\"{c}\" stroke-opacity=\"{}\" stroke-width=\"{}\"/>", f(a), f(line.width));
+        }
+        svg.body.push_str(&format!("<g transform=\"translate({} {})\">{body}</g>", f(s.dx), f(s.dy)));
     }
 
     // -----------------------------------------------------------------------

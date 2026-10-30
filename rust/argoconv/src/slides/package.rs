@@ -40,6 +40,11 @@ impl Package {
         Ok(Package { parts })
     }
 
+    /// 이미 갖춘 부분들로 (옛 ppt 를 옮긴 것).
+    pub fn from_parts(parts: HashMap<String, Vec<u8>>) -> Package {
+        Package { parts }
+    }
+
     pub fn bytes(&self, path: &str) -> Option<&[u8]> {
         self.parts.get(path.trim_start_matches('/')).map(|v| v.as_slice()).or_else(|| {
             // 대소문자만 다른 경로를 쓰는 파일이 있다.
