@@ -663,3 +663,9 @@
 /* ---- Argo: container names ---- */
 "{0} (그룹)" = "{0} (group)";
 "{0} (확장)" = "{0} (extension)";
+
+/* ---- Argo: music ---- */
+"다음 곡" = "Up Next";
+"가사를 찾는 중…" = "Looking for lyrics…";
+"가사가 없습니다" = "No lyrics";
+"같은 이름의 .lrc 파일을 음악 옆에 두면 그것을 씁니다." = "Put a .lrc file with the same name next to the song and it will be used.";
