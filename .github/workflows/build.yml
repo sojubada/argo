@@ -19,15 +19,16 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-14 는 2026-11-02 에 폐기된다(그 전에 중단 기간이 있다). macos-15 + Xcode 16.
+    runs-on: macos-15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 15
+      - name: Select Xcode
         run: |
-          for candidate in /Applications/Xcode_15.4.app /Applications/Xcode_15.3.app /Applications/Xcode_15.2.app; do
+          for candidate in /Applications/Xcode_16.4.app /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_16.app; do
             if [ -d "$candidate" ]; then
               sudo xcode-select -s "$candidate"
               break
