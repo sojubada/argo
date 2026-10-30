@@ -8,6 +8,8 @@
 #ifndef Pogo_BridgingHeader_h
 #define Pogo_BridgingHeader_h
 
+#include <stdint.h>
+#include <sys/types.h>
 #include <spawn.h>
 
 #define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
