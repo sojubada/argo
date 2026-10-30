@@ -189,6 +189,8 @@ pub unsafe extern "C" fn argoconv_to_pdf(
     let bytes = slice::from_raw_parts(input, len);
     let (out_ptr, out_size) = (out, out_len);
     // 발표 문서는 새 렌더러(SVG 경로)로 먼저 그린다. 실패하면 예전 변환기로.
+    // 끄려면 Cargo.toml 의 default 에서 "slides" 를 빼고 짓는다 (예전 변환기만 쓴다).
+    #[cfg(feature = "slides")]
     if slides::is_presentation_zip(bytes) || slides::ppt::is_ppt(bytes) {
         let attempt = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             if slides::ppt::is_ppt(bytes) {

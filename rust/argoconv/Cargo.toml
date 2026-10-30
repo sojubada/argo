@@ -33,7 +33,10 @@ flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "tiff"] }
 
 [features]
-default = ["rhwp"]
+# rhwp: 한글 문서 새 엔진(실패하면 hwpers). slides: 발표 문서 새 렌더러(실패하면 minipdf).
+# 문제가 생기면 여기서 빼고 지으면 그 기능만 예전 길로 돌아간다.
+default = ["rhwp", "slides"]
+slides = []
 
 [profile.release]
 opt-level = "z"     # 크기 우선. 변환은 이미 0.1 초 안쪽이라 속도를 더 살 이유가 없다.
