@@ -285,9 +285,23 @@ struct FilePaneView: View {
                 // 색을 못 박지 않는다. tvOS 는 포커스된 줄의 바탕을 흰색으로
                 // 바꾸면서 글자색을 같이 뒤집는데, 여기서 흰색을 지정하면
                 // 포커스된 줄의 파일명이 흰 바탕에 흰 글자가 되어 사라진다.
-                Text(file.fileType == 8 ? removeLastChar(file.name) : file.name)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if let label = ContainerNames.label(for: file.fullPath) {
+                    // 앱 컨테이너(UUID 폴더): 앱 이름을 크게, 폴더 이름은 아래에 작게.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(label.name)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text("\(label.identifier) · \(file.name.trimmingCharacters(in: CharacterSet(charactersIn: "/")))")
+                            .font(.caption2)
+                            .opacity(0.65)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                } else {
+                    Text(file.fileType == 8 ? removeLastChar(file.name) : file.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
         }
     }

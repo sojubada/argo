@@ -35,6 +35,7 @@
 		C2B2B1036D504FA8B906F1ED /* ArgoLocale.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6385437A364748A88715895B /* ArgoLocale.swift */; };
 		9307D3732DF24AE197059F9D /* ArgoTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60740246B0EA4EAC8E9BB33A /* ArgoTextField.swift */; };
 		367BEC69AE4748E797D5890E /* ExplorerTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = DECA29446B5F4C498827BE61 /* ExplorerTools.swift */; };
+		D1A900F3C0DE4A00991100F3 /* ContainerNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A900F4C0DE4A00991100F4 /* ContainerNames.swift */; };
 		76A281EAD2594E03B012BE85 /* PrintProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 891E5DD5390D449FBBA34DE0 /* PrintProbe.m */; };
 		2A0DACC2F4A24A1985520419 /* PrintProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */; };
 		F0F318CE8B0942F3A5B8CD46 /* ArgoTheme.m in Sources */ = {isa = PBXBuildFile; fileRef = E9E752021CA74F4691440910 /* ArgoTheme.m */; };
@@ -159,6 +160,7 @@
 		6385437A364748A88715895B /* ArgoLocale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoLocale.swift; sourceTree = "<group>"; };
 		60740246B0EA4EAC8E9BB33A /* ArgoTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoTextField.swift; sourceTree = "<group>"; };
 		DECA29446B5F4C498827BE61 /* ExplorerTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerTools.swift; sourceTree = "<group>"; };
+		D1A900F4C0DE4A00991100F4 /* ContainerNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContainerNames.swift; sourceTree = "<group>"; };
 		891E5DD5390D449FBBA34DE0 /* PrintProbe.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PrintProbe.m; sourceTree = "<group>"; };
 		3EFA857705F0421AA3C626E3 /* PrintProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintProbeView.swift; sourceTree = "<group>"; };
 		E9E752021CA74F4691440910 /* ArgoTheme.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ArgoTheme.m; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
 				6385437A364748A88715895B /* ArgoLocale.swift */,
 				60740246B0EA4EAC8E9BB33A /* ArgoTextField.swift */,
 				DECA29446B5F4C498827BE61 /* ExplorerTools.swift */,
+				D1A900F4C0DE4A00991100F4 /* ContainerNames.swift */,
 				B6604FACB2874A76A7C58933 /* ArgoKeyboard.swift */,
 				A4B38B012B684A9C928BE9AF /* KeyboardHelpView.swift */,
 				4EFDA75F20A1401596F97654 /* FilePaneView.swift */,
@@ -741,6 +744,7 @@
 				C2B2B1036D504FA8B906F1ED /* ArgoLocale.swift in Sources */,
 				9307D3732DF24AE197059F9D /* ArgoTextField.swift in Sources */,
 				367BEC69AE4748E797D5890E /* ExplorerTools.swift in Sources */,
+				D1A900F3C0DE4A00991100F3 /* ContainerNames.swift in Sources */,
 						76A281EAD2594E03B012BE85 /* PrintProbe.m in Sources */,
 				2A0DACC2F4A24A1985520419 /* PrintProbeView.swift in Sources */,
 				F0F318CE8B0942F3A5B8CD46 /* ArgoTheme.m in Sources */,

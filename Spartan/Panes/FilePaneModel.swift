@@ -184,7 +184,14 @@ final class FilePaneModel: ObservableObject {
 
         let terms = Self.filterTerms(filter)
         if !terms.isEmpty {
-            out = out.filter { file in terms.contains { Self.matches(file.name, term: $0) } }
+            out = out.filter { file in
+                // 앱 컨테이너는 붙은 앱 이름·번들 ID 로도 찾는다.
+                let label = ContainerNames.label(for: file.fullPath)
+                return terms.contains { term in
+                    Self.matches(file.name, term: term)
+                        || (label.map { $0.name.lowercased().contains(term) || $0.identifier.lowercased().contains(term) } ?? false)
+                }
+            }
         }
 
         out.sort { a, b in
@@ -196,7 +203,10 @@ final class FilePaneModel: ObservableObject {
             let result: Bool
             switch sort {
             case .name:
-                result = a.name.localizedStandardCompare(b.name) == .orderedAscending
+                // 앱 컨테이너는 UUID 가 아니라 앱 이름으로 줄 세운다.
+                let an = ContainerNames.label(for: a.fullPath)?.name ?? a.name
+                let bn = ContainerNames.label(for: b.fullPath)?.name ?? b.name
+                result = an.localizedStandardCompare(bn) == .orderedAscending
             case .size:
                 // 디스크를 치지 않는다. 폴더를 읽을 때 채워 둔 값이다.
                 result = (a.size ?? 0) < (b.size ?? 0)
