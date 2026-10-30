@@ -15,6 +15,7 @@
 //
 
 import Foundation
+import ApplicationsWrapper
 
 struct ContainerLabel {
     /// 보일 이름 (앱 이름, 없으면 번들 ID)
