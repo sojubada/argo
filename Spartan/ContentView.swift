@@ -138,6 +138,10 @@ struct ContentView: View {
     @State var newViewArrayNames: [String] = [""]
     @State var newViewFileName: String = ""
     @State private var newViewFileIndex = 0
+    /// 메뉴를 연 그 파일. 메뉴가 떠 있는 동안 목록이 다시 읽혀(자동 새로 고침·
+    /// 옆 칸 작업) 줄 수가 줄어도 번호로 다시 꺼내지 않는다 — 전에는
+    /// masterFiles[newViewFileIndex] 가 범위를 벗어나 앱이 죽거나, 다른 파일을 가리켰다.
+    @State private var menuFile = SpartanFile(name: "", fullPath: "", isSelected: false, fileType: 0, isLoadingFile: false)
     
     @State var renameFileCurrentName: String = ""
     @State var renameFileNewName: String = ""
@@ -856,7 +860,7 @@ struct ContentView: View {
 					ContextMenuButtonTV(stringKey: "INFO", action: {
                         // 0.5초 지연 전에 고정한다. masterFiles 는 활성 칸을 가리키는
                         // 계산 속성이라, 지연 중에 칸이 넘어가면 반대 칸의 파일을 읽는다.
-                        let selectedFile = masterFiles[newViewFileIndex]
+                        let selectedFile = menuFile
                         fileInfo = FileInfo.getFileInfo(filePath: selectedFile.fullPath)
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -867,8 +871,8 @@ struct ContentView: View {
 					
 					ContextMenuButtonTV(stringKey: "RENAME", action: {
                         newViewFilePath = directory
-                        renameFileCurrentName = masterFiles[newViewFileIndex].name
-                        renameFileNewName = masterFiles[newViewFileIndex].name
+                        renameFileCurrentName = menuFile.name
+                        renameFileNewName = menuFile.name
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showSubView[7] = true
@@ -877,7 +881,7 @@ struct ContentView: View {
                     
                     ContextMenuButtonTV(stringKey: "OPENIN", action: {
                         newViewFilePath = directory
-                        newViewArrayNames = [masterFiles[newViewFileIndex].name]
+                        newViewArrayNames = [menuFile.name]
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showSubView[2] = true
@@ -898,12 +902,12 @@ struct ContentView: View {
                     // 어긋난다. 지운 뒤 다시 읽는다.
                     if(directory == "/private/var/mobile/Media/.Trash/"){
                         ContextMenuButtonTV(stringKey: "DELETE", action: {
-                            if TrashManager.shared.deletePathDirectly(masterFiles[newViewFileIndex].fullPath) {
+                            if TrashManager.shared.deletePathDirectly(menuFile.fullPath) {
                                 updateFiles()
                             }
                             showSubView[1] = false
                         })
-                    } else if(directory == "/private/var/mobile/Media/" && masterFiles[newViewFileIndex].name == ".Trash/"){
+                    } else if(directory == "/private/var/mobile/Media/" && menuFile.name == ".Trash/"){
                         ContextMenuButtonTV(stringKey: "TRASHYEET", action: {
                             _ = TrashManager.shared.emptyAll()
                             updateFiles()
@@ -911,7 +915,7 @@ struct ContentView: View {
                         })
                     } else {
                         ContextMenuButtonTV(stringKey: "GOTOTRASH", action: {
-                            if TrashManager.shared.moveToTrash(path: masterFiles[newViewFileIndex].fullPath) {
+                            if TrashManager.shared.moveToTrash(path: menuFile.fullPath) {
                                 updateFiles()
                             }
                             showSubView[1] = false
@@ -919,7 +923,7 @@ struct ContentView: View {
                     }
                     if(deleteOverride) { //i dont think this can display but it's HERE ANYWAY
                         ContextMenuButtonTV(stringKey: "DELETE", action: {
-                            if TrashManager.shared.deletePathDirectly(masterFiles[newViewFileIndex].fullPath) {
+                            if TrashManager.shared.deletePathDirectly(menuFile.fullPath) {
                                 updateFiles()
                             }
                             showSubView[1] = false
@@ -928,7 +932,7 @@ struct ContentView: View {
                     
                     ContextMenuButtonTV(stringKey: "FAVORITESADD", action: {
                         newViewFilePath = directory
-						newViewFileName = masterFiles[newViewFileIndex].name
+						newViewFileName = menuFile.name
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showSubView[17] = true
@@ -938,7 +942,7 @@ struct ContentView: View {
                     
                     ContextMenuButtonTV(stringKey: "MOVETO", action: {
                         newViewFilePath = directory
-                        newViewArrayNames = [masterFiles[newViewFileIndex].name]
+                        newViewArrayNames = [menuFile.name]
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showSubView[8] = true
@@ -948,7 +952,7 @@ struct ContentView: View {
                     
                     ContextMenuButtonTV(stringKey: "COPYTO", action: {
                         newViewFilePath = directory
-                        newViewArrayNames = [masterFiles[newViewFileIndex].name]
+                        newViewArrayNames = [menuFile.name]
                         showSubView[1] = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             showSubView[9] = true
@@ -964,14 +968,14 @@ struct ContentView: View {
                     HStack {
                         VStack {
                             ContextMenuButtonTV(stringKey: "OPEN_DIRECTORY", action: {
-                                directory = directory + masterFiles[newViewFileIndex].name
+                                directory = directory + menuFile.name
                                 updateFiles()
                                 showSubView[2] = false
                             })
                             
                             ContextMenuButtonTV(stringKey: "OPEN_AUDIO", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
 									showSubView[10] = true
@@ -982,7 +986,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_VIDEO", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
 									showSubView[11] = true
@@ -992,7 +996,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_IMAGE", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								isImageSVG[1] = true
 								showSubView[31] = true
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -1021,7 +1025,7 @@ struct ContentView: View {
                             
                             ContextMenuButtonTV(stringKey: "OPEN_TEXT", action: {
                                 newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
                                 showSubView[2] = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     presentTextEditor()
@@ -1030,7 +1034,7 @@ struct ContentView: View {
                             
                             ContextMenuButtonTV(stringKey: "OPEN_HEX", action: {
                                 newViewFilePath = directory
-                                newViewFileName = masterFiles[newViewFileIndex].name
+                                newViewFileName = menuFile.name
                                 showSubView[2] = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     showSubView[22] = true
@@ -1039,7 +1043,7 @@ struct ContentView: View {
                             
                             ContextMenuButtonTV(stringKey: "OPEN_DMG", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     if isJB {
@@ -1052,7 +1056,7 @@ struct ContentView: View {
                             
                             ContextMenuButtonTV(stringKey: "OPEN_COMP", action: {
                                 newViewFilePath = directory
-                                newViewArrayNames = [masterFiles[newViewFileIndex].name]
+                                newViewArrayNames = [menuFile.name]
                                 showSubView[2] = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     showSubView[14] = true
@@ -1061,7 +1065,7 @@ struct ContentView: View {
                             
                             ContextMenuButtonTV(stringKey: "OPEN_UNCOMP", action: {
                                 newViewFilePath = directory
-                                newViewFileName = masterFiles[newViewFileIndex].name
+                                newViewFileName = menuFile.name
                                 showSubView[2] = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     showSubView[34] = true
@@ -1072,7 +1076,7 @@ struct ContentView: View {
 						VStack {
                             ContextMenuButtonTV(stringKey: "FAVORITESADD", action: {
                                 newViewFilePath = directory
-                                newViewFileName = masterFiles[newViewFileIndex].name
+                                newViewFileName = menuFile.name
                                 showSubView[2] = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     showSubView[17] = true
@@ -1081,7 +1085,7 @@ struct ContentView: View {
                             
 							ContextMenuButtonTV(stringKey: "OPEN_PLIST", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
 									showSubView[13] = true
@@ -1090,7 +1094,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_FONT", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
 									showSubView[30] = true
@@ -1099,7 +1103,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_DPKG", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     if isJB {
@@ -1112,7 +1116,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_DPKGDEB", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     if isJB {
@@ -1125,7 +1129,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_HTML", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
 									showSubView[33] = true
@@ -1134,7 +1138,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_CAR", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
 									showSubView[34] = true
@@ -1143,7 +1147,7 @@ struct ContentView: View {
 							
 							ContextMenuButtonTV(stringKey: "OPEN_SPAWN", action: {
 								newViewFilePath = directory
-								newViewFileName = masterFiles[newViewFileIndex].name
+								newViewFileName = menuFile.name
 								showSubView[2] = false
 								DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                     if isJB {
@@ -1231,7 +1235,7 @@ struct ContentView: View {
                     showSubView[3] = true
                 }, content: {
                     TextField(NSLocalizedString("PERMSEDIT", comment: "This should have been added a long time ago"), value: $filePerms, formatter: NumberFormatter(), onCommit: {
-                        RootHelperActs.chmod(masterFiles[newViewFileIndex].fullPath, filePerms)
+                        RootHelperActs.chmod(menuFile.fullPath, filePerms)
                         showSubView[27] = false
                     })
                     .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
@@ -1241,7 +1245,7 @@ struct ContentView: View {
                     .textContentType(.oneTimeCode) //0-9 only!
                     .onAppear {
 						do {
-							filePerms = try fileManager.attributesOfItem(atPath: masterFiles[newViewFileIndex].fullPath)[.posixPermissions] as? Int ?? 000 //this used to be a 000 for some reason??????? i changed it to 640 like other files on the tvOS filesystem. truly amazing.
+							filePerms = try fileManager.attributesOfItem(atPath: menuFile.fullPath)[.posixPermissions] as? Int ?? 000 //this used to be a 000 for some reason??????? i changed it to 640 like other files on the tvOS filesystem. truly amazing.
 							//im unsmart and forgot what this does. if it can't read the file perms it sets them to 000 since it can't read the file... and 000 means no perms to read the file........
                         } catch {
 							filePerms = 000
@@ -1991,6 +1995,7 @@ struct ContentView: View {
             newViewFilePath = file.fullPath
             newViewFileName = file.name
             newViewFileIndex = index
+            menuFile = file
             // 메뉴가 뜨면 포커스는 메뉴로 간다. 누른 줄을 대상으로 못박아 둔다.
             model.lastFocusedPath = file.fullPath
             return file.fullPath
