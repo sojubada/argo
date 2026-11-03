@@ -704,16 +704,14 @@ struct ContentView: View {
                         .sheet(isPresented: $showSubView[9], onDismiss: refreshBothPanes, content: {
                             CopyFileView(fileNames: $newViewArrayNames, filePath: $newViewFilePath, multiSelect: multiSelectBinding, isPresented: $showSubView[9])
                         })
-                        .sheet(isPresented: $showSubView[11], content: {
-                            VideoPlayerView(videoPath: $newViewFilePath, videoName: $newViewFileName, isPresented: $showSubView[11], player: globalAVPlayer)
-                        })
-                        .sheet(isPresented: $showSubView[10], content: {
-                            if(callback){
-                                AudioPlayerView(callback: callback, audioPath: $newViewFilePath, audioName: $newViewFileName, player: globalAVPlayer, isPresented: $showSubView[10])
-                            } else {
-                                AudioPlayerView(callback: callback, audioPath: $blankString[0], audioName: $blankString[0], player: globalAVPlayer, isPresented: $showSubView[10])
-                            }
-                        })
+                        // 재생 화면은 시트가 아니라 UIKit 으로 직접 띄운다 (MediaKeys.swift).
+                        // 시트 안에서는 리모컨 누름이 이 목록 화면으로 새어 나갔다.
+                        .onChange(of: showSubView[11]) { on in
+                            if on { openVideoPlayer() } else { ArgoMediaPresenter.dismissCurrent() }
+                        }
+                        .onChange(of: showSubView[10]) { on in
+                            if on { openAudioPlayer() } else { ArgoMediaPresenter.dismissCurrent() }
+                        }
                         .sheet(isPresented: $showSubView[12], onDismiss: {
                             isImageSVG[0] = false
                         }, content: {
@@ -1773,6 +1771,28 @@ struct ContentView: View {
     
     
     // 아래 다섯 개는 칸 모델로 옮겼다. 호출부가 많아 이름만 남겨 넘긴다.
+    /// 동영상: 애플TV 기본 재생 화면을 화면 가득 띄운다. 닫히면 멈춘다.
+    func openVideoPlayer() {
+        let path = newViewFileName.isEmpty ? newViewFilePath : (newViewFilePath as NSString).appendingPathComponent(newViewFileName)
+        ArgoMediaPresenter.presentVideo(url: URL(fileURLWithPath: path), player: globalAVPlayer) {
+            showSubView[11] = false
+        }
+    }
+
+    /// 음악: 닫히면(Menu·Esc) 멈춘다. 재생·멈춤 단추로 목록에서 다시 열 수 있다.
+    func openAudioPlayer() {
+        let player = globalAVPlayer
+        let view = AudioPlayerView(callback: callback,
+                                   audioPath: callback ? $newViewFilePath : $blankString[0],
+                                   audioName: callback ? $newViewFileName : $blankString[0],
+                                   player: player,
+                                   isPresented: $showSubView[10])
+        ArgoMediaPresenter.presentAudio(view) {
+            player.pause()
+            showSubView[10] = false
+        }
+    }
+
     func updateFiles() {
         pane.updateFiles()
     }

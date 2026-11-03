@@ -274,6 +274,15 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         // 덮인 창에서 처리되지 않은 누름은 리스폰더 체인을 타고 여기까지
         // 올라온다. 문서 뷰어에서 누른 ⌦ 가 뒤에 깔린 목록의 줄을 지우거나,
         // 삭제 확인 창에서 누른 스페이스가 '누름' 대신 고르기로 먹히면 안 된다.
+        // 재생 화면이 떠 있을 때 거기서 처리되지 않고 올라온 누름은 목록으로
+        // 보내지 않는다. 보내면 SwiftUI 의 onPlayPauseCommand(음악 화면 열기)와
+        // onExitCommand(이전 폴더)가 재생 화면 뒤에서 돈다. Menu 는 재생 화면을 닫는다.
+        if ArgoMediaPresenter.isMedia(presentedViewController) {
+            if presses.contains(where: { $0.type == .menu }) {
+                presentedViewController?.dismiss(animated: true)
+            }
+            return
+        }
         guard isTopmost else {
             super.pressesBegan(presses, with: event)
             return

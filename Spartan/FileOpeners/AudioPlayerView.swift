@@ -110,7 +110,11 @@ struct AudioPlayerView: View {
         }
         .ignoresSafeArea()
         .onAppear(perform: start)
-        .onDisappear(perform: stopObserving)
+        .onDisappear {
+            // 화면을 닫으면 음악도 멈춘다.
+            player.pause()
+            stopObserving()
+        }
         .onReceive(player.publisher(for: \.rate)) { rate in
             isPlaying = rate != 0
         }

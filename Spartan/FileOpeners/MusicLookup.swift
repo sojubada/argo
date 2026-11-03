@@ -77,7 +77,7 @@ enum MusicLookup {
         var title = "", artist = "", album = ""
         for item in asset.commonMetadata {
             guard let key = item.commonKey else { continue }
-            let value = item.stringValue ?? ""
+            let value = repairKorean(item.stringValue ?? "")
             switch key {
             case .commonKeyTitle: title = value
             case .commonKeyArtist: artist = value
@@ -99,6 +99,21 @@ enum MusicLookup {
         }
         let seconds = asset.duration.seconds
         return TrackInfo(title: title, artist: artist, album: album, duration: seconds.isFinite ? seconds : 0)
+    }
+
+    /// 옛 MP3 태그는 한국어를 EUC-KR(CP949) 바이트로 적고 "Latin-1" 이라고 표시한 것이 많다.
+    /// 그대로 읽으면 "±×°Í¸¸ÀÌ" 처럼 깨진다. 글자가 모두 1바이트 범위이고 높은 바이트가
+    /// 섞여 있으면 그 바이트를 CP949 로 다시 읽어, 한글이 나오면 그것을 쓴다.
+    static func repairKorean(_ s: String) -> String {
+        let scalars = s.unicodeScalars
+        guard scalars.contains(where: { $0.value >= 0x80 }),
+              !scalars.contains(where: { (0xAC00...0xD7A3).contains($0.value) }) else { return s }
+        guard let bytes = s.data(using: .isoLatin1) ?? s.data(using: .windowsCP1252) else { return s }
+        let cp949 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.dosKorean.rawValue)))
+        guard let fixed = String(data: bytes, encoding: cp949),
+              fixed.unicodeScalars.contains(where: { (0xAC00...0xD7A3).contains($0.value) }) else { return s }
+        return fixed
     }
 
     // MARK: - 표지
