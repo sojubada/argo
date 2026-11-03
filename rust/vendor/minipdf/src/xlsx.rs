@@ -4990,7 +4990,33 @@ fn render_xlsx_row(
         let align_right = cell.is_numeric || has_rtl_base_direction(rendered_text);
         let overflows_left = text_style.horizontal_alignment == HorizontalAlignment::Right
             || (text_style.horizontal_alignment == HorizontalAlignment::General && align_right);
-        let (clip_offset, clip_width, overflow_is_blocked) = if merge.is_none() {
+        // 엑셀 규칙: 숫자(날짜 포함)는 옆 칸으로 넘치지 않는다. 가운데 정렬 글은
+        // 양쪽으로 넘친다. 줄 바꿈 칸은 넘치지 않는다(아래 should_clip).
+        let centered = text_style.horizontal_alignment == HorizontalAlignment::Center;
+        let (clip_offset, clip_width, overflow_is_blocked) = if merge.is_none() && cell.is_numeric {
+            (0.0, cell_width, true)
+        } else if merge.is_none() && centered && !text_style.wrap_text {
+            let (left_off, left_w, left_blocked) = text_overflow_region(
+                sheet,
+                row,
+                column_widths,
+                column_start,
+                column_index,
+                column_end,
+                true,
+            );
+            let (_, right_w, right_blocked) = text_overflow_region(
+                sheet,
+                row,
+                column_widths,
+                column_start,
+                column_index,
+                column_end,
+                false,
+            );
+            let own = column_widths[column_index];
+            (left_off, left_w + right_w - own, left_blocked || right_blocked)
+        } else if merge.is_none() {
             text_overflow_region(
                 sheet,
                 row,
@@ -5003,7 +5029,7 @@ fn render_xlsx_row(
         } else {
             (0.0, cell_width, false)
         };
-        let lines = if text_style.stacked_text {
+        let mut lines = if text_style.stacked_text {
             rendered_text
                 .replace("\r\n", "\n")
                 .replace('\r', "\n")
@@ -5022,7 +5048,7 @@ fn render_xlsx_row(
         } else {
             vec![text]
         };
-        let max_text_width = if text_style.stacked_text {
+        let mut max_text_width = if text_style.stacked_text {
             font_size * 1.2 * lines.len() as f32
         } else {
             lines
@@ -5038,6 +5064,35 @@ fn render_xlsx_row(
                 })
                 .fold(0.0, f32::max)
         };
+        // 칸보다 넓은 숫자: 일반 서식이면 소수 자리를 줄이거나 지수로, 그래도 안 되거나
+        // 서식이 있으면 엑셀처럼 ### 로 채운다.
+        if cell.is_numeric
+            && merge.is_none()
+            && !text_style.wrap_text
+            && !text_style.stacked_text
+            && lines.len() == 1
+            && !lines[0].is_empty()
+            && max_text_width > cell_width - 2.0
+        {
+            let avail = (cell_width - 3.0).max(1.0);
+            let measure = |s: &str| {
+                styled_text_width_with_font(
+                    s,
+                    font_size,
+                    text_style.bold,
+                    text_style.italic,
+                    text_style.preferred_font,
+                )
+            };
+            let general = matches!(cell.style.number_format, NumberFormat::General);
+            let fitted = if general { shrink_general_number(&lines[0], avail, &measure) } else { None };
+            let replacement = fitted.unwrap_or_else(|| {
+                let hash = measure("#").max(0.1);
+                "#".repeat(((avail / hash).floor() as usize).clamp(1, 255))
+            });
+            max_text_width = measure(&replacement);
+            lines = vec![replacement];
+        }
         let should_clip =
             text_style.wrap_text || (max_text_width > clip_width && overflow_is_blocked);
         pending_text.push(PendingCellText {
@@ -5211,6 +5266,10 @@ fn render_xlsx_row(
                 text.style.preferred_font,
             );
             let x = match text.style.horizontal_alignment {
+                // 넘치는 가운데 정렬 글은 양쪽으로 고르게 넘친다(엑셀과 같게).
+                HorizontalAlignment::Center if !text.style.wrap_text => {
+                    text.cell_x + (text.cell_width - text_width) / 2.0
+                }
                 HorizontalAlignment::Center => {
                     text.cell_x + (text.cell_width - text_width).max(0.0) / 2.0
                 }
@@ -5264,6 +5323,36 @@ fn render_xlsx_row(
             page.pop_clip();
         }
     }
+}
+
+/// 일반 서식 숫자가 칸보다 넓을 때 엑셀처럼 줄인다: 소수 자리를 반올림해 줄이고,
+/// 그래도 넓으면 지수 표기(1.2E+10). 숫자로 읽을 수 없거나 끝내 못 맞추면 None.
+fn shrink_general_number(text: &str, avail: f32, measure: &dyn Fn(&str) -> f32) -> Option<String> {
+    let plain: String = text.chars().filter(|c| *c != ',').collect();
+    let value: f64 = plain.trim().parse().ok()?;
+    if !value.is_finite() {
+        return None;
+    }
+    let decimals = plain.split('.').nth(1).map(|d| d.len()).unwrap_or(0);
+    for d in (0..decimals).rev() {
+        let candidate = format!("{value:.d$}");
+        if measure(&candidate) <= avail {
+            return Some(candidate);
+        }
+    }
+    for d in (0..=5).rev() {
+        let raw = format!("{value:.d$E}");
+        // Rust 는 1.5E10, 엑셀은 1.5E+10
+        let candidate = match raw.split_once('E') {
+            Some((m, e)) if e.starts_with('-') => format!("{m}E-{:0>2}", &e[1..]),
+            Some((m, e)) => format!("{m}E+{e:0>2}"),
+            None => raw,
+        };
+        if measure(&candidate) <= avail {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn text_overflow_region(

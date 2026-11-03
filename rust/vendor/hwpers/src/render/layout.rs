@@ -40,6 +40,8 @@ pub struct RenderedCell {
     pub height: i32,
     /// 칸 안의 글. 바깥 문단과 똑같이 배치된다.
     pub paragraphs: Vec<RenderedParagraph>,
+    /// 칸의 테두리·배경 (문서 정보의 BorderFill, 1부터 센다. 0 이면 없음).
+    pub border_fill_id: u16,
 }
 
 /// 자리가 정해진 표 하나.
@@ -279,6 +281,7 @@ impl<'a> LayoutEngine<'a> {
                 width,
                 height,
                 paragraphs,
+                border_fill_id: cell.border_fill_id,
             });
         }
 

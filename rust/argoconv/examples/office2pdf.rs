@@ -27,7 +27,12 @@ fn main() {
         let mut out: *mut u8 = std::ptr::null_mut();
         let mut out_len = 0usize;
         let t = std::time::Instant::now();
-        let code = argoconv::argoconv_to_pdf(input.as_ptr(), input.len(), &mut out, &mut out_len);
+        let is_hwp = args[1].to_lowercase().ends_with(".hwp") || args[1].to_lowercase().ends_with(".hwpx");
+        let code = if is_hwp {
+            argoconv::hwp::argoconv_hwp_to_pdf(input.as_ptr(), input.len(), &mut out, &mut out_len)
+        } else {
+            argoconv::argoconv_to_pdf(input.as_ptr(), input.len(), &mut out, &mut out_len)
+        };
         let ms = t.elapsed().as_millis();
         let mut note = vec![0u8; 4096];
         let nl = argoconv::argoconv_last_note(note.as_mut_ptr(), note.len());

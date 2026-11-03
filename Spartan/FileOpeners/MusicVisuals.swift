@@ -108,15 +108,15 @@ final class AudioSpectrum: ObservableObject {
                 let count = Int(first.mDataByteSize) / MemoryLayout<Float>.size / channels
                 me.feed(data.assumingMemoryBound(to: Float.self), count: min(count, Int(framesOut.pointee)), stride: channels)
             })
-        var out: MTAudioProcessingTap?
+        var out: Unmanaged<MTAudioProcessingTap>?
         let err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
                                              kMTAudioProcessingTapCreationFlag_PostEffects, &out)
-        if err != noErr || out == nil {
+        guard err == noErr, let made = out else {
             // init 이 불리지 않았으니 맡긴 참조를 돌려받는다.
             Unmanaged<AudioSpectrum>.fromOpaque(callbacks.clientInfo!).release()
             return nil
         }
-        return out
+        return made.takeRetainedValue()
     }
 
     /// 오디오 스레드. 1024개가 모이면 FFT 한 번.

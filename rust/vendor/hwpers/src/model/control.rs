@@ -348,6 +348,12 @@ impl TableCell {
 
         let paragraph_count = reader.read_u16()? as u32;
         let _properties = reader.read_u32()?;
+        // 속성 다음에 2바이트(셀 확장 속성)가 더 있다. 스펙 표에는 없지만 실제
+        // 파일에는 있다(rhwp·hwplib 동일). 이것을 빠뜨려 칸 주소·크기·테두리 번호가
+        // 전부 2바이트씩 밀려 읽혔고, 표가 엉뚱한 자리에 그려지거나 사라졌다.
+        if reader.remaining() >= 28 {
+            let _cell_ext = reader.read_u16()?;
+        }
         let col = reader.read_u16()?;
         let row = reader.read_u16()?;
         let col_span = reader.read_u16()?;

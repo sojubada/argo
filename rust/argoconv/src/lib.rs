@@ -5,7 +5,7 @@
 //! 그 빈 곳을 아예 지나가지 않기 위해서다. 읽고 쓰는 일은 Swift 가 한다.
 
 pub mod fonts;
-mod hwp;
+pub mod hwp;
 mod slides;
 
 use std::panic;

@@ -115,7 +115,6 @@ struct AudioPlayerView: View {
                     nowPlaying
                         .transition(.opacity)
                 }
-            }
                 // 화면 아래 얇은 색 스펙트럼
                 VStack {
                     Spacer()

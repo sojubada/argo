@@ -267,7 +267,13 @@ fn pdf_from_svgs(svgs: impl Iterator<Item = String>) -> Result<Vec<u8>, ()> {
     let tree_id = alloc.bump();
     let mut page_ids: Vec<Ref> = Vec::new();
 
-    for svg in svgs {
+    let dump = std::env::var("ARGO_SVG_DUMP").ok();
+    for (page, svg) in svgs.enumerate() {
+        if let Some(dir) = &dump {
+            // PC 시험용: 쪽 SVG 를 쏟는다.
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(format!("{dir}/hwp-{:03}.svg", page + 1), &svg);
+        }
         // 문서가 원한 글꼴 이름을 실제로 넣은 글꼴 이름으로 바꾼다.
         let svg = crate::fonts::apply_aliases(&svg);
         let Ok(tree) = usvg::Tree::from_str(&svg, &options) else {

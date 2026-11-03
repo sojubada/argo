@@ -107,7 +107,7 @@ impl BorderFill {
         }
 
         // Read fill info if available
-        let fill_info = if reader.remaining() >= 16 {
+        let fill_info = if reader.remaining() >= 4 {
             FillInfo::read(&mut reader)?
         } else {
             FillInfo {
@@ -206,41 +206,65 @@ impl BorderLine {
 }
 
 impl FillInfo {
+    /// 채우기 정보. 종류(u32)는 비트 묶음이다: bit0 단색, bit1 그림, bit2 그러데이션.
+    /// 단색일 때만 배경색·무늬색·무늬 종류가 따라온다 — 예전에는 종류와 상관없이
+    /// 바로 다음 4바이트를 배경색으로 읽어, 채우기 없는 칸이 엉뚱한 색이 되었다.
+    /// 그러데이션 크기는 실제 파일(rhwp·hwplib 기준)을 따른다.
     fn read(reader: &mut StreamReader) -> Result<Self> {
-        if reader.remaining() < 16 {
-            return Err(crate::error::HwpError::ParseError(
-                "Insufficient data for FillInfo".to_string(),
-            ));
+        let fill_type = reader.read_u32()?;
+        let mut back_color = 0xFFFFFFFF;
+        let mut pattern_color = 0;
+        let mut pattern_type = 0;
+        if fill_type & 0x01 != 0 && reader.remaining() >= 12 {
+            back_color = reader.read_u32()?;
+            pattern_color = reader.read_u32()?;
+            pattern_type = reader.read_u32()?;
         }
 
-        let fill_type = reader.read_u32()?;
-        let back_color = reader.read_u32()?;
-        let pattern_color = reader.read_u32()?;
-        let pattern_type = reader.read_u32()?;
+        let mut gradient_info = None;
+        if fill_type & 0x04 != 0 && reader.remaining() >= 21 {
+            let gradient_type = reader.read_u8()?;
+            let angle = reader.read_u32()? as u16;
+            let center_x = reader.read_u32()? as u16;
+            let center_y = reader.read_u32()? as u16;
+            let blur_degree = reader.read_u32()? as u16;
+            let count = (reader.read_u32()? as usize).min(64);
+            if count > 2 {
+                for _ in 0..count {
+                    if reader.remaining() < 4 {
+                        break;
+                    }
+                    reader.read_u32()?;
+                }
+            }
+            let mut colors = Vec::with_capacity(count);
+            for _ in 0..count {
+                if reader.remaining() < 4 {
+                    break;
+                }
+                colors.push(reader.read_u32()?);
+            }
+            if let (Some(&start_color), Some(&end_color)) = (colors.first(), colors.last()) {
+                gradient_info = Some(GradientInfo {
+                    gradient_type,
+                    start_color,
+                    end_color,
+                    angle,
+                    center_x,
+                    center_y,
+                    blur_degree,
+                });
+            }
+        }
 
-        // Read optional image info
-        let image_info = if (fill_type & 0x04) != 0 && reader.remaining() >= 6 {
-            Some(ImageInfo {
-                brightness: reader.read_u8()?,
-                contrast: reader.read_u8()?,
-                effect: reader.read_u8()?,
-                bin_data_id: reader.read_u16()?,
-            })
-        } else {
-            None
-        };
-
-        // Read optional gradient info
-        let gradient_info = if (fill_type & 0x08) != 0 && reader.remaining() >= 16 {
-            Some(GradientInfo {
-                gradient_type: reader.read_u8()?,
-                start_color: reader.read_u32()?,
-                end_color: reader.read_u32()?,
-                angle: reader.read_u16()?,
-                center_x: reader.read_u16()?,
-                center_y: reader.read_u16()?,
-                blur_degree: reader.read_u16()?,
-            })
+        // 그림 채우기는 칸 배경에서는 그리지 않는다 (번호만 남긴다).
+        let image_info = if fill_type & 0x02 != 0 && reader.remaining() >= 6 {
+            let _mode = reader.read_u8()?;
+            let brightness = reader.read_u8()?;
+            let contrast = reader.read_u8()?;
+            let effect = reader.read_u8()?;
+            let bin_data_id = reader.read_u16()?;
+            Some(ImageInfo { brightness, contrast, effect, bin_data_id })
         } else {
             None
         };
