@@ -88,25 +88,31 @@ struct AudioPlayerView: View {
     private var currentPath: String { playlist.indices.contains(index) ? playlist[index] : "" }
 
     var body: some View {
-        ZStack {
-            background
-            if showLyrics {
-                lyricsScreen
-                    .transition(.opacity)
-            } else {
-                nowPlaying
-                    .transition(.opacity)
+        // 리모컨·키보드는 UIKit 호스트가 받는다 (MediaKeys.swift).
+        MediaKeyHost(handlers: MediaKeyHandlers(
+            playPause: { playPause() },
+            close: { if showLyrics { showLyrics = false } else { isPresented = false } },
+            seek: { seek(by: $0) },
+            next: { next() },
+            previous: { previous() }
+        )) {
+            ZStack {
+                background
+                if showLyrics {
+                    lyricsScreen
+                        .transition(.opacity)
+                } else {
+                    nowPlaying
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.35), value: showLyrics)
         }
-        .animation(.easeInOut(duration: 0.35), value: showLyrics)
-        .onPlayPauseCommand { playPause() }
-        .onExitCommand {
-            if showLyrics { showLyrics = false } else { isPresented = false }
-        }
+        .ignoresSafeArea()
         .onAppear(perform: start)
         .onDisappear(perform: stopObserving)
-        .onReceive(player.publisher(for: \.timeControlStatus)) { status in
-            isPlaying = status == .playing
+        .onReceive(player.publisher(for: \.rate)) { rate in
+            isPlaying = rate != 0
         }
     }
 
@@ -347,22 +353,20 @@ struct AudioPlayerView: View {
     // MARK: - 재생
 
     private func start() {
-        if callback {
-            let path = (audioPath as NSString).appendingPathComponent(audioName)
-            playlist = MusicLookup.folderPlaylist(for: path)
-            index = playlist.firstIndex(of: path) ?? 0
+        let given = audioName.isEmpty ? audioPath : (audioPath as NSString).appendingPathComponent(audioName)
+        if callback || !given.isEmpty {
+            // 파일을 받아 왔으면 그 파일을 튼다 (WebDAV 는 callback 없이 경로만 준다).
+            guard !given.isEmpty else { return }
+            playlist = MusicLookup.folderPlaylist(for: given)
+            index = playlist.firstIndex(of: given) ?? 0
             load(play: true)
         } else if let url = (player.currentItem?.asset as? AVURLAsset)?.url, url.isFileURL {
-            // 틀고 있던 곡을 다시 보여 준다.
+            // 경로 없이 열면 틀고 있던 곡을 보여 준다.
             playlist = MusicLookup.folderPlaylist(for: url.path)
             index = playlist.firstIndex(of: url.path) ?? 0
+            isPlaying = player.rate != 0
             describeCurrent()
             observe()
-        } else if !audioPath.isEmpty || !audioName.isEmpty {
-            let path = audioName.isEmpty ? audioPath : (audioPath as NSString).appendingPathComponent(audioName)
-            playlist = MusicLookup.folderPlaylist(for: path)
-            index = playlist.firstIndex(of: path) ?? 0
-            load(play: true)
         }
     }
 
@@ -461,7 +465,17 @@ struct AudioPlayerView: View {
     }
 
     private func playPause() {
-        if isPlaying { player.pause() } else { player.play() }
+        // 화면의 상태값이 아니라 재생기 자신에게 묻는다 (버퍼링 중에도 맞게).
+        if player.rate != 0 {
+            player.pause()
+        } else {
+            if player.currentItem == nil, !currentPath.isEmpty {
+                load(play: true)
+                return
+            }
+            if duration > 0, currentTime >= duration - 0.5 { player.seek(to: .zero) }
+            player.play()
+        }
         updateNowPlayingInfo()
     }
 
