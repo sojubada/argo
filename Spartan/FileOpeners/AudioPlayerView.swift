@@ -84,6 +84,9 @@ struct AudioPlayerView: View {
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
     @State private var loadToken = UUID()
+    @StateObject private var spectrum = AudioSpectrum()
+    @State private var showSlides = false
+    @State private var slidePhotos: [String] = []
 
     private var currentPath: String { playlist.indices.contains(index) ? playlist[index] : "" }
 
@@ -91,14 +94,21 @@ struct AudioPlayerView: View {
         // 리모컨·키보드는 UIKit 호스트가 받는다 (MediaKeys.swift).
         MediaKeyHost(handlers: MediaKeyHandlers(
             playPause: { playPause() },
-            close: { if showLyrics { showLyrics = false } else { isPresented = false } },
+            close: {
+                if showSlides { showSlides = false }
+                else if showLyrics { showLyrics = false }
+                else { isPresented = false }
+            },
             seek: { seek(by: $0) },
             next: { next() },
             previous: { previous() }
         )) {
             ZStack {
                 background
-                if showLyrics {
+                if showSlides {
+                    slideScreen
+                        .transition(.opacity)
+                } else if showLyrics {
                     lyricsScreen
                         .transition(.opacity)
                 } else {
@@ -106,7 +116,17 @@ struct AudioPlayerView: View {
                         .transition(.opacity)
                 }
             }
+                // 화면 아래 얇은 색 스펙트럼
+                VStack {
+                    Spacer()
+                    SpectrumBar(spectrum: spectrum, tint: Color(MusicLookup.lighten(UIColor(colors.0))))
+                        .frame(height: 56)
+                        .padding(.horizontal, 110)
+                        .padding(.bottom, 30)
+                }
+            }
             .animation(.easeInOut(duration: 0.35), value: showLyrics)
+            .animation(.easeInOut(duration: 0.6), value: showSlides)
         }
         .ignoresSafeArea()
         .onAppear(perform: start)
@@ -117,6 +137,7 @@ struct AudioPlayerView: View {
         }
         .onReceive(player.publisher(for: \.rate)) { rate in
             isPlaying = rate != 0
+            if rate == 0 { spectrum.reset() }
         }
     }
 
@@ -189,6 +210,10 @@ struct AudioPlayerView: View {
                     .buttonStyle(GlassButtonStyle(size: 70))
                     Button(action: { showLyrics = true }) {
                         Image(systemName: "quote.bubble").opacity(lyrics.isEmpty ? 0.45 : 1)
+                    }
+                    .buttonStyle(GlassButtonStyle(size: 70))
+                    Button(action: openSlides) {
+                        Image(systemName: "photo.on.rectangle.angled")
                     }
                     .buttonStyle(GlassButtonStyle(size: 70))
                     Button(action: toggleOnline) {
@@ -265,6 +290,36 @@ struct AudioPlayerView: View {
             }
         }
         .padding(.top, 8)
+    }
+
+    // MARK: - 슬라이드쇼
+
+    private func openSlides() {
+        slidePhotos = SlideSource.photos(near: currentPath)
+        showSlides = true
+    }
+
+    private var slideScreen: some View {
+        ZStack(alignment: .bottomLeading) {
+            SlideshowView(photos: slidePhotos, fallback: artwork)
+            LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .center, endPoint: .bottom)
+                .ignoresSafeArea()
+            HStack(spacing: 24) {
+                artworkView.frame(width: 120, height: 120)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(info.title.isEmpty ? (currentPath as NSString).lastPathComponent : info.title)
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Text(info.artist)
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundColor(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.leading, 110)
+            .padding(.bottom, 120)
+        }
     }
 
     // MARK: - 가사
@@ -369,6 +424,7 @@ struct AudioPlayerView: View {
             playlist = MusicLookup.folderPlaylist(for: url.path)
             index = playlist.firstIndex(of: url.path) ?? 0
             isPlaying = player.rate != 0
+            if let item = player.currentItem { spectrum.attach(to: item) }
             describeCurrent()
             observe()
         }
@@ -376,7 +432,9 @@ struct AudioPlayerView: View {
 
     private func load(play: Bool) {
         guard !currentPath.isEmpty else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: URL(fileURLWithPath: currentPath)))
+        let item = AVPlayerItem(url: URL(fileURLWithPath: currentPath))
+        spectrum.attach(to: item)
+        player.replaceCurrentItem(with: item)
         currentTime = 0
         if play { player.play() }
         describeCurrent()

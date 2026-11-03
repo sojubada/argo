@@ -307,6 +307,13 @@ enum MusicLookup {
     }
 
     /// 배경으로 쓸 만큼 어둡게 (흰 글자가 읽히게).
+    /// 스펙트럼 막대에 쓸 밝은 표지 색.
+    static func lighten(_ c: UIColor) -> UIColor {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return UIColor(hue: h, saturation: max(0.45, min(1, s * 1.3)), brightness: 0.95, alpha: 1)
+    }
+
     static func deepen(_ c: UIColor, _ factor: CGFloat) -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
