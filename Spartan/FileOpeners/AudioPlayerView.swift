@@ -97,7 +97,7 @@ struct AudioPlayerView: View {
             close: {
                 if showSlides { showSlides = false }
                 else if showLyrics { showLyrics = false }
-                else { isPresented = false }
+                else { isPresented = false; ArgoMediaPresenter.dismissCurrent() }
             },
             seek: { seek(by: $0) },
             next: { next() },

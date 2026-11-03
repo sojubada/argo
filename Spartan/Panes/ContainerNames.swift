@@ -122,7 +122,7 @@ enum ContainerNames {
     private static func bestOwner(of id: String, in names: [String: String]) -> String? {
         if let exact = names[id] { return exact }
         var best: (Int, String)?
-        for (bundle, name) in names where id.hasPrefix(bundle + ".") || id.hasPrefix(bundle) {
+        for (bundle, name) in names where id.hasPrefix(bundle + ".") {
             if best == nil || bundle.count > best!.0 { best = (bundle.count, name) }
         }
         return best?.1

@@ -648,10 +648,20 @@ struct WebDAVBrowserView: View {
     private func present(_ local: String) {
         let type = FileInfo.yandereDevFileType(file: local)
         isSVG = false
-        if type == 1 {
-            viewerKind = 1
-        } else if type == 2 {
-            viewerKind = 2
+        if type == 1 || type == 2 {
+            // 음악·동영상은 시트가 아니라 화면 가득 띄운다 (MediaKeys.swift).
+            // 시트 안에서는 리모컨 누름이 이 화면의 onExitCommand 로 새어 나갔다.
+            // local 은 이미 파일 전체 경로다 — 이름을 또 붙이면 없는 경로가 된다.
+            let file = local
+            if type == 2 {
+                ArgoMediaPresenter.presentVideo(url: URL(fileURLWithPath: file), player: player) {}
+            } else {
+                let p = player
+                let view = AudioPlayerView(callback: true, audioPath: .constant(file), audioName: .constant(""),
+                                           player: p, isPresented: .constant(true))
+                ArgoMediaPresenter.presentAudio(view) { p.pause() }
+            }
+            return
         } else if type == 3 {
             viewerKind = 3
         } else if type == 12 {
