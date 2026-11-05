@@ -17,6 +17,13 @@ const VML_INLINE_IMAGE_TOP_LEADING: f32 = 2.0;
 #[derive(Debug, PartialEq)]
 struct DocxDocument {
     blocks: Vec<DocxBlock>,
+    /// 머리말·꼬리말 (보통 쪽, 첫 쪽). 문단만 담는다.
+    header: Vec<DocxParagraph>,
+    footer: Vec<DocxParagraph>,
+    first_header: Option<Vec<DocxParagraph>>,
+    first_footer: Option<Vec<DocxParagraph>>,
+    header_distance: f32,
+    footer_distance: f32,
     page_size: PageSize,
     margins: DocxMargins,
     grid_line_pitch: f32,
@@ -54,6 +61,42 @@ struct DocxParagraph {
     line_spacing_explicit: bool,
     fill: Option<PdfColor>,
     bottom_border: Option<DocxBorder>,
+    /// 첫 줄 들여쓰기(+) / 내어쓰기(-)
+    first_line: f32,
+    justify: bool,
+    tabs: Vec<TabStop>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TabStop {
+    pos: f32,
+    align: TabAlign,
+    leader: Option<char>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TabAlign {
+    Left,
+    Right,
+    Center,
+}
+
+/// 번호 매기기 정의 (word/numbering.xml)
+#[derive(Debug, Clone, Default)]
+struct NumberingDefs {
+    /// numId → (abstractNumId, 수준별 시작값 덮어쓰기)
+    nums: HashMap<String, (String, HashMap<u8, i32>)>,
+    abstracts: HashMap<String, Vec<NumLevel>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct NumLevel {
+    start: i32,
+    format: String,
+    text: String,
+    suffix: String,
+    paragraph: ParagraphProperties,
+    run: RunProperties,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +144,9 @@ struct DocxStyles {
     run_defaults: RunProperties,
     styles: HashMap<String, DocxStyle>,
     theme_fonts: DocxThemeFonts,
+    numbering: NumberingDefs,
+    /// 번호 세기 (abstractNumId → 수준별 지금 값)
+    counters: std::cell::RefCell<HashMap<String, [Option<i32>; 9]>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -123,6 +169,11 @@ struct ParagraphProperties {
     line_spacing: Option<f32>,
     fill: Option<PdfColor>,
     bottom_border: Option<DocxBorder>,
+    first_line: Option<f32>,
+    justify: Option<bool>,
+    /// (numId, 수준)
+    numbering: Option<(String, u8)>,
+    tabs: Option<Vec<(TabStop, bool)>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -279,8 +330,16 @@ fn read_docx_document(input: &[u8]) -> Result<DocxDocument> {
         )));
     }
 
+    let (header, footer, first_header, first_footer, header_distance, footer_distance) =
+        read_headers_footers(&xml, body, &styles, &relationships, &mut archive)?;
     Ok(DocxDocument {
         blocks,
+        header,
+        footer,
+        first_header,
+        first_footer,
+        header_distance,
+        footer_distance,
         page_size,
         margins,
         grid_line_pitch,
@@ -309,6 +368,12 @@ fn empty_docx_document() -> DocxDocument {
         blocks: vec![DocxBlock::Paragraph(plain_paragraph(
             "Empty DOCX document".to_owned(),
         ))],
+        header: Vec::new(),
+        footer: Vec::new(),
+        first_header: None,
+        first_footer: None,
+        header_distance: 36.0,
+        footer_distance: 36.0,
         page_size: PageSize {
             width: PAGE_WIDTH,
             height: PAGE_HEIGHT,
@@ -344,10 +409,13 @@ fn plain_paragraph(text: String) -> DocxParagraph {
         indent_right: 0.0,
         spacing_before: 0.0,
         spacing_after: 0.0,
-        line_spacing: 1.15,
+        line_spacing: 1.0,
         line_spacing_explicit: false,
         fill: None,
         bottom_border: None,
+        first_line: 0.0,
+        justify: false,
+        tabs: Vec::new(),
     }
 }
 
@@ -423,12 +491,234 @@ fn read_styles(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<DocxStyles> {
             ))
         })
         .collect();
+    let numbering = read_numbering(archive)?;
     Ok(DocxStyles {
         paragraph_defaults,
         run_defaults,
         styles,
         theme_fonts,
+        numbering,
+        counters: Default::default(),
     })
+}
+
+/// word/numbering.xml 을 읽는다.
+fn read_numbering(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<NumberingDefs> {
+    let Some(text) = read_zip_text(archive, "word/numbering.xml")? else {
+        return Ok(NumberingDefs::default());
+    };
+    let xml = roxmltree::Document::parse(&text)?;
+    let mut defs = NumberingDefs::default();
+    for abs in xml.descendants().filter(|n| n.has_tag_name("abstractNum")) {
+        let Some(id) = attribute_by_local_name(abs, "abstractNumId") else { continue };
+        let mut levels = vec![NumLevel::default(); 9];
+        for (i, level) in levels.iter_mut().enumerate() {
+            level.start = 1;
+            level.format = "decimal".into();
+            level.text = format!("%{}.", i + 1);
+            level.suffix = "tab".into();
+        }
+        for lvl in abs.children().filter(|n| n.has_tag_name("lvl")) {
+            let Some(index) = attribute_by_local_name(lvl, "ilvl").and_then(|v| v.parse::<usize>().ok()) else { continue };
+            if index > 8 {
+                continue;
+            }
+            let val = |name: &str| child(lvl, name).and_then(|n| attribute_by_local_name(n, "val")).map(str::to_owned);
+            let level = &mut levels[index];
+            if let Some(start) = val("start").and_then(|v| v.parse().ok()) {
+                level.start = start;
+            }
+            if let Some(format) = val("numFmt") {
+                level.format = format;
+            }
+            level.text = val("lvlText").unwrap_or_default();
+            if let Some(suffix) = val("suff") {
+                level.suffix = suffix;
+            }
+            level.paragraph = child(lvl, "pPr").map(read_paragraph_properties).unwrap_or_default();
+            level.run = child(lvl, "rPr").map(read_run_properties).unwrap_or_default();
+        }
+        defs.abstracts.insert(id.to_owned(), levels);
+    }
+    for num in xml.descendants().filter(|n| n.has_tag_name("num")) {
+        let Some(id) = attribute_by_local_name(num, "numId") else { continue };
+        let Some(abs) = child(num, "abstractNumId").and_then(|n| attribute_by_local_name(n, "val")) else { continue };
+        let mut overrides = HashMap::new();
+        for ov in num.children().filter(|n| n.has_tag_name("lvlOverride")) {
+            let level = attribute_by_local_name(ov, "ilvl").and_then(|v| v.parse::<u8>().ok());
+            let start = child(ov, "startOverride").and_then(|n| attribute_by_local_name(n, "val")).and_then(|v| v.parse::<i32>().ok());
+            if let (Some(level), Some(start)) = (level, start) {
+                overrides.insert(level, start);
+            }
+        }
+        defs.nums.insert(id.to_owned(), (abs.to_owned(), overrides));
+    }
+    Ok(defs)
+}
+
+fn roman(mut n: i32, upper: bool) -> String {
+    if n <= 0 {
+        return n.to_string();
+    }
+    let table = [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")];
+    let mut out = String::new();
+    for (value, text) in table {
+        while n >= value {
+            out.push_str(text);
+            n -= value;
+        }
+    }
+    if upper { out.to_uppercase() } else { out }
+}
+
+fn letters(n: i32, upper: bool) -> String {
+    if n <= 0 {
+        return n.to_string();
+    }
+    let base = if upper { b'A' } else { b'a' };
+    let ch = (base + ((n - 1) % 26) as u8) as char;
+    std::iter::repeat(ch).take(((n - 1) / 26 + 1) as usize).collect()
+}
+
+fn format_number(n: i32, format: &str) -> String {
+    const CIRCLED: &str = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+    const GANADA: &str = "가나다라마바사아자차카타파하";
+    const CHOSUNG: &str = "ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ";
+    let pick = |set: &str| -> String {
+        let chars: Vec<char> = set.chars().collect();
+        if n >= 1 && (n as usize) <= chars.len() { chars[n as usize - 1].to_string() } else { n.to_string() }
+    };
+    match format {
+        "lowerRoman" => roman(n, false),
+        "upperRoman" => roman(n, true),
+        "lowerLetter" => letters(n, false),
+        "upperLetter" => letters(n, true),
+        "decimalZero" => format!("{n:02}"),
+        "decimalEnclosedCircle" | "decimalEnclosedCircleChinese" => pick(CIRCLED),
+        "ganada" => pick(GANADA),
+        "chosung" => pick(CHOSUNG),
+        "none" => String::new(),
+        _ => n.to_string(),
+    }
+}
+
+/// 글머리 기호 글꼴(Symbol·Wingdings)의 사설 영역 글자를 보이는 글자로.
+fn bullet_glyph(text: &str) -> String {
+    text.chars()
+        .map(|c| match c as u32 {
+            0xF0B7 | 0xF09F | 0x2022 => '•',
+            0xF0A7 | 0xF06E | 0xF0FC => '▪',
+            0xF0A8 => '□',
+            0xF02D => '-',
+            u if (0xF020..=0xF0FF).contains(&u) => '•',
+            _ => c,
+        })
+        .collect()
+}
+
+/// 번호 붙은 문단의 번호 글자와 그 수준. 세기를 한 칸 올린다.
+fn next_number_label(styles: &DocxStyles, num_id: &str, level: u8) -> Option<(String, NumLevel)> {
+    let (abs_id, overrides) = styles.numbering.nums.get(num_id)?;
+    let levels = styles.numbering.abstracts.get(abs_id)?;
+    let lvl = levels.get(level as usize)?.clone();
+    let mut counters = styles.counters.borrow_mut();
+    let key = format!("{abs_id}#{num_id}");
+    let state = counters.entry(key).or_insert([None; 9]);
+    let start_of = |i: usize| overrides.get(&(i as u8)).copied().unwrap_or(levels[i].start);
+    let li = level as usize;
+    state[li] = Some(state[li].map_or(start_of(li), |v| v + 1));
+    for deeper in state.iter_mut().skip(li + 1) {
+        *deeper = None;
+    }
+    if lvl.format == "bullet" {
+        return Some((bullet_glyph(&lvl.text), lvl));
+    }
+    let mut label = lvl.text.clone();
+    for i in (0..=li).rev() {
+        let value = state[i].unwrap_or_else(|| start_of(i));
+        let shown = if lvl.format == "decimal" && i != li && levels[i].format != "decimal" {
+            // 상위 수준이 문자여도 "1.1" 처럼 숫자로 이어 적는 문서가 많다
+            format_number(value, &levels[i].format)
+        } else if i == li {
+            format_number(value, &lvl.format)
+        } else {
+            format_number(value, &levels[i].format)
+        };
+        label = label.replace(&format!("%{}", i + 1), &shown);
+    }
+    Some((label, lvl))
+}
+
+/// 머리말·꼬리말 문단들을 읽는다. 표 안의 문단도 차례로 꺼낸다.
+#[allow(clippy::type_complexity)]
+fn read_headers_footers(
+    xml: &roxmltree::Document<'_>,
+    body: roxmltree::Node<'_, '_>,
+    styles: &DocxStyles,
+    relationships: &HashMap<String, String>,
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+) -> Result<(Vec<DocxParagraph>, Vec<DocxParagraph>, Option<Vec<DocxParagraph>>, Option<Vec<DocxParagraph>>, f32, f32)> {
+    let sections: Vec<_> = xml.descendants().filter(|n| n.has_tag_name("sectPr")).collect();
+    let mut refs: HashMap<(bool, String), String> = HashMap::new();
+    let mut title_page = false;
+    for section in &sections {
+        for r in section.children().filter(|n| n.has_tag_name("headerReference") || n.has_tag_name("footerReference")) {
+            let is_header = r.has_tag_name("headerReference");
+            let kind = attribute_by_local_name(r, "type").unwrap_or("default").to_owned();
+            if let Some(id) = attribute_by_local_name(r, "id") {
+                refs.entry((is_header, kind)).or_insert_with(|| id.to_owned());
+            }
+        }
+        if child(*section, "titlePg").is_some_and(property_enabled) {
+            title_page = true;
+        }
+    }
+    let margins = body
+        .children()
+        .find(|n| n.has_tag_name("sectPr"))
+        .or_else(|| sections.first().copied())
+        .and_then(|s| child(s, "pgMar"));
+    let header_distance = twips_attribute(margins, "header").unwrap_or(36.0);
+    let footer_distance = twips_attribute(margins, "footer").unwrap_or(36.0);
+
+    let mut load = |is_header: bool, kind: &str| -> Result<Option<Vec<DocxParagraph>>> {
+        let Some(id) = refs.get(&(is_header, kind.to_owned())) else { return Ok(None) };
+        let Some(target) = relationships.get(id) else { return Ok(None) };
+        let path = resolve_part_target("word/document.xml", target);
+        let Some(text) = read_zip_text(archive, &path)? else { return Ok(None) };
+        let part = roxmltree::Document::parse(&text)?;
+        let mut blocks = Vec::new();
+        for p in part.descendants().filter(|n| n.has_tag_name("p")) {
+            if p.ancestors().skip(1).any(|a| a.has_tag_name("p") || a.has_tag_name("txbxContent")) {
+                continue;
+            }
+            read_paragraph(p, &mut blocks, styles, &HashMap::new(), archive)?;
+        }
+        // 글상자 안의 글(분류 표시 등)은 뒤에 이어 붙인다. 같은 글상자가
+        // mc:Fallback(VML)에 한 번 더 있으므로 그쪽은 건너뛴다.
+        for p in part.descendants().filter(|n| n.has_tag_name("p")) {
+            let in_box = p.ancestors().skip(1).any(|a| a.has_tag_name("txbxContent"));
+            let in_fallback = p.ancestors().any(|a| a.has_tag_name("Fallback"));
+            let nested = p.ancestors().skip(1).take_while(|a| !a.has_tag_name("txbxContent")).any(|a| a.has_tag_name("p"));
+            if in_box && !in_fallback && !nested {
+                read_paragraph(p, &mut blocks, styles, &HashMap::new(), archive)?;
+            }
+        }
+        Ok(Some(
+            blocks
+                .into_iter()
+                .filter_map(|b| match b {
+                    DocxBlock::Paragraph(p) => Some(p),
+                    _ => None,
+                })
+                .collect(),
+        ))
+    };
+    let header = load(true, "default")?.unwrap_or_default();
+    let footer = load(false, "default")?.unwrap_or_default();
+    let first_header = if title_page { Some(load(true, "first")?.unwrap_or_default()) } else { None };
+    let first_footer = if title_page { Some(load(false, "first")?.unwrap_or_default()) } else { None };
+    Ok((header, footer, first_header, first_footer, header_distance, footer_distance))
 }
 
 fn read_theme_fonts(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<DocxThemeFonts> {
@@ -494,6 +784,44 @@ fn read_paragraph_properties(properties: roxmltree::Node<'_, '_>) -> ParagraphPr
         bottom_border: child(properties, "pBdr")
             .and_then(|node| child(node, "bottom"))
             .and_then(read_border),
+        first_line: indentation.and_then(|node| {
+            numeric_attribute(node, "hanging")
+                .map(|twips| -twips / 20.0)
+                .or_else(|| numeric_attribute(node, "firstLine").map(|twips| twips / 20.0))
+        }),
+        justify: child(properties, "jc")
+            .and_then(|node| attribute_by_local_name(node, "val"))
+            .map(|value| matches!(value, "both" | "distribute" | "justify" | "lowKashida" | "mediumKashida" | "highKashida")),
+        numbering: child(properties, "numPr").and_then(|node| {
+            let id = child(node, "numId").and_then(|n| attribute_by_local_name(n, "val"))?;
+            let level = child(node, "ilvl")
+                .and_then(|n| attribute_by_local_name(n, "val"))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0u8);
+            Some((id.to_owned(), level.min(8)))
+        }),
+        tabs: child(properties, "tabs").map(|tabs| {
+            tabs.children()
+                .filter(|n| n.has_tag_name("tab"))
+                .filter_map(|n| {
+                    let pos = numeric_attribute(n, "pos")? / 20.0;
+                    let val = attribute_by_local_name(n, "val").unwrap_or("left");
+                    let align = match val {
+                        "right" | "end" | "decimal" => TabAlign::Right,
+                        "center" => TabAlign::Center,
+                        _ => TabAlign::Left,
+                    };
+                    let leader = match attribute_by_local_name(n, "leader") {
+                        Some("dot") => Some('.'),
+                        Some("middleDot") => Some('·'),
+                        Some("hyphen") => Some('-'),
+                        Some("underscore" | "heavy") => Some('_'),
+                        _ => None,
+                    };
+                    Some((TabStop { pos, align, leader }, val == "clear"))
+                })
+                .collect()
+        }),
     }
 }
 
@@ -618,6 +946,26 @@ fn merge_paragraph_properties(target: &mut ParagraphProperties, source: &Paragra
     if source.bottom_border.is_some() {
         target.bottom_border = source.bottom_border;
     }
+    if source.first_line.is_some() {
+        target.first_line = source.first_line;
+    }
+    if source.justify.is_some() {
+        target.justify = source.justify;
+    }
+    if source.numbering.is_some() {
+        target.numbering.clone_from(&source.numbering);
+    }
+    if let Some(new_tabs) = &source.tabs {
+        // 탭은 쌓인다. clear 는 같은 자리의 위쪽 탭을 지운다.
+        let mut merged: Vec<(TabStop, bool)> = target.tabs.clone().unwrap_or_default();
+        for (tab, clear) in new_tabs {
+            merged.retain(|(t, _)| (t.pos - tab.pos).abs() > 0.5);
+            if !*clear {
+                merged.push((*tab, false));
+            }
+        }
+        target.tabs = Some(merged);
+    }
 }
 
 fn merge_run_properties(target: &mut RunProperties, source: &RunProperties) {
@@ -700,6 +1048,16 @@ fn read_paragraph(
             0,
         );
     }
+    // 번호: 스타일 < 번호 수준 < 문단 직접 순으로 들여쓰기가 덮인다.
+    let numbering = direct_properties
+        .numbering
+        .clone()
+        .or_else(|| paragraph_properties.numbering.clone())
+        .filter(|(id, _)| id != "0");
+    let label = numbering.and_then(|(id, level)| next_number_label(styles, &id, level));
+    if let Some((_, level)) = &label {
+        merge_paragraph_properties(&mut paragraph_properties, &level.paragraph);
+    }
     merge_paragraph_properties(&mut paragraph_properties, &direct_properties);
     if let Some(properties) = child(paragraph, "pPr").and_then(|node| child(node, "rPr")) {
         merge_run_properties(&mut base_run_properties, &read_run_properties(properties));
@@ -708,13 +1066,54 @@ fn read_paragraph(
     let floating_images = read_vml_floating_images(paragraph, relationships, archive)?;
 
     let mut runs = Vec::new();
+    if let Some((text, level)) = &label {
+        let mut props = base_run_properties.clone();
+        let mut level_run = level.run.clone();
+        if level.format == "bullet" {
+            // Symbol·Wingdings 글꼴은 기기에 없다. 기호는 이미 보이는 글자로 바꿨으니
+            // 문단 글꼴로 그린다.
+            level_run.font_name = None;
+            level_run.font_theme = None;
+        }
+        merge_run_properties(&mut props, &level_run);
+        props.underline = Some(false);
+        props.highlight = None;
+        let suffix = match level.suffix.as_str() {
+            "space" => " ",
+            "nothing" => "",
+            _ => "\t",
+        };
+        if !text.is_empty() {
+            runs.push(create_run(format!("{text}{suffix}"), &props, &styles.theme_fonts));
+        }
+    }
     let mut emitted_non_text = false;
+    // 필드: 0 없음, 1 명령 읽는 중, 2 결과 숨김(쪽 번호로 바꿈), 3 결과 그대로
+    let mut field_mode = 0u8;
+    let mut field_instr = String::new();
     for run_node in paragraph
         .descendants()
         .filter(|node| node.has_tag_name("r"))
     {
+        // fldSimple PAGE / NUMPAGES: 첫 글토막을 자리표시로, 나머지는 버린다.
+        if let Some(simple) = run_node.ancestors().find(|n| n.has_tag_name("fldSimple")) {
+            let instr = attribute_by_local_name(simple, "instr").unwrap_or("").trim().to_uppercase();
+            let placeholder = field_placeholder(&instr);
+            if let Some(ph) = placeholder {
+                let first = simple.descendants().find(|n| n.has_tag_name("r"));
+                if first == Some(run_node) {
+                    let mut run_properties = base_run_properties.clone();
+                    if let Some(properties) = child(run_node, "rPr") {
+                        merge_run_properties(&mut run_properties, &read_run_properties(properties));
+                    }
+                    runs.push(create_run(ph.to_string(), &run_properties, &styles.theme_fonts));
+                }
+                continue;
+            }
+        }
         if run_node
             .ancestors()
+            .take_while(|node| *node != paragraph)
             .any(|node| node.has_tag_name("txbxContent"))
             || run_node
                 .descendants()
@@ -740,11 +1139,46 @@ fn read_paragraph(
         }
         let mut text = String::new();
         for node in run_node.descendants() {
+            if node.has_tag_name("fldChar") {
+                match attribute_by_local_name(node, "fldCharType") {
+                    Some("begin") => {
+                        field_mode = 1;
+                        field_instr.clear();
+                    }
+                    Some("separate") => {
+                        if let Some(ph) = field_placeholder(&field_instr.trim().to_uppercase()) {
+                            text.push(ph);
+                            field_mode = 2;
+                        } else {
+                            field_mode = 3;
+                        }
+                    }
+                    Some("end") => {
+                        if field_mode == 1 {
+                            if let Some(ph) = field_placeholder(&field_instr.trim().to_uppercase()) {
+                                text.push(ph);
+                            }
+                        }
+                        field_mode = 0;
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            if node.has_tag_name("instrText") {
+                if field_mode == 1 {
+                    field_instr.push_str(node.text().unwrap_or(""));
+                }
+                continue;
+            }
+            if field_mode == 1 || field_mode == 2 {
+                continue;
+            }
             if node.has_tag_name("t") {
                 if let Some(value) = node.text() {
                     text.push_str(value);
                 }
-            } else if node.has_tag_name("tab") {
+            } else if node.has_tag_name("tab") && !node.ancestors().any(|a| a.has_tag_name("tabs")) {
                 text.push('\t');
             } else if node.has_tag_name("br") {
                 if attribute_by_local_name(node, "type") == Some("page") {
@@ -774,6 +1208,19 @@ fn read_paragraph(
         blocks.push(DocxBlock::Paragraph(output));
     }
     Ok(())
+}
+
+/// 쪽 번호 필드 자리표시 글자. 그릴 때 실제 번호로 바뀐다.
+const PAGE_FIELD: char = '\u{E000}';
+const NUMPAGES_FIELD: char = '\u{E001}';
+
+fn field_placeholder(instr: &str) -> Option<char> {
+    let word = instr.split_whitespace().next()?;
+    match word {
+        "PAGE" => Some(PAGE_FIELD),
+        "NUMPAGES" | "SECTIONPAGES" => Some(NUMPAGES_FIELD),
+        _ => None,
+    }
 }
 
 fn read_vml_floating_images(
@@ -919,10 +1366,22 @@ fn create_paragraph(
         indent_right: properties.indent_right.unwrap_or(0.0),
         spacing_before: properties.spacing_before.unwrap_or(0.0),
         spacing_after,
-        line_spacing: properties.line_spacing.unwrap_or(1.15),
+        // 문서가 줄 간격을 안 정하면 워드 기본은 '한 줄'(1.0)이다.
+        line_spacing: properties.line_spacing.unwrap_or(1.0),
         line_spacing_explicit: properties.line_spacing.is_some(),
         fill: properties.fill,
         bottom_border: properties.bottom_border,
+        first_line: properties.first_line.unwrap_or(0.0),
+        justify: properties.justify.unwrap_or(false),
+        tabs: {
+            let mut tabs: Vec<TabStop> = properties
+                .tabs
+                .as_ref()
+                .map(|t| t.iter().filter(|(_, clear)| !clear).map(|(tab, _)| *tab).collect())
+                .unwrap_or_default();
+            tabs.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+            tabs
+        },
     }
 }
 
@@ -1120,6 +1579,14 @@ fn read_table(
 ) -> Result<DocxTable> {
     let properties = child(table, "tblPr");
     let cell_margins = properties.and_then(|node| child(node, "tblCellMar"));
+    // 표 전체 칸 여백이 없으면 첫 칸의 위·아래 여백(tcMar)을 쓴다 — 칸마다 같은
+    // 여백을 적어 두는 문서가 많고, 그걸 버리면 줄 높이가 반으로 준다.
+    // 좌우는 칸마다 크게 다른 문서(주소 라벨 등)가 있어 따르지 않는다.
+    let vertical_margins = cell_margins.or_else(|| {
+        table
+            .descendants()
+            .find(|node| node.has_tag_name("tcMar") && node.parent().is_some_and(|p| p.has_tag_name("tcPr")))
+    });
     let style_id = properties
         .and_then(|node| child(node, "tblStyle"))
         .and_then(|node| attribute_by_local_name(node, "val"));
@@ -1168,8 +1635,8 @@ fn read_table(
             .unwrap_or(TextAlignment::Left),
         cell_margin_left: table_margin(cell_margins, "left", TABLE_CELL_PADDING_HORIZONTAL),
         cell_margin_right: table_margin(cell_margins, "right", TABLE_CELL_PADDING_HORIZONTAL),
-        cell_margin_top: table_margin(cell_margins, "top", 0.0),
-        cell_margin_bottom: table_margin(cell_margins, "bottom", 0.0),
+        cell_margin_top: table_margin(vertical_margins, "top", 0.0),
+        cell_margin_bottom: table_margin(vertical_margins, "bottom", 0.0),
         legacy_cjk_metrics,
     })
 }
@@ -1404,6 +1871,13 @@ fn attribute_by_local_name<'a, 'input>(
 }
 
 fn render_docx(doc: &mut PdfDocument, document: &DocxDocument, options: &ConversionOptions) {
+    let first_page = doc.pages().len();
+    render_docx_body(doc, document, options);
+    let page_size = options.page_size.unwrap_or(document.page_size);
+    render_headers_footers(doc, document, page_size, first_page);
+}
+
+fn render_docx_body(doc: &mut PdfDocument, document: &DocxDocument, options: &ConversionOptions) {
     let mut page_index = doc.pages().len();
     let page_size = options.page_size.unwrap_or(document.page_size);
     let margins = document.margins;
@@ -1506,18 +1980,12 @@ fn render_paragraph(
 ) {
     let (spacing_before, spacing_after, grid_line_pitch, previous_grid_ascent) = layout;
     let (_, line_height, baseline_offset) = paragraph_line_metrics(paragraph, grid_line_pitch);
-    let available_width = (page_size.width
-        - margins.left
-        - margins.right
-        - paragraph.indent_left
-        - paragraph.indent_right)
-        .max(1.0);
-    let lines = wrap_paragraph_runs(&paragraph.runs, available_width);
+    let text_width = (page_size.width - margins.left - margins.right).max(1.0);
+    let lines = flow_lines(paragraph, text_width);
     let line_count = lines.len().max(1);
-    let content_height = line_count as f32 * line_height;
-    let total_height = spacing_before + content_height + spacing_after;
     let mut top = *y + BODY_FONT_SIZE;
-    if top - total_height < margins.bottom {
+    // 첫 줄도 안 들어가면 다음 쪽으로. 그 뒤로는 줄마다 넘긴다.
+    if top - spacing_before - line_height < margins.bottom {
         *page_index = doc.pages().len();
         doc.add_page(page_size.width, page_size.height);
         top = page_size.height - margins.top;
@@ -1528,50 +1996,39 @@ fn render_paragraph(
             top -= baseline_offset - previous_ascent;
         }
     }
-    let left = margins.left + paragraph.indent_left;
-    let bottom = top - content_height;
-    if let Some(fill) = paragraph.fill {
-        doc.page_mut(*page_index)
-            .expect("page index is valid")
-            .add_rect(left, bottom, available_width, content_height, fill);
-    }
+    let box_left = margins.left + paragraph.indent_left;
+    let box_width = (text_width - paragraph.indent_left - paragraph.indent_right).max(1.0);
+    let first_page = *page_index;
+    let first_top = top;
+    let mut line_top = top;
 
-    for (line_index, line) in lines.iter().enumerate() {
-        let line_width: f32 = line.iter().map(|run| run_width(run, &run.text)).sum();
-        let mut x = match paragraph.alignment {
-            TextAlignment::Left => left,
-            TextAlignment::Center => left + (available_width - line_width) / 2.0,
-            TextAlignment::Right => left + available_width - line_width,
-        };
-        let baseline = top - baseline_offset - line_index as f32 * line_height;
-        for run in line {
-            let width = run_width(run, &run.text);
-            let page = doc.page_mut(*page_index).expect("page index is valid");
-            page.add_styled_text_with_font(
-                &run.text,
-                x,
-                baseline,
-                run.font_size,
-                run.color,
-                run.bold,
-                run.italic,
-                run.font_name.as_deref(),
-            );
-            if run.underline && !run.text.trim().is_empty() {
-                page.add_line(x, baseline - 1.5, x + width, baseline - 1.5, run.color, 0.5);
-            }
-            x += width;
+    for index in 0..line_count {
+        if index > 0 && line_top - line_height < margins.bottom {
+            *page_index = doc.pages().len();
+            doc.add_page(page_size.width, page_size.height);
+            line_top = page_size.height - margins.top;
         }
+        if let Some(fill) = paragraph.fill {
+            doc.page_mut(*page_index)
+                .expect("page index is valid")
+                .add_rect(box_left, line_top - line_height, box_width, line_height, fill);
+        }
+        if let Some(line) = lines.get(index) {
+            let baseline = line_top - baseline_offset;
+            let page_number = *page_index + 1;
+            draw_flow_line(doc.page_mut(*page_index).expect("page index is valid"), paragraph, line, margins.left, baseline, page_number, 0);
+        }
+        line_top -= line_height;
     }
 
     for floating in &paragraph.floating_images {
         let image_id = register_image(doc, &floating.image);
-        doc.page_mut(*page_index)
+        doc.page_mut(first_page)
             .expect("page index is valid")
             .add_image(
                 image_id,
                 margins.left + floating.offset_x + floating.inset_left,
-                top - floating.offset_y
+                first_top - floating.offset_y
                     - floating.inset_top
                     - floating.line_top_leading
                     - floating.image.height,
@@ -1580,25 +2037,387 @@ fn render_paragraph(
             );
     }
 
+    let bottom = line_top;
     if let Some(border) = paragraph.bottom_border {
         let border_y = bottom - border.space;
         let page = doc.page_mut(*page_index).expect("page index is valid");
         draw_border(
             page,
-            (left, border_y),
-            (left + available_width, border_y),
+            (box_left, border_y),
+            (box_left + box_width, border_y),
             border,
         );
         if border.is_double {
             draw_border(
                 page,
-                (left, border_y - border.width * 2.0),
-                (left + available_width, border_y - border.width * 2.0),
+                (box_left, border_y - border.width * 2.0),
+                (box_left + box_width, border_y - border.width * 2.0),
                 border,
             );
         }
     }
-    *y = top - content_height - spacing_after - BODY_FONT_SIZE;
+    *y = bottom - spacing_after - BODY_FONT_SIZE;
+}
+
+// ---------------------------------------------------------------------------
+// 문단 줄 배치: 낱말 단위 줄바꿈, 탭(채움 점선 포함), 양쪽 맞춤, 내어쓰기
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PieceKind {
+    Word,
+    Space,
+    Tab,
+    Newline,
+}
+
+#[derive(Debug, Clone)]
+struct Piece {
+    run: usize,
+    text: String,
+    width: f32,
+    kind: PieceKind,
+}
+
+#[derive(Debug, Clone)]
+struct Placed {
+    run: usize,
+    text: String,
+    x: f32,
+    width: f32,
+    tab: Option<Option<char>>,
+    space: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FlowLine {
+    items: Vec<Placed>,
+}
+
+const DEFAULT_TAB: f32 = 36.0;
+
+fn is_breakable_cjk(ch: char) -> bool {
+    // 한자·가나는 글자마다 끊는다. 한글은 띄어쓰기로 끊는다(워드 기본).
+    matches!(ch as u32, 0x2e80..=0x2fff | 0x3000..=0x30ff | 0x3400..=0x9fff | 0xf900..=0xfaff | 0xff00..=0xffef)
+}
+
+fn display_text(text: &str, page: usize, total: usize) -> String {
+    if !text.contains([PAGE_FIELD, NUMPAGES_FIELD]) {
+        return text.to_owned();
+    }
+    text.replace(PAGE_FIELD, &page.to_string())
+        .replace(NUMPAGES_FIELD, &if total > 0 { total.to_string() } else { page.to_string() })
+}
+
+fn pieces_of(runs: &[DocxRun]) -> Vec<Piece> {
+    let mut out: Vec<Piece> = Vec::new();
+    for (ri, run) in runs.iter().enumerate() {
+        let mut word = String::new();
+        let flush = |word: &mut String, out: &mut Vec<Piece>| {
+            if !word.is_empty() {
+                let measure = display_text(word, 88, 88);
+                out.push(Piece { run: ri, width: run_width(run, &measure), text: std::mem::take(word), kind: PieceKind::Word });
+            }
+        };
+        for ch in run.text.chars() {
+            match ch {
+                '\n' => {
+                    flush(&mut word, &mut out);
+                    out.push(Piece { run: ri, text: String::new(), width: 0.0, kind: PieceKind::Newline });
+                }
+                '\t' => {
+                    flush(&mut word, &mut out);
+                    out.push(Piece { run: ri, text: String::new(), width: 0.0, kind: PieceKind::Tab });
+                }
+                ' ' | '\u{3000}' => {
+                    flush(&mut word, &mut out);
+                    let text = ch.to_string();
+                    out.push(Piece { run: ri, width: run_width(run, &text), text, kind: PieceKind::Space });
+                }
+                c if is_breakable_cjk(c) && !is_forbidden_line_start(c) && !matches!(c, '、' | '。' | '，' | '．' | '：' | '；' | '！' | '？' | '」' | '』' | '）') => {
+                    flush(&mut word, &mut out);
+                    word.push(c);
+                    flush(&mut word, &mut out);
+                }
+                c => {
+                    // 닫는 문장부호는 앞 낱말에 붙인다 (줄 첫머리 금칙).
+                    if word.is_empty() && (is_forbidden_line_start(c) || matches!(c, '、' | '。' | '，' | '．' | '」' | '』' | '）')) {
+                        if let Some(last) = out.last_mut().filter(|p| p.kind == PieceKind::Word && p.run == ri) {
+                            last.text.push(c);
+                            last.width = run_width(run, &display_text(&last.text, 88, 88));
+                            continue;
+                        }
+                    }
+                    word.push(c);
+                }
+            }
+        }
+        flush(&mut word, &mut out);
+    }
+    out
+}
+
+fn next_tab_stop(paragraph: &DocxParagraph, x: f32) -> TabStop {
+    if paragraph.first_line < 0.0 && x < paragraph.indent_left - 0.01 {
+        let custom_before = paragraph.tabs.iter().find(|t| t.pos > x + 0.01 && t.pos < paragraph.indent_left);
+        if let Some(t) = custom_before {
+            return *t;
+        }
+        return TabStop { pos: paragraph.indent_left, align: TabAlign::Left, leader: None };
+    }
+    if let Some(t) = paragraph.tabs.iter().find(|t| t.pos > x + 0.01) {
+        return *t;
+    }
+    let next = ((x + 0.01) / DEFAULT_TAB).floor() * DEFAULT_TAB + DEFAULT_TAB;
+    TabStop { pos: next, align: TabAlign::Left, leader: None }
+}
+
+/// 문단을 줄로 나눈다. x 는 본문 왼쪽 여백 기준.
+fn flow_lines(paragraph: &DocxParagraph, text_width: f32) -> Vec<FlowLine> {
+    let mut pieces = pieces_of(&paragraph.runs);
+    let limit = (text_width - paragraph.indent_right).max(paragraph.indent_left + 1.0);
+    let mut lines: Vec<FlowLine> = Vec::new();
+    let mut ends: Vec<bool> = Vec::new(); // 줄이 문단 끝/강제 줄바꿈으로 끝났는가
+    let mut line = FlowLine::default();
+    let mut first = true;
+    let mut x = paragraph.indent_left + paragraph.first_line;
+    let start_x = |first: bool| if first { paragraph.indent_left + paragraph.first_line } else { paragraph.indent_left };
+    let mut i = 0;
+    let mut guard = 0usize;
+    while i < pieces.len() {
+        guard += 1;
+        if guard > pieces.len() * 4 + 1000 {
+            break;
+        }
+        let piece = pieces[i].clone();
+        match piece.kind {
+            PieceKind::Newline => {
+                lines.push(std::mem::take(&mut line));
+                ends.push(true);
+                first = false;
+                x = start_x(false);
+                i += 1;
+            }
+            PieceKind::Space => {
+                // 줄바꿈으로 넘어온 줄의 첫 공백만 버린다. 문단 첫머리 공백은 들여쓰기다.
+                let wrapped_start = line.items.is_empty() && ends.last() == Some(&false);
+                if !wrapped_start {
+                    line.items.push(Placed { run: piece.run, text: piece.text.clone(), x, width: piece.width, tab: None, space: true });
+                    x += piece.width;
+                }
+                i += 1;
+            }
+            PieceKind::Tab => {
+                let stop = next_tab_stop(paragraph, x);
+                // 오른쪽·가운데 탭: 다음 탭 전까지의 글 폭만큼 당긴다.
+                let following: f32 = pieces[i + 1..]
+                    .iter()
+                    .take_while(|p| !matches!(p.kind, PieceKind::Tab | PieceKind::Newline))
+                    .map(|p| p.width)
+                    .sum();
+                let target = match stop.align {
+                    TabAlign::Left => stop.pos,
+                    TabAlign::Right => stop.pos - following,
+                    TabAlign::Center => stop.pos - following / 2.0,
+                };
+                let width = (target - x).max(0.0);
+                line.items.push(Placed { run: piece.run, text: String::new(), x, width, tab: Some(stop.leader), space: false });
+                x += width;
+                i += 1;
+            }
+            PieceKind::Word => {
+                let has_content = line.items.iter().any(|p| !p.space);
+                if x + piece.width > limit + 0.01 && has_content {
+                    while line.items.last().is_some_and(|p| p.space) {
+                        line.items.pop();
+                    }
+                    lines.push(std::mem::take(&mut line));
+                    ends.push(false);
+                    first = false;
+                    x = start_x(false);
+                    continue;
+                }
+                if x + piece.width > limit + 0.01 && !has_content {
+                    // 한 낱말이 줄보다 길다: 글자 단위로 자른다.
+                    let run = &paragraph.runs[piece.run];
+                    let mut part = String::new();
+                    let mut part_width = 0.0;
+                    let mut rest = String::new();
+                    let mut overflow = false;
+                    for ch in piece.text.chars() {
+                        if overflow {
+                            rest.push(ch);
+                            continue;
+                        }
+                        let cw = run_width(run, &ch.to_string());
+                        if x + part_width + cw > limit + 0.01 && !part.is_empty() {
+                            overflow = true;
+                            rest.push(ch);
+                        } else {
+                            part.push(ch);
+                            part_width += cw;
+                        }
+                    }
+                    line.items.push(Placed { run: piece.run, text: part, x, width: part_width, tab: None, space: false });
+                    if rest.is_empty() {
+                        x += part_width;
+                        i += 1;
+                    } else {
+                        lines.push(std::mem::take(&mut line));
+                        ends.push(false);
+                        first = false;
+                        x = start_x(false);
+                        let rest_width = run_width(run, &rest);
+                        pieces[i] = Piece { run: piece.run, text: rest, width: rest_width, kind: PieceKind::Word };
+                    }
+                    continue;
+                }
+                line.items.push(Placed { run: piece.run, text: piece.text.clone(), x, width: piece.width, tab: None, space: false });
+                x += piece.width;
+                i += 1;
+            }
+        }
+    }
+    while line.items.last().is_some_and(|p| p.space) {
+        line.items.pop();
+    }
+    lines.push(line);
+    ends.push(true);
+    let _ = first;
+    align_lines(paragraph, &mut lines, &ends, limit);
+    lines
+}
+
+fn align_lines(paragraph: &DocxParagraph, lines: &mut [FlowLine], ends: &[bool], limit: f32) {
+    for (index, line) in lines.iter_mut().enumerate() {
+        let Some(last) = line.items.last() else { continue };
+        let right = last.x + last.width;
+        let free = limit - right;
+        if free <= 0.0 {
+            continue;
+        }
+        let last_tab = line.items.iter().rposition(|p| p.tab.is_some());
+        let natural_end = ends.get(index).copied().unwrap_or(true);
+        if paragraph.justify && !natural_end {
+            let from = last_tab.map_or(0, |t| t + 1);
+            let spaces = line.items[from..].iter().filter(|p| p.space).count();
+            if spaces > 0 && free < limit * 0.5 {
+                let gap = free / spaces as f32;
+                let mut shift = 0.0;
+                for item in line.items[from..].iter_mut() {
+                    item.x += shift;
+                    if item.space {
+                        item.width += gap;
+                        shift += gap;
+                    }
+                }
+            }
+            continue;
+        }
+        if last_tab.is_some() {
+            continue;
+        }
+        let offset = match paragraph.alignment {
+            TextAlignment::Center => free / 2.0,
+            TextAlignment::Right => free,
+            TextAlignment::Left => 0.0,
+        };
+        if offset > 0.0 {
+            for item in &mut line.items {
+                item.x += offset;
+            }
+        }
+    }
+}
+
+/// 한 줄을 그린다. left 는 본문 왼쪽 여백(쪽 좌표).
+fn draw_flow_line(
+    page: &mut crate::pdf::PdfPage,
+    paragraph: &DocxParagraph,
+    line: &FlowLine,
+    left: f32,
+    baseline: f32,
+    page_number: usize,
+    total_pages: usize,
+) {
+    for item in &line.items {
+        let run = &paragraph.runs[item.run];
+        let x = left + item.x;
+        if let Some(leader) = item.tab {
+            if let Some(ch) = leader {
+                let glyph = ch.to_string();
+                let cw = run_width(run, &glyph).max(0.5);
+                let count = ((item.width - cw) / cw).floor();
+                if count >= 1.0 {
+                    let dots: String = std::iter::repeat(ch).take(count as usize).collect();
+                    let start = x + item.width - count * cw - cw * 0.5;
+                    page.add_styled_text_with_font(&dots, start, baseline, run.font_size, run.color, false, false, run.font_name.as_deref());
+                }
+            }
+            continue;
+        }
+        if item.text.is_empty() {
+            continue;
+        }
+        let text = display_text(&item.text, page_number, total_pages);
+        if let Some(highlight) = run.highlight {
+            page.add_rect(x, baseline - run.font_size * 0.24, item.width, run.font_size * 1.18, highlight);
+        }
+        if !item.space {
+            page.add_styled_text_with_font(&text, x, baseline, run.font_size, run.color, run.bold, run.italic, run.font_name.as_deref());
+        }
+        if run.underline && !text.trim().is_empty() || run.underline && item.space {
+            page.add_line(x, baseline - 1.5, x + item.width, baseline - 1.5, run.color, 0.5);
+        }
+    }
+}
+
+/// 머리말·꼬리말을 모든 쪽에 그린다 (쪽 수가 정해진 뒤).
+fn render_headers_footers(doc: &mut PdfDocument, document: &DocxDocument, page_size: PageSize, first_page: usize) {
+    let total = doc.pages().len() - first_page;
+    let text_width = (page_size.width - document.margins.left - document.margins.right).max(1.0);
+    for n in 0..total {
+        let index = first_page + n;
+        let is_first = n == 0;
+        let header = if is_first { document.first_header.as_ref().unwrap_or(&document.header) } else { &document.header };
+        let footer = if is_first { document.first_footer.as_ref().unwrap_or(&document.footer) } else { &document.footer };
+        // 머리말: 위에서 header_distance 아래부터 내려간다.
+        let mut top = page_size.height - document.header_distance;
+        for paragraph in header {
+            let (_, line_height, baseline_offset) = paragraph_line_metrics(paragraph, 0.0);
+            top -= paragraph.spacing_before;
+            for line in flow_lines(paragraph, text_width) {
+                if let Some(page) = doc.page_mut(index) {
+                    draw_flow_line(page, paragraph, &line, document.margins.left, top - baseline_offset, n + 1, total);
+                }
+                top -= line_height;
+            }
+            top -= paragraph.spacing_after;
+        }
+        // 꼬리말: 아래에서 footer_distance 위에 마지막 줄이 놓이게 높이를 먼저 잰다.
+        let laid: Vec<(Vec<FlowLine>, f32, f32)> = footer
+            .iter()
+            .map(|p| {
+                let (_, lh, bo) = paragraph_line_metrics(p, 0.0);
+                (flow_lines(p, text_width), lh, bo)
+            })
+            .collect();
+        let height: f32 = laid
+            .iter()
+            .zip(footer)
+            .map(|((lines, lh, _), p)| p.spacing_before + lines.len().max(1) as f32 * lh + p.spacing_after)
+            .sum();
+        let mut top = document.footer_distance + height;
+        for ((lines, lh, bo), paragraph) in laid.iter().zip(footer) {
+            top -= paragraph.spacing_before;
+            for line in lines {
+                if let Some(page) = doc.page_mut(index) {
+                    draw_flow_line(page, paragraph, line, document.margins.left, top - bo, n + 1, total);
+                }
+                top -= lh;
+            }
+            top -= paragraph.spacing_after;
+        }
+    }
 }
 
 fn paragraph_line_metrics(paragraph: &DocxParagraph, grid_line_pitch: f32) -> (f32, f32, f32) {
@@ -1607,7 +2426,17 @@ fn paragraph_line_metrics(paragraph: &DocxParagraph, grid_line_pitch: f32) -> (f
         .iter()
         .map(|run| run.font_size)
         .fold(BODY_FONT_SIZE, f32::max);
-    let mut line_height = font_size * 1.18 * paragraph.line_spacing;
+    // 글꼴마다 '한 줄' 높이가 다르다. 맑은 고딕은 워드에서 크기의 1.73배다
+    // (워드 PDF 에서 잰 값: 11pt·줄간격 1.333 → 25.4pt).
+    let font_factor = if paragraph.runs.iter().filter_map(|run| run.font_name.as_deref()).any(|name| {
+        let lower = name.to_ascii_lowercase();
+        name.contains("맑은") || lower.contains("malgun")
+    }) {
+        1.73
+    } else {
+        1.18
+    };
+    let mut line_height = font_size * font_factor * paragraph.line_spacing;
     if grid_line_pitch <= 0.0 {
         return (font_size, line_height, font_size);
     }
@@ -2052,14 +2881,11 @@ fn table_cell_content_height(table: &DocxTable, cell: &DocxTableCell, width: f32
 }
 
 fn table_cell_line_height(table: &DocxTable, cell: &DocxTableCell) -> f32 {
-    let metrics_factor = if table.legacy_cjk_metrics
-        && cell
-            .runs
-            .iter()
-            .filter_map(|run| run.font_name.as_deref())
-            .any(is_tall_cjk_font_name)
-    {
+    let fonts = || cell.runs.iter().filter_map(|run| run.font_name.as_deref());
+    let metrics_factor = if table.legacy_cjk_metrics && fonts().any(is_tall_cjk_font_name) {
         1.35
+    } else if fonts().any(|name| name.contains("맑은") || name.to_ascii_lowercase().contains("malgun")) {
+        1.73
     } else {
         1.18
     };
