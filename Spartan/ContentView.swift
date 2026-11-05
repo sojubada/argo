@@ -1763,6 +1763,15 @@ struct ContentView: View {
 			case 16:
 				presentOfficeReader()
             default:
+                // 애플TV 재생기(AVFoundation)가 못 푸는 음악·영상 형식은 16진수
+                // 보기로 떨어뜨리지 않고 이유를 알린다.
+                let ext = (fileToCheck[index] as NSString).pathExtension.lowercased()
+                if FileInfo.unsupportedMediaExtensions.contains(ext) {
+                    alertTitle = L("재생할 수 없는 형식입니다")
+                    alertMsg = LF("애플TV 기본 재생기는 .{0} 파일을 재생하지 못합니다. mp4·mov·m4v(영상), mp3·m4a·aac·flac·wav·aiff(음악)로 바꿔 넣어 주십시오.", ext)
+                    showAlert = true
+                    return
+                }
                 masterFiles[index].isLoadingFile = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     showSubView[22] = true

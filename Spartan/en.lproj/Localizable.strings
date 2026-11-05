@@ -669,3 +669,5 @@
 "가사를 찾는 중…" = "Looking for lyrics…";
 "가사가 없습니다" = "No lyrics";
 "같은 이름의 .lrc 파일을 음악 옆에 두면 그것을 씁니다." = "Put a .lrc file with the same name next to the song and it will be used.";
+"재생할 수 없는 형식입니다" = "Unsupported format";
+"애플TV 기본 재생기는 .{0} 파일을 재생하지 못합니다. mp4·mov·m4v(영상), mp3·m4a·aac·flac·wav·aiff(음악)로 바꿔 넣어 주십시오." = "The Apple TV player cannot play .{0} files. Please convert to mp4/mov/m4v (video) or mp3/m4a/aac/flac/wav/aiff (audio).";

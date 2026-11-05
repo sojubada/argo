@@ -131,6 +131,12 @@ class FileInfo {
         FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory)
         return isDirectory.boolValue
     }
+    /// AVFoundation 이 열지 못하는 흔한 음악·영상 형식. 열면 이유를 알린다.
+    static let unsupportedMediaExtensions: Set<String> = [
+        "mkv", "avi", "webm", "wmv", "flv", "f4v", "rm", "rmvb", "divx", "ogv", "vob", "mpg", "mpeg", "m2ts", "mts", "asf",
+        "ogg", "oga", "opus", "wma", "ape", "wv", "dsf", "dff", "mka", "ra",
+    ]
+
     class func isAudio(filePath: String) -> Bool {
         let fileURL = URL(fileURLWithPath: filePath)
         let asset = AVAsset(url: fileURL)
