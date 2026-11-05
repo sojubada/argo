@@ -761,6 +761,15 @@ impl<'d, 'i> Renderer<'d, 'i> {
         if b.tile {
             // 바둑판 그림은 늘여서 채운다(타일 크기를 알기 어렵다).
         }
+        // 안에 그림(<image>)을 품은 SVG(비트맵이 든 EMF·WMF 등)는 <image> 로 넣으면
+        // 안 된다 — usvg 는 그림으로 불러온 SVG 안의 그림을 모두 버린다. 그래서
+        // 쪽 SVG 안에 중첩 <svg> 로 바로 넣는다.
+        if mime == "image/svg+xml" {
+            if let Some(inline) = inline_svg(&data, &svg.id("e"), x, y, w, h) {
+                svg.body.push_str(&format!("<g{attrs}>{inline}</g>"));
+                return;
+            }
+        }
         svg.body.push_str(&format!(
             "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\"{attrs} xlink:href=\"data:{mime};base64,{}\"/>",
             f(x),
@@ -989,6 +998,48 @@ pub(crate) fn image_data(bytes: &[u8]) -> Option<(&'static str, Vec<u8>)> {
         return super::metafile::wmf(bytes).map(|s| ("image/svg+xml", s));
     }
     super::metafile::raster(bytes).map(|p| ("image/png", p))
+}
+
+/// 그림을 품은 SVG 문서를 쪽 안에 중첩 <svg> 로 옮긴다. 그림이 없으면 None
+/// (예전처럼 <image> 로 넣는다). id 는 겹치지 않게 앞머리를 붙인다.
+fn inline_svg(data: &[u8], prefix: &str, x: f64, y: f64, w: f64, h: f64) -> Option<String> {
+    let text = std::str::from_utf8(data).ok()?;
+    if !text.contains("<image") {
+        return None;
+    }
+    let start = text.find("<svg")?;
+    let open_end = start + text[start..].find('>')?;
+    let open = &text[start..open_end];
+    let close = text.rfind("</svg>")?;
+    if close <= open_end {
+        return None;
+    }
+    let inner = &text[open_end + 1..close];
+    let attr = |name: &str| -> Option<&str> {
+        let key = format!(" {name}=\"");
+        let i = open.find(&key)? + key.len();
+        let j = open[i..].find('"')? + i;
+        Some(&open[i..j])
+    };
+    let view_box = match attr("viewBox") {
+        Some(v) => v.to_string(),
+        None => {
+            let num = |s: Option<&str>| s.and_then(|v| v.trim_end_matches("pt").trim_end_matches("px").parse::<f64>().ok());
+            format!("0 0 {} {}", num(attr("width"))?, num(attr("height"))?)
+        }
+    };
+    let par = attr("preserveAspectRatio").unwrap_or("none");
+    let inner = inner
+        .replace("id=\"", &format!("id=\"{prefix}"))
+        .replace("url(#", &format!("url(#{prefix}"))
+        .replace("href=\"#", &format!("href=\"#{prefix}"));
+    Some(format!(
+        "<svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"{view_box}\" preserveAspectRatio=\"{par}\" overflow=\"hidden\">{inner}</svg>",
+        f(x),
+        f(y),
+        f(w.max(0.01)),
+        f(h.max(0.01))
+    ))
 }
 
 pub(crate) fn part_dir(part: &str) -> &str {

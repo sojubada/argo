@@ -2,13 +2,22 @@
 //!
 //! EMF·WMF 는 rhwp 의 변환기로 SVG 로 옮긴다. rhwp 를 빼고 지으면 건너뛴다.
 
-#[cfg(feature = "rhwp")]
+/// 그림이 주인공인 EMF(차트를 그림으로 붙여넣은 것 등)는 우리 변환기로,
+/// 나머지는 rhwp 로.
 pub(crate) fn emf(bytes: &[u8]) -> Option<Vec<u8>> {
+    if let Some(svg) = std::panic::catch_unwind(|| super::emfbitmap::convert(bytes)).ok().flatten() {
+        return Some(svg);
+    }
+    emf_general(bytes)
+}
+
+#[cfg(feature = "rhwp")]
+fn emf_general(bytes: &[u8]) -> Option<Vec<u8>> {
     std::panic::catch_unwind(|| rhwp::emf::convert_to_standalone_svg(bytes)).ok().flatten()
 }
 
 #[cfg(not(feature = "rhwp"))]
-pub(crate) fn emf(_bytes: &[u8]) -> Option<Vec<u8>> {
+fn emf_general(_bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 

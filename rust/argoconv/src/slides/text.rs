@@ -962,6 +962,10 @@ fn break_lines(p: &Para, width: f64, wrap: bool) -> Vec<LineOut> {
         let mut last_break: Option<usize> = None;
         let mut end = g.len();
         let mut forced = false;
+        // 줄을 통째로 차지하는 한 낱말이 조금(15%) 넘칠 때는 쪼개지 않는다.
+        // 글꼴이 PC 와 달라 폭이 몇 % 다르면, 좁은 표 칸의 "439" 가 "43/9" 로
+        // 꺾였다. 파워포인트에서 한 줄이던 것은 한 줄로 둔다.
+        let mut overflow_ok_until = 0usize;
         while i < g.len() {
             let gl = &g[i];
             if gl.newline {
@@ -971,7 +975,24 @@ fn break_lines(p: &Para, width: f64, wrap: bool) -> Vec<LineOut> {
             }
             let adv = if gl.tab { tab_stop(&p.style, x0 + x) - (x0 + x) } else { gl.adv };
             let trailing_space = gl.ch == ' ';
-            if wrap && x + adv > avail + 0.01 && !trailing_space && i > start {
+            if wrap && i >= overflow_ok_until && x + adv > avail + 0.01 && !trailing_space && i > start
+                && !matches!(last_break, Some(b) if b > start)
+            {
+                let mut j = i;
+                let mut wx = x;
+                while j < g.len() && !g[j].newline && g[j].ch != ' ' {
+                    wx += g[j].adv;
+                    if j + 1 < g.len() && can_break(g[j].ch, g[j + 1].ch) {
+                        j += 1;
+                        break;
+                    }
+                    j += 1;
+                }
+                if wx <= avail * 1.15 + 1.0 {
+                    overflow_ok_until = j;
+                }
+            }
+            if wrap && i >= overflow_ok_until && x + adv > avail + 0.01 && !trailing_space && i > start {
                 end = match last_break {
                     Some(b) if b > start => b,
                     _ => i,

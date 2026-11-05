@@ -9,6 +9,7 @@ mod color;
 mod fill;
 mod fontbook;
 mod geom;
+mod emfbitmap;
 mod metafile;
 pub(crate) mod package;
 pub(crate) mod ppt;
