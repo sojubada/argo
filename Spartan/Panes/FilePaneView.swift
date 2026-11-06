@@ -100,6 +100,12 @@ struct FilePaneView: View {
         }
         // 포커스가 옮겨 갈 때마다 칸에 적어 둔다. 스페이스를 받은 쪽은
         // 이 값을 보고 어느 줄을 고를지 정한다.
+        // 다른 곳에서 이 칸으로 포커스를 보내 달라고 하면 첫 줄로.
+        .onChange(of: model.focusToken) { _ in
+            if !model.masterFiles.isEmpty {
+                focusedRow = model.lastFocusedIndex ?? 0
+            }
+        }
         .onChange(of: focusedRow) { row in
             model.focusedIndex = row
             if let row, model.masterFiles.indices.contains(row) {

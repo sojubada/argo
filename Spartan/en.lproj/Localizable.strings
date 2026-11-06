@@ -671,3 +671,16 @@
 "같은 이름의 .lrc 파일을 음악 옆에 두면 그것을 씁니다." = "Put a .lrc file with the same name next to the song and it will be used.";
 "재생할 수 없는 형식입니다" = "Unsupported format";
 "애플TV 기본 재생기는 .{0} 파일을 재생하지 못합니다. mp4·mov·m4v(영상), mp3·m4a·aac·flac·wav·aiff(음악)로 바꿔 넣어 주십시오." = "The Apple TV player cannot play .{0} files. Please convert to mp4/mov/m4v (video) or mp3/m4a/aac/flac/wav/aiff (audio).";
+"{0}개 고름" = "{0} selected";
+"휴지통" = "Trash";
+"{0}개를 옮길 폴더로 들어가십시오" = "Open the folder to move {0} item(s) into";
+"{0}개를 복사할 폴더로 들어가십시오" = "Open the folder to copy {0} item(s) into";
+"여기로 이동" = "Move here";
+"여기에 복사" = "Copy here";
+"같은 폴더입니다" = "Same folder";
+"원래 있던 폴더입니다. 다른 폴더로 들어간 뒤 누르십시오." = "This is where the items already are. Open another folder first.";
+"그 안으로는 넣을 수 없습니다" = "Can't put it inside itself";
+"\n\n옮기려는 폴더 자신이거나 그 안쪽입니다." = "\n\nThis is the folder itself or a folder inside it.";
+"유리 효과" = "Glass effect";
+"켜짐" = "On";
+"꺼짐" = "Off";

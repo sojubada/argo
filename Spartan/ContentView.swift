@@ -43,6 +43,12 @@ struct ContentView: View {
     /// 툴바에 나머지 아이콘을 펼칠지. 기본은 접어 둔다 —
     /// 25개가 한 줄에 늘어서면 무엇이 무엇인지 알 수 없다.
     @State private var toolbarExpanded = false
+    /// 대상 폴더를 고르는 중이면 true(이동)·false(복사), 아니면 nil.
+    /// 리모컨으로 경로를 치는 대신 옆 칸에서 폴더를 찾아 들어가 '여기로' 를 누른다.
+    @State private var pickMove: Bool? = nil
+    @State private var pickSources: [String] = []
+    /// 고르기·대상 고르기 중이면 평소 도구 단추를 접는다.
+    private var busyBar: Bool { multiSelect || pickMove != nil }
     /// ⌘L 경로로 이동, ⌘⇧F 걸러보기. showSubView 번호를 더 늘리지 않는다 —
     /// 번호로 시트를 고르는 방식은 겹쳐 쓰기 쉽다(25번이 그랬다).
     @State private var showGoToPath = false
@@ -241,7 +247,18 @@ struct ContentView: View {
                 // 포커스가 화면 밖 버튼으로 가면 tvOS 가 알아서 스크롤한다.
                 ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
-                    // 자주 쓰는 차례: 전원 · 홈 · 새로 읽기 · 두 칸 · 즐겨찾기.
+                    // 고르는 중·대상 폴더를 고르는 중에는 평소 단추들이 접히고
+                    // 이 자리에 그 일에 쓸 단추만 남는다. 리모컨으로 '…' 를 펼쳐
+                    // 찾지 않아도 되게.
+                    Group {
+                        if pickMove != nil {
+                            pickingBar
+                        } else if multiSelect {
+                            selectionBar
+                        }
+                    }
+
+                    // 자주 쓰는 차례: 전원 · 홈 · 새로 읽기 · 두 칸 · 즐겨찾기 · 고르기.
                     // Group 으로 묶은 것은 ViewBuilder 자식 수를 열 개 아래로 두려는 것이다.
                     Group {
                     Button(action: { //quit
@@ -301,7 +318,16 @@ struct ContentView: View {
                     .sheet(isPresented: $showSubView[17], content: {
                         AddToFavoritesView(filePath: newViewFilePath, displayName: newViewFileName, showView: $showSubView[17])
                     })
+
+                    Button(action: { //고르기 시작 — '…' 안에 숨어 있던 것을 앞줄로
+                        resetMultiSelectArrays()
+                        withAnimation { multiSelect = true }
+                    }) {
+                        Image(systemName: "checkmark.circle")
+                            .frame(width: 50, height: 50)
                     }
+                    }
+                    .collapsed(busyBar)
 
                     Button(action: { //webdav
                         openWebDAV()
@@ -309,6 +335,7 @@ struct ContentView: View {
                         Image(systemName: "globe")
                             .frame(width:50, height:50)
                     }
+                    .collapsed(busyBar)
                     // 받는 곳은 미디어 폴더로 고정한다.
                     //
                     // 보고 있던 폴더로 받으면 시스템 폴더 한가운데로
@@ -342,6 +369,7 @@ struct ContentView: View {
                         Image(systemName: "trash")
                             .frame(width:50, height:50)
                     }
+                    .collapsed(busyBar)
                     .sheet(isPresented: $showSubView[37], onDismiss: {
                         updateFiles()
                     }, content: {
@@ -352,6 +380,7 @@ struct ContentView: View {
 
                     // AirDrop. 쓸 수 없는 기기에서는 아예 보이지 않는다 —
                     // 눌러도 안 되는 버튼을 두는 것보다 없는 편이 낫다.
+                    Group {
                     if airdrop.isAvailable {
                         Button(action: {
                             airdrop.toggle()
@@ -376,6 +405,8 @@ struct ContentView: View {
                                   dismissButton: .default(Text(NSLocalizedString("DISMISS", comment: ""))))
                         }
                     }
+                    }
+                    .collapsed(busyBar)
 
                     Button(action: { //settings
                         showSubView[18] = true
@@ -383,12 +414,14 @@ struct ContentView: View {
                         Image(systemName: "gear")
                             .frame(width:50, height:50)
                     }
+                    .collapsed(busyBar)
                     .sheet(isPresented: $showSubView[18], content: {
                         SettingsView()
                     })
 
                     // 붙여넣을 것이 있을 때만 나타난다. 평소에 자리를 차지하지 않고,
                     // 나타나면 그 자체가 '뭔가 담겨 있다'는 표시가 된다.
+                    Group {
                     if !clipboard.isEmpty {
                         Button(action: {
                             clipboardPaste()
@@ -409,14 +442,17 @@ struct ContentView: View {
                                 .frame(width: 50, height: 50)
                         }
                     }
+                    }
+                    .collapsed(busyBar)
 
                     Button(action: { //더보기 — 나머지 아이콘 펼치기
                         withAnimation { toolbarExpanded.toggle() }
                     }) {
-                        Image(systemName: (toolbarExpanded || multiSelect)
+                        Image(systemName: toolbarExpanded
                               ? "chevron.left.circle" : "ellipsis.circle")
                             .frame(width: 50, height: 50)
                     }
+                    .collapsed(busyBar)
 
                     // 펼침 영역도 자주 쓰는 차례로 둔다:
                     // 검색 · 새로 만들기 · 고르기(→ 이동·복사·압축·삭제) · 정렬 · 숨긴 항목
@@ -805,9 +841,12 @@ struct ContentView: View {
                     // 고르는 중이면 펼침 영역을 연다. 이동·복사·압축·삭제 단추가
                     // 이 안에 있어서, 접혀 있으면 골라 놓고도 할 일을 찾을 수
                     // 없었다(이슈 #2).
-                    .collapsed(!(toolbarExpanded || multiSelect))
+                    .collapsed(!toolbarExpanded || busyBar)
                 }
+                .buttonStyle(IslandButtonStyle())
+                .glassIsland()
                 .padding(.horizontal, 8)
+                .padding(.vertical, 14)
                 }
                 // 툴바를 하나의 포커스 구역으로 묶는다. 칸에서 좌우 끝으로 가면
                 // 더 갈 곳이 없어 포커스가 이 구역으로 올라온다.
@@ -2193,6 +2232,143 @@ struct ContentView: View {
 
     /// 활성 칸의 선택을 반대 칸으로 복사한다. 두 칸의 존재 이유다.
     /// 쓰기는 반드시 FileGuard를 지난다 — 관문을 우회하면 안전장치가 무의미해진다.
+    // MARK: - 고르기 막대 · 대상 폴더 고르기
+
+    /// 고르는 중의 도구 막대: 모두 고르기 · 개수 · 복사 · 이동 · 휴지통 · 압축 · 끝내기.
+    @ViewBuilder
+    var selectionBar: some View {
+        HStack(spacing: 14) {
+            Button(action: {
+                allWereSelected.toggle()
+                iterateOverFileWasSelected(boolToIterate: allWereSelected)
+            }) {
+                Image(systemName: allWereSelected ? "checkmark.circle.fill" : "checkmark.circle")
+                    .frame(width: 50, height: 50)
+            }
+            Text(LF("{0}개 고름", multiSelectFiles.count))
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundColor(Theme.textPrimary)
+                .padding(.horizontal, 8)
+            Button(action: { startPicking(move: false) }) {
+                Label(L("복사"), systemImage: "doc.on.doc").padding(.horizontal, 18)
+            }
+            Button(action: { startPicking(move: true) }) {
+                Label(L("이동"), systemImage: "folder").padding(.horizontal, 18)
+            }
+            Button(action: { requestDeleteSelection() }) {
+                Label(L("휴지통"), systemImage: "trash").padding(.horizontal, 18)
+            }
+            .buttonStyle(IslandButtonStyle(destructive: true))
+            Button(action: {
+                showSubView[14] = true
+                newViewFilePath = directory
+                newViewArrayNames = multiSelectFiles
+            }) {
+                Image(systemName: "doc.zipper").frame(width: 50, height: 50)
+            }
+            Button(action: {
+                resetMultiSelectArrays()
+                withAnimation { multiSelect = false }
+                allWereSelected = false
+            }) {
+                Image(systemName: "xmark").frame(width: 50, height: 50)
+            }
+        }
+    }
+
+    /// 대상 폴더를 고르는 중의 도구 막대. 지금 칸의 폴더가 대상이다.
+    @ViewBuilder
+    var pickingBar: some View {
+        let move = pickMove ?? false
+        HStack(spacing: 14) {
+            Image(systemName: move ? "folder" : "doc.on.doc")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundColor(Theme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(move ? LF("{0}개를 옮길 폴더로 들어가십시오", pickSources.count)
+                          : LF("{0}개를 복사할 폴더로 들어가십시오", pickSources.count))
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(Theme.textPrimary)
+                Text(pane.directory)
+                    .font(.system(size: 20))
+                    .foregroundColor(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .frame(maxWidth: 620, alignment: .leading)
+            }
+            Button(action: finishPicking) {
+                Label(move ? L("여기로 이동") : L("여기에 복사"), systemImage: "arrow.down.doc")
+                    .padding(.horizontal, 20)
+            }
+            .buttonStyle(IslandButtonStyle(prominent: true))
+            Button(action: { showSubView[6] = true }) {
+                Image(systemName: "folder.badge.plus").frame(width: 50, height: 50)
+            }
+            Button(action: cancelPicking) {
+                Image(systemName: "xmark").frame(width: 50, height: 50)
+            }
+        }
+    }
+
+    /// 복사·이동 대상 고르기를 시작한다. 두 칸을 켜고 반대 칸으로 포커스를 보낸다.
+    func startPicking(move: Bool) {
+        let sources = pane.selectedPaths
+        guard !sources.isEmpty else {
+            alertTitle = L("고른 항목이 없습니다")
+            alertMsg = L("먼저 항목을 고르십시오.")
+            showAlert = true
+            return
+        }
+        if let bad = targetUnderfoot(sources) {
+            refuseUnderfoot(bad, verb: move ? L("옮길") : L("복사할"))
+            return
+        }
+        pickSources = sources
+        resetMultiSelectArrays()
+        withAnimation {
+            multiSelect = false
+            pickMove = move
+            if !dualPaneEnabled { dualPaneEnabled = true }
+        }
+        let target = otherPane
+        if target.masterFiles.isEmpty { target.updateFiles() }
+        activeSide = activeSide == .left ? .right : .left
+        target.focusToken += 1
+        ArgoDiag.log("pick", "\(move ? "이동" : "복사") 대상 고르기 — \(sources.count)개")
+    }
+
+    func cancelPicking() {
+        withAnimation { pickMove = nil }
+        pickSources = []
+    }
+
+    /// 지금 칸의 폴더로 복사·이동한다.
+    func finishPicking() {
+        guard let move = pickMove else { return }
+        let destination = pane.directory
+        let dest = Self.lexicalPath(destination)
+        for source in pickSources {
+            let src = Self.lexicalPath(source)
+            let parent = Self.lexicalPath((source as NSString).deletingLastPathComponent)
+            if dest == parent {
+                alertTitle = L("같은 폴더입니다")
+                alertMsg = L("원래 있던 폴더입니다. 다른 폴더로 들어간 뒤 누르십시오.")
+                showAlert = true
+                return
+            }
+            if dest == src || dest.hasPrefix(src + "/") {
+                alertTitle = L("그 안으로는 넣을 수 없습니다")
+                alertMsg = (source as NSString).lastPathComponent + L("\n\n옮기려는 폴더 자신이거나 그 안쪽입니다.")
+                showAlert = true
+                return
+            }
+        }
+        let sources = pickSources
+        cancelPicking()
+        runTransfer(sources: sources, destination: destination, move: move,
+                    destinationPane: pane, sourcePane: otherPane)
+    }
+
     func copySelectionToOtherPane(move: Bool) {
         let sources = currentTargets
         guard !sources.isEmpty else {
@@ -2206,10 +2382,13 @@ struct ContentView: View {
             return
         }
 
-        // 큰 파일을 복사하는 동안 화면이 멈추면 안 된다. 뒷줄에서 돌리고 진행률만 올린다.
-        let destination = otherPane.directory
-        let destinationPane = otherPane
-        let sourcePane = pane
+        runTransfer(sources: sources, destination: otherPane.directory, move: move,
+                    destinationPane: otherPane, sourcePane: pane)
+    }
+
+    /// 뒷줄에서 복사·이동하고 진행률만 올린다. 큰 파일 동안 화면이 멈추면 안 된다.
+    func runTransfer(sources: [String], destination: String, move: Bool,
+                     destinationPane: FilePaneModel, sourcePane: FilePaneModel) {
         transfer.run(sources: sources,
                      destination: destination,
                      move: move,

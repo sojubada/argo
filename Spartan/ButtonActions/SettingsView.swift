@@ -27,6 +27,7 @@ struct SettingsView: View {
 
     // 화면 언어
     @State private var languagePre = ArgoLocale.current
+    @State private var glassPre = UserDefaults.settings.object(forKey: "argoGlass") as? Bool ?? true
     @State private var showLanguageRestart = false
 
     var body: some View {
@@ -66,6 +67,16 @@ struct SettingsView: View {
 					}),
 					secondaryButton: .cancel(Text(L("나중에")))
 				)
+			}
+			// 유리 효과: 도구 모음을 반투명 유리 섬으로 그린다. 끄면 불투명 바탕.
+			Button(action: {
+				glassPre.toggle()
+				UserDefaults.settings.set(glassPre, forKey: "argoGlass")
+			}) {
+				HStack {
+					Image(systemName: glassPre ? "drop.fill" : "drop")
+					Text(L("유리 효과") + ": " + (glassPre ? L("켜짐") : L("꺼짐")))
+				}
 			}
 			Text(" ")
 

@@ -71,6 +71,8 @@ final class FilePaneModel: ObservableObject {
     /// tvOS 는 포커스를 포커스 엔진이 들고 있어서, 어느 줄이 눌릴 차례인지
     /// 물어볼 데가 없습니다. 칸이 직접 받아 적어 둡니다.
     @Published var focusedIndex: Int?
+    /// 값이 바뀌면 이 칸의 목록으로 포커스를 옮긴다 (대상 폴더 고르기 시작 때).
+    @Published var focusToken = 0
 
     /// 이 칸에서 마지막으로 포커스가 올라갔던 줄의 **경로**.
     ///
