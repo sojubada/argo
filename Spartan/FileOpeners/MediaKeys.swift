@@ -169,17 +169,70 @@ final class ArgoAVPlayerController: AVPlayerViewController {
         }
     }
 
+    // MARK: 키보드 화살표로 빨리 감기
+    //
+    // ← → 한 번에 10초, ⇧ 와 함께면 60초. 누르고 있으면 0.4초 뒤부터
+    // 계속 넘기며 점점 빨라진다(10 → 20 → 30초씩). 리모컨 터치면 화살표는
+    // key 가 없으므로 여기 걸리지 않고 기본 재생 화면이 그대로 받는다.
+    private var holdTimer: Timer?
+    private var holdCount = 0
+
+    private func arrowDirection(_ press: UIPress) -> (Double, Bool)? {
+        guard let key = press.key else { return nil }
+        let shift = key.modifierFlags.contains(.shift)
+        switch key.keyCode {
+        case .keyboardLeftArrow: return (-1, shift)
+        case .keyboardRightArrow: return (1, shift)
+        default: return nil
+        }
+    }
+
+    private func startHold(direction: Double, big: Bool) {
+        stopHold()
+        seek(direction * (big ? 60 : 10))
+        holdCount = 0
+        holdTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.holdCount += 1
+            guard self.holdCount > 2 else { return }   // 0.4초쯤 지나서부터
+            let step = min(30.0, 10.0 + Double(self.holdCount / 6) * 10.0)
+            self.seek(direction * (big ? 60 : step))
+        }
+    }
+
+    private func stopHold() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopHold()
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var rest = Set<UIPress>()
         for p in presses {
-            if let run = keyAction(p) { run() } else { rest.insert(p) }
+            if let (direction, big) = arrowDirection(p) {
+                startHold(direction: direction, big: big)
+            } else if let run = keyAction(p) {
+                run()
+            } else {
+                rest.insert(p)
+            }
         }
         if !rest.isEmpty { super.pressesBegan(rest, with: event) }
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        let rest = presses.filter { keyAction($0) == nil }
+        if presses.contains(where: { arrowDirection($0) != nil }) { stopHold() }
+        let rest = presses.filter { keyAction($0) == nil && arrowDirection($0) == nil }
         if !rest.isEmpty { super.pressesEnded(rest, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { arrowDirection($0) != nil }) { stopHold() }
+        super.pressesCancelled(presses, with: event)
     }
 }
 

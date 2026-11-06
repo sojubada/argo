@@ -42,7 +42,9 @@ struct ContentView: View {
     @AppStorage("dualPaneEnabled") var dualPaneEnabled = false
     /// 툴바에 나머지 아이콘을 펼칠지. 기본은 접어 둔다 —
     /// 25개가 한 줄에 늘어서면 무엇이 무엇인지 알 수 없다.
-    @State private var toolbarExpanded = false
+    /// 처음부터 펼쳐 둔다 — 유리 막대에 자리가 남아, 자주 쓰는 검색·경로·정렬
+    /// 단추까지 앞에 보이는 편이 리모컨으로 '…' 를 한 번 더 누르는 것보다 낫다.
+    @State private var toolbarExpanded = true
     /// 대상 폴더를 고르는 중이면 true(이동)·false(복사), 아니면 nil.
     /// 리모컨으로 경로를 치는 대신 옆 칸에서 폴더를 찾아 들어가 '여기로' 를 누른다.
     @State private var pickMove: Bool? = nil
@@ -246,7 +248,10 @@ struct ContentView: View {
                 // 화면 전체가 옆으로 밀려 잘린다. 가로 스크롤로 폭을 가둔다 —
                 // 포커스가 화면 밖 버튼으로 가면 tvOS 가 알아서 스크롤한다.
                 ScrollView(.horizontal, showsIndicators: false) {
-                HStack {
+                // 간격은 0 — 단추 사이는 단추 스타일의 바깥 여백이 만든다. 접힌 단추는
+                // 폭이 0 이 되는데, 줄 간격이 있으면 접힌 수만큼 빈 칸이 쌓여 유리 막대
+                // 오른쪽이 화면 밖까지 늘어났다.
+                HStack(spacing: 0) {
                     // 고르는 중·대상 폴더를 고르는 중에는 평소 단추들이 접히고
                     // 이 자리에 그 일에 쓸 단추만 남는다. 리모컨으로 '…' 를 펼쳐
                     // 찾지 않아도 되게.
@@ -468,21 +473,7 @@ struct ContentView: View {
                         Image(systemName: "magnifyingglass")
                             .frame(width:50, height:50)
                     }
-                    .sheet(isPresented: $showSubView[19], onDismiss: {
-                        if(didSearch) {
-                            if(FileInfo.isDirectory(filePath: newViewFilePath)) {
-                                pane.navigate(to: newViewFilePath.hasSuffix("/")
-                                              ? newViewFilePath : newViewFilePath + "/")
-                            } else {
-                                openFileAtFullPath(newViewFilePath)
-                            }
-                            didSearch = false
-                        }
-                    }, content: {
-                        SearchView(directory: directoryBinding, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
-                            .onAppear { ArgoTextEntry.begin() }
-                            .onDisappear { ArgoTextEntry.end() }
-                    }) //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
+ //my search function is very complex and i'm not sure how I wrote it. i don't fully understand it now and i didn't understand it then, either. I know it works and so im happy
                     //someday I'll figure it out. It's surprisingly good
 
                     Button(action: { //경로로 이동 (⌘L)
@@ -685,15 +676,6 @@ struct ContentView: View {
                         Image(systemName: "externaldrive")
                             .frame(width:50, height:50)
                     }
-                    .sheet(isPresented: $showSubView[21], onDismiss: {
-                        if didChangeDir {
-                            updateFiles()
-                            resetShowSubView()
-                            didChangeDir = false
-                        }
-                    }, content: {
-                        MountPointsView(directory: directoryBinding, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
-                    })
 
                     Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
                         showSubView[39] = true
@@ -707,7 +689,52 @@ struct ContentView: View {
                     debugMenu
                         .frame(alignment: .leading)
                     freeSpace
-                        .frame(alignment: .trailing)
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundColor(Theme.textSecondary)
+                        .padding(.horizontal, 16)
+                        .fixedSize()
+                    }
+                    // 접혀 있으면 폭 0 · 투명 · 포커스 불가. 계층에서 빼지 않는 이유는
+                    // 이 버튼들에 시트가 붙어 있어서다 — if 로 들어내면 단축키로 띄우는
+                    // 시트까지 같이 사라진다.
+                    //
+                    // 고르는 중이면 펼침 영역을 연다. 이동·복사·압축·삭제 단추가
+                    // 이 안에 있어서, 접혀 있으면 골라 놓고도 할 일을 찾을 수
+                    // 없었다(이슈 #2).
+                    .collapsed(!toolbarExpanded || busyBar)
+                }
+                .buttonStyle(IslandButtonStyle())
+                .glassIsland()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 14)
+                }
+                // 시트는 접히는 단추 묶음 밖(늘 살아 있는 스크롤 뷰)에 단다.
+                // 접힌 묶음은 .disabled 라, 거기 단 시트는 안의 입력 칸과 단추까지
+                // 꺼진 채로 떴다 — 이름 바꾸기 창에서 확인이 듣지 않던 원인이다.
+                    .sheet(isPresented: $showSubView[19], onDismiss: {
+                        if(didSearch) {
+                            if(FileInfo.isDirectory(filePath: newViewFilePath)) {
+                                pane.navigate(to: newViewFilePath.hasSuffix("/")
+                                              ? newViewFilePath : newViewFilePath + "/")
+                            } else {
+                                openFileAtFullPath(newViewFilePath)
+                            }
+                            didSearch = false
+                        }
+                    }, content: {
+                        SearchView(directory: directoryBinding, isPresenting: $showSubView[19], selectedFile: $newViewFilePath, didSearch: $didSearch)
+                            .onAppear { ArgoTextEntry.begin() }
+                            .onDisappear { ArgoTextEntry.end() }
+                    })
+                    .sheet(isPresented: $showSubView[21], onDismiss: {
+                        if didChangeDir {
+                            updateFiles()
+                            resetShowSubView()
+                            didChangeDir = false
+                        }
+                    }, content: {
+                        MountPointsView(directory: directoryBinding, isPresented: $showSubView[21], didChangeDir: $didChangeDir)
+                    })
                     .sheet(isPresented: $showSubView[6], onDismiss: refreshBothPanes, content: {
                         CreateDirectoryView(directoryPath: directoryBinding, isPresented: $showSubView[6])
                             .onAppear { ArgoTextEntry.begin() }
@@ -833,21 +860,7 @@ struct ContentView: View {
                         .sheet(isPresented: $showSubView[38], content: {
                             WebDocumentSwiftView(filePath: newViewFilePath, fileName: newViewFileName, isPresented: $showSubView[38])
                         })
-                    }
-                    // 접혀 있으면 폭 0 · 투명 · 포커스 불가. 계층에서 빼지 않는 이유는
-                    // 이 버튼들에 시트가 붙어 있어서다 — if 로 들어내면 단축키로 띄우는
-                    // 시트까지 같이 사라진다.
-                    //
-                    // 고르는 중이면 펼침 영역을 연다. 이동·복사·압축·삭제 단추가
-                    // 이 안에 있어서, 접혀 있으면 골라 놓고도 할 일을 찾을 수
-                    // 없었다(이슈 #2).
-                    .collapsed(!toolbarExpanded || busyBar)
-                }
-                .buttonStyle(IslandButtonStyle())
-                .glassIsland()
-                .padding(.horizontal, 8)
-                .padding(.vertical, 14)
-                }
+
                 // 툴바를 하나의 포커스 구역으로 묶는다. 칸에서 좌우 끝으로 가면
                 // 더 갈 곳이 없어 포커스가 이 구역으로 올라온다.
                 .focusSection()
@@ -2074,7 +2087,10 @@ struct ContentView: View {
                 renameFileCurrentName = model.masterFiles[index].name
                 renameFileNewName = model.masterFiles[index].name
                 newViewFilePath = model.directory
-                showSubView[7] = true
+                // 길게 누른 메뉴가 닫히는 중에 시트를 띄우면 무시된다. 조금 기다린다.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    showSubView[7] = true
+                }
             },
             info: { index in
                 guard let path = focusItem(index) else { return }

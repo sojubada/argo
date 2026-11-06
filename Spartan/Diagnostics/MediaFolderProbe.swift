@@ -145,7 +145,9 @@ enum MediaFolderProbe {
     }
 
     /// 산출물에 담을 쪽 수 상한. 넘으면 앞에서부터 자르고 로그에 적습니다.
-    private static let maxPages = 150
+    /// 큰 발표 문서(173장)에서 쪽 그림이 쌓여 메모리로 앱이 강제 종료됐다.
+    /// 쪽마다 autoreleasepool 로 비우고, 담는 쪽 수도 줄인다.
+    private static let maxPages = 60
 
     static let argoSuffix    = "_argo"
     static let screenSuffix  = "_screen"
@@ -285,17 +287,17 @@ enum MediaFolderProbe {
         do {
             try renderer.writePDF(to: URL(fileURLWithPath: path)) { rc in
                 let available = CGSize(width: screenPDFWidth, height: screenPDFWidth * 3 / 4)
-                for n in 1...count {
+                for n in 1...count { autoreleasepool {
                     guard let page = doc.page(at: n),
                           let shot = renderViewerPath(page: page, available: available)
-                    else { continue }
+                    else { return }
                     // 첫 쪽의 상자·회전·배율을 한 번 적어 둡니다. 뒤에서 쪽마다
                     // 적으면 로그가 그것만으로 가득 찹니다.
                     if n == 1 { ArgoDiag.log("probe", "첫 쪽 \(shot.info)") }
                     rc.beginPage(withBounds: CGRect(origin: .zero, size: shot.image.size),
                                  pageInfo: [:])
                     shot.image.draw(in: CGRect(origin: .zero, size: shot.image.size))
-                }
+                } }
             }
             let size = fileSize(path)
             ArgoDiag.log("probe", "화면 렌더본 → \(label)\(screenSuffix).pdf "
@@ -343,9 +345,9 @@ enum MediaFolderProbe {
         let renderer = UIGraphicsPDFRenderer(bounds: bounds)
         do {
             try renderer.writePDF(to: URL(fileURLWithPath: path)) { rc in
-                for n in 1...count {
+                for n in 1...count { autoreleasepool {
                     guard let pcPage   = pcDoc.page(at: n),
-                          let argoPage = argoDoc.page(at: n) else { continue }
+                          let argoPage = argoDoc.page(at: n) else { return }
 
                     let panel = CGSize(width: panelWidth, height: panelMaxHeight)
                     let pcImg   = renderMediaBox(page: pcPage,   fitting: panel)
@@ -404,7 +406,7 @@ enum MediaFolderProbe {
                                            width: panelWidth, height: panelMaxHeight)
                         drawPanel(shot, blank: blanks[i], name: names[i], in: frame)
                     }
-                }
+                } }
             }
             let size = fileSize(path)
             ArgoDiag.log("probe", "비교본 → \(label)\(compareSuffix).pdf (\(count)쪽, \(size))")

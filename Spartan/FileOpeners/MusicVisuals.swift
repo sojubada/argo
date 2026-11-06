@@ -54,6 +54,19 @@ final class AudioSpectrum: ObservableObject {
     func attach(to item: AVPlayerItem) {
         guard item.audioMix == nil else { return }
         let asset = item.asset
+        // 내 기기의 파일이면 트랙을 바로 읽어, 재생이 시작되기 전에 탭을 건다.
+        // 재생이 시작된 뒤에 소리 섞기를 넣으면 몇몇 mp3 에서 탭이 끝내 불리지
+        // 않았다(막대가 안 움직임).
+        if let url = (asset as? AVURLAsset)?.url, url.isFileURL,
+           let track = asset.tracks(withMediaType: .audio).first,
+           let tap = makeTap() {
+            let params = AVMutableAudioMixInputParameters(track: track)
+            params.audioTapProcessor = tap
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            item.audioMix = mix
+            return
+        }
         asset.loadValuesAsynchronously(forKeys: ["tracks"]) { [weak self, weak item] in
             guard let self, let item else { return }
             var error: NSError?

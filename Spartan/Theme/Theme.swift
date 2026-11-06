@@ -133,6 +133,8 @@ private struct IslandButtonBody: View {
             .scaleEffect(configuration.isPressed ? 0.96 : (focused ? Theme.focusScale : 1))
             .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 14 : 0, x: 0, y: 8)
             .animation(.easeOut(duration: 0.15), value: focused)
+            // 단추 사이 간격. 막대 쪽 HStack 은 간격 0 이다(접힌 단추가 빈 칸을 남기지 않게).
+            .padding(.horizontal, 7)
     }
 }
 
