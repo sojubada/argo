@@ -234,9 +234,16 @@ struct AudioPlayerView: View {
     private var artworkView: some View {
         ZStack {
             if let artwork {
-                Image(uiImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                // 정사각이 아닌 표지(16:9 사진 등)도 칸을 넘지 않게: 칸 크기를 가진
+                // 투명 바탕 위에 채워 그리고 잘라 낸다. 그림을 바로 .fill 로 두면
+                // 그림 크기가 칸보다 커져 제목·단추 위로 넘쳐 그려졌다.
+                Color.clear
+                    .overlay(
+                        Image(uiImage: artwork)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    )
+                    .clipped()
             } else {
                 LinearGradient(colors: [.white.opacity(0.18), .white.opacity(0.06)], startPoint: .top, endPoint: .bottom)
                 Image(systemName: "music.note")

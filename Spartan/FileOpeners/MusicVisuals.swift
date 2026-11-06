@@ -37,6 +37,12 @@ final class AudioSpectrum: ObservableObject {
     private var lastPublish: CFAbsoluteTime = 0
     fileprivate var sampleRate: Double = 44_100
     fileprivate var isFloat = true
+    /// 정수 표본일 때의 비트 수(16·32). 0 이면 읽지 못하는 형식.
+    fileprivate var intBits: UInt32 = 0
+    /// 탭이 실제로 불린 횟수. 걸어 놓고도 끝내 불리지 않는 mp3 가 있어 센다.
+    fileprivate var processCalls = 0
+    fileprivate var loggedFirstCall = false
+    private var retried = Set<ObjectIdentifier>()
     private let lock = NSLock()
 
     init() {
@@ -54,6 +60,7 @@ final class AudioSpectrum: ObservableObject {
     func attach(to item: AVPlayerItem) {
         guard item.audioMix == nil else { return }
         let asset = item.asset
+        lock.lock(); processCalls = 0; loggedFirstCall = false; lock.unlock()
         // 내 기기의 파일이면 트랙을 바로 읽어, 재생이 시작되기 전에 탭을 건다.
         // 재생이 시작된 뒤에 소리 섞기를 넣으면 몇몇 mp3 에서 탭이 끝내 불리지
         // 않았다(막대가 안 움직임).
@@ -65,6 +72,7 @@ final class AudioSpectrum: ObservableObject {
             let mix = AVMutableAudioMix()
             mix.inputParameters = [params]
             item.audioMix = mix
+            watch(item, name: url.lastPathComponent)
             return
         }
         asset.loadValuesAsynchronously(forKeys: ["tracks"]) { [weak self, weak item] in
@@ -79,7 +87,46 @@ final class AudioSpectrum: ObservableObject {
                 let mix = AVMutableAudioMix()
                 mix.inputParameters = [params]
                 item.audioMix = mix
+                self.watch(item, name: (asset as? AVURLAsset)?.url.lastPathComponent ?? "?")
             }
+        }
+    }
+
+    /// 몇몇 mp3(앞에 큰 ID3 태그·표지가 붙은 것 등)는 준비가 끝나기 전에 건
+    /// 소리 섞기를 무시해 탭이 한 번도 불리지 않았다. 재생이 시작되고 잠시
+    /// 뒤에도 불린 적이 없으면 새 탭으로 한 번 다시 건다. 결과는 진단 로그에 남긴다.
+    private func watch(_ item: AVPlayerItem, name: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self, weak item] in
+            guard let self, let item else { return }
+            self.lock.lock(); let calls = self.processCalls; self.lock.unlock()
+            if calls > 0 { return }
+            guard item.status == .readyToPlay else {
+                // 아직 준비 중이면 조금 더 기다린다.
+                if item.status == .unknown { self.watch(item, name: name) }
+                return
+            }
+            // 멈춰 있으면 탭이 안 불리는 게 정상이다. 재생될 때까지 기다린다.
+            let rate = item.timebase.map { CMTimebaseGetRate($0) } ?? 0
+            if rate == 0 { self.watch(item, name: name); return }
+            let key = ObjectIdentifier(item)
+            guard !self.retried.contains(key) else {
+                ArgoDiag.log("audio", "스펙트럼 탭이 다시 걸어도 불리지 않음 — \(name)")
+                return
+            }
+            self.retried.insert(key)
+            guard let track = item.asset.tracks(withMediaType: .audio).first,
+                  let tap = self.makeTap() else {
+                ArgoDiag.log("audio", "스펙트럼 탭 재시도 실패(트랙/탭 없음) — \(name)")
+                return
+            }
+            ArgoDiag.log("audio", "스펙트럼 탭이 3초간 불리지 않아 다시 검 — \(name)")
+            let params = AVMutableAudioMixInputParameters(track: track)
+            params.audioTapProcessor = tap
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            item.audioMix = nil
+            item.audioMix = mix
+            self.watch(item, name: name)
         }
     }
 
@@ -105,21 +152,34 @@ final class AudioSpectrum: ObservableObject {
             },
             prepare: { tap, _, format in
                 let me = Unmanaged<AudioSpectrum>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
-                me.sampleRate = format.pointee.mSampleRate > 0 ? format.pointee.mSampleRate : 44_100
-                me.isFloat = format.pointee.mFormatFlags & kAudioFormatFlagIsFloat != 0
-                    && format.pointee.mBitsPerChannel == 32
+                let f = format.pointee
+                me.sampleRate = f.mSampleRate > 0 ? f.mSampleRate : 44_100
+                me.isFloat = f.mFormatFlags & kAudioFormatFlagIsFloat != 0 && f.mBitsPerChannel == 32
+                // 정수 표본도 받는다. 전에는 float 이 아니면 그냥 버려 막대가 서지 않았다.
+                me.intBits = (!me.isFloat && f.mFormatFlags & kAudioFormatFlagIsSignedInteger != 0
+                              && (f.mBitsPerChannel == 16 || f.mBitsPerChannel == 32)) ? f.mBitsPerChannel : 0
+                ArgoDiag.log("audio", "스펙트럼 탭 준비 — \(Int(f.mSampleRate))Hz \(f.mChannelsPerFrame)ch \(f.mBitsPerChannel)bit flags=0x\(String(f.mFormatFlags, radix: 16))")
             },
             unprepare: { _ in },
             process: { tap, frames, _, bufferList, framesOut, flagsOut in
                 let status = MTAudioProcessingTapGetSourceAudio(tap, frames, bufferList, flagsOut, nil, framesOut)
-                guard status == noErr else { return }
                 let me = Unmanaged<AudioSpectrum>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
-                guard me.isFloat else { return }
+                me.noteCall(status: status)
+                guard status == noErr else { return }
                 let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
                 guard let first = buffers.first, let data = first.mData else { return }
                 let channels = max(1, Int(first.mNumberChannels))
-                let count = Int(first.mDataByteSize) / MemoryLayout<Float>.size / channels
-                me.feed(data.assumingMemoryBound(to: Float.self), count: min(count, Int(framesOut.pointee)), stride: channels)
+                let frameCount = Int(framesOut.pointee)
+                if me.isFloat {
+                    let count = Int(first.mDataByteSize) / MemoryLayout<Float>.size / channels
+                    me.feed(data.assumingMemoryBound(to: Float.self), count: min(count, frameCount), stride: channels)
+                } else if me.intBits == 16 {
+                    let count = min(Int(first.mDataByteSize) / 2 / channels, frameCount)
+                    me.feedInt16(data.assumingMemoryBound(to: Int16.self), count: count, stride: channels)
+                } else if me.intBits == 32 {
+                    let count = min(Int(first.mDataByteSize) / 4 / channels, frameCount)
+                    me.feedInt32(data.assumingMemoryBound(to: Int32.self), count: count, stride: channels)
+                }
             })
         var out: Unmanaged<MTAudioProcessingTap>?
         let err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
@@ -130,6 +190,32 @@ final class AudioSpectrum: ObservableObject {
             return nil
         }
         return made.takeRetainedValue()
+    }
+
+    /// 오디오 스레드. 처음 불릴 때와 오류만 로그에 남긴다(매번 남기면 로그가 넘친다).
+    fileprivate func noteCall(status: OSStatus) {
+        lock.lock()
+        processCalls += 1
+        let first = !loggedFirstCall
+        loggedFirstCall = true
+        lock.unlock()
+        if first {
+            ArgoDiag.log("audio", status == noErr ? "스펙트럼 탭 동작 시작" : "스펙트럼 탭 원본 읽기 실패 \(status)")
+        }
+    }
+
+    fileprivate func feedInt16(_ samples: UnsafePointer<Int16>, count: Int, stride: Int) {
+        guard count > 0 else { return }
+        var tmp = [Float](repeating: 0, count: count)
+        for i in 0..<count { tmp[i] = Float(samples[i * stride]) / 32_768 }
+        tmp.withUnsafeBufferPointer { feed($0.baseAddress!, count: count, stride: 1) }
+    }
+
+    fileprivate func feedInt32(_ samples: UnsafePointer<Int32>, count: Int, stride: Int) {
+        guard count > 0 else { return }
+        var tmp = [Float](repeating: 0, count: count)
+        for i in 0..<count { tmp[i] = Float(samples[i * stride]) / 2_147_483_648 }
+        tmp.withUnsafeBufferPointer { feed($0.baseAddress!, count: count, stride: 1) }
     }
 
     /// 오디오 스레드. 1024개가 모이면 FFT 한 번.

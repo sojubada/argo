@@ -1027,6 +1027,8 @@ fn read_paragraph(
     if child(paragraph, "pPr")
         .and_then(|properties| child(properties, "pageBreakBefore"))
         .is_some_and(property_enabled)
+        // 바로 앞이 구역 나눔으로 넘긴 쪽이면 또 넘기지 않는다(워드도 빈 쪽을 만들지 않는다).
+        && !matches!(blocks.last(), Some(DocxBlock::PageBreak))
     {
         blocks.push(DocxBlock::PageBreak);
     }
@@ -1206,6 +1208,22 @@ fn read_paragraph(
             create_paragraph(std::mem::take(&mut runs), style_id, &paragraph_properties);
         output.floating_images = floating_images;
         blocks.push(DocxBlock::Paragraph(output));
+    }
+    // 문단에 붙은 구역 나눔. 다음 구역이 어떻게 시작하는지는 다음 sectPr 의
+    // type 이 정한다(없으면 '다음 쪽'). '이어서'만 쪽을 넘기지 않는다.
+    if let Some(sect) = child(paragraph, "pPr").and_then(|p| child(p, "sectPr")) {
+        let here = sect.range().end;
+        let next_type = paragraph
+            .document()
+            .descendants()
+            .filter(|n| n.has_tag_name("sectPr") && n.range().start >= here)
+            .find(|n| !n.ancestors().any(|a| a.has_tag_name("sectPrChange")))
+            .and_then(|n| child(n, "type"))
+            .and_then(|t| attribute_by_local_name(t, "val"))
+            .map(str::to_owned);
+        if next_type.as_deref() != Some("continuous") {
+            blocks.push(DocxBlock::PageBreak);
+        }
     }
     Ok(())
 }

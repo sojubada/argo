@@ -264,6 +264,14 @@ fn axis_range(min_v: f64, max_v: f64, ax: Option<&Axis>, target: usize) -> (f64,
     if (hi - lo).abs() < 1e-12 {
         hi = lo + 1.0;
     }
+    // 엑셀은 자동 최댓값에 범위의 5% 여유를 더한 뒤 눈금 단위로 올린다.
+    // 여유가 없으면 가장 긴 막대가 그림틀 끝까지 닿아 옆 칸을 침범한다.
+    if ax.and_then(|a| a.max).is_none() && hi > 0.0 && hi > lo {
+        hi += (hi - lo) * 0.05;
+    }
+    if ax.and_then(|a| a.min).is_none() && lo < 0.0 && hi > lo {
+        lo -= (hi - lo) * 0.05;
+    }
     let step = ax.and_then(|a| a.major).unwrap_or_else(|| nice_step(hi - lo, target));
     let lo2 = ax.and_then(|a| a.min).unwrap_or_else(|| (lo / step).floor() * step);
     let mut hi2 = ax.and_then(|a| a.max).unwrap_or_else(|| (hi / step).ceil() * step);
@@ -732,7 +740,11 @@ fn draw_xy(
         lo = 0.0;
         hi = 1.0;
     }
-    let (vmin, vmax, step) = axis_range(lo, hi, val_ax, 6);
+    let (vmin, mut vmax, step) = axis_range(lo, hi, val_ax, 6);
+    // 100% 기준 누적은 여유 없이 100%에서 끝난다.
+    if percent && val_ax.and_then(|a| a.max).is_none() {
+        vmax = 1.0;
+    }
     let val_fmt = val_ax.map(|a| a.format.clone()).unwrap_or_else(|| "General".into());
     let val_fmt = if percent && !val_fmt.contains('%') { "0%".to_owned() } else { val_fmt };
     let lab_size = val_ax.and_then(|a| a.label_size).unwrap_or(size);
@@ -779,7 +791,18 @@ fn draw_xy(
     }
     let pw = (right - left).max(10.0);
     let ph = (bottom - top).max(10.0);
-    let vmap = |v: f64| (v - vmin) / (vmax - vmin);
+    // 값 축을 거꾸로(maxMin) 둔 차트는 막대가 반대쪽에서 자란다.
+    let val_rev = !scatter && val_ax.map(|a| a.reverse).unwrap_or(false);
+    let vmap = |v: f64| {
+        let t = (v - vmin) / (vmax - vmin);
+        if val_rev { 1.0 - t } else { t }
+    };
+    // 분류 축 방향. 가로 막대는 엑셀처럼 첫 분류가 맨 아래에 온다(minMax 기준).
+    // 전에는 위에서부터 그려, 왼쪽에 따로 적힌 '19년/'30년 글자와 막대가 뒤바뀌었다.
+    let cat_rev = cat_ax.map(|a| a.reverse).unwrap_or(false);
+    let flip_cat = !scatter && (horizontal != cat_rev);
+    // 분류 방향 좌표를 뒤집는다(시작점과 길이를 받아 거울상 시작점을 돌려준다).
+    let mirror = |p: f64, len: f64| if !flip_cat { p } else if horizontal { top + bottom - p - len } else { left + right - p - len };
     // 값 → 좌표
     let to_val = |v: f64| if horizontal { left + vmap(v) * pw } else { bottom - vmap(v) * ph };
 
@@ -808,11 +831,11 @@ fn draw_xy(
 
     // 분류 축
     let slot = if horizontal { ph / ncat as f64 } else { pw / ncat as f64 };
-    let cat_pos = |i: usize| if horizontal { top + slot * (i as f64 + 0.5) } else { left + slot * (i as f64 + 0.5) };
+    let cat_pos = |i: usize| mirror(if horizontal { top + slot * (i as f64 + 0.5) } else { left + slot * (i as f64 + 0.5) }, 0.0);
     let line_on_cat = groups.iter().all(|g| matches!(g.kind, Kind::Line | Kind::Area)) && !scatter;
     let cat_pos_line = |i: usize| {
         if line_on_cat && groups.iter().any(|g| g.kind == Kind::Area) && ncat > 1 {
-            left + pw * i as f64 / (ncat - 1) as f64
+            mirror(left + pw * i as f64 / (ncat - 1) as f64, 0.0)
         } else {
             cat_pos(i)
         }
@@ -922,7 +945,7 @@ fn draw_xy(
                             (0.0_f64.clamp(vmin, vmax), v)
                         };
                         let off = if stacked { 0.0 } else { si as f64 * bw * (1.0 - overlap) };
-                        let start = (if horizontal { top } else { left }) + slot * i as f64 + gslot * bar_index as f64 + bw * g.gap / 2.0 + off;
+                        let start = mirror((if horizontal { top } else { left }) + slot * i as f64 + gslot * bar_index as f64 + bw * g.gap / 2.0 + off, bw);
                         let (p0, p1) = (to_val(v0), to_val(v1));
                         let (x, y, ww, hh) = if horizontal {
                             (p0.min(p1), start, (p1 - p0).abs(), bw)

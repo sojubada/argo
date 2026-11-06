@@ -688,11 +688,6 @@ struct ContentView: View {
 
                     debugMenu
                         .frame(alignment: .leading)
-                    freeSpace
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundColor(Theme.textSecondary)
-                        .padding(.horizontal, 16)
-                        .fixedSize()
                     }
                     // 접혀 있으면 폭 0 · 투명 · 포커스 불가. 계층에서 빼지 않는 이유는
                     // 이 버튼들에 시트가 붙어 있어서다 — if 로 들어내면 단축키로 띄우는
@@ -708,6 +703,11 @@ struct ContentView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 14)
                 }
+                // 남은 공간은 유리 막대 밖, 오른쪽 끝에 고정해 둔다. 막대 안 맨 끝에
+                // 두었더니 아이콘이 늘어 화면 밖으로 밀려나 글자가 잘렸다.
+                // 막대가 넘치면 막대만 옆으로 스크롤되고 이 표시는 그대로 남는다.
+                .padding(.trailing, 200)
+                .overlay(alignment: .trailing) { freeSpaceBadge }
                 // 시트는 접히는 단추 묶음 밖(늘 살아 있는 스크롤 뷰)에 단다.
                 // 접힌 묶음은 .disabled 라, 거기 단 시트는 안의 입력 칸과 단추까지
                 // 꺼진 채로 떴다 — 이름 바꾸기 창에서 확인이 듣지 않던 원인이다.
@@ -1503,6 +1503,23 @@ struct ContentView: View {
         .opacity(opacityInt)
     }
     
+    /// 상단 오른쪽 끝에 붙는 남은 공간 표시. 글자를 줄이고 폭을 고정해
+    /// 막대가 몇 개의 아이콘을 품든 잘리지 않게 한다.
+    var freeSpaceBadge: some View {
+        let (value, unit) = freeSpace(path: "/")
+        return HStack(spacing: 8) {
+            Image(systemName: "internaldrive")
+            Text(String(format: "%.1f", value) + " " + unit)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .font(.system(size: 22, weight: .medium))
+        .foregroundColor(Theme.textSecondary)
+        .frame(width: 184, alignment: .trailing)
+        .padding(.trailing, 8)
+        .accessibilityLabel(NSLocalizedString("FREE_SPACE", comment: "E") + String(format: "%.2f", value) + " " + unit)
+    }
+
     @ViewBuilder
     var freeSpace: some View { //this is hardcoded for now, returning mount points wasnt working
 		//future me wants you to know it works now but im not changing it.
