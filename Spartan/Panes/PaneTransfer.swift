@@ -258,6 +258,8 @@ final class PaneTransfer: ObservableObject {
     /// 조각 복사가 취소 말고 다른 이유로 실패하면, 쓰다 만 것을 지우고
     /// FileManager 로 한 번 더 해 본다. 그래도 안 되면 헬퍼로 한다.
     private func copyOne(source: String, target: String, onBytes: (Int64) -> Void) -> Bool {
+        // 자기 안쪽으로 복사하면 끝없이 커진다.
+        if TrashManager.contains(source, target) { return false }
         do {
             try copyTree(source: source, target: target, onBytes: onBytes)
             OperationLog.record(action: "COPY (pane)", path: source, destination: target)

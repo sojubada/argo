@@ -110,6 +110,13 @@ final class TrashManager: ObservableObject {
         }
     }
 
+    /// outer 가 inner 와 같거나 그 위쪽 폴더인가.
+    static func contains(_ outer: String, _ inner: String) -> Bool {
+        let o = outer.hasSuffix("/") ? String(outer.dropLast()) : outer
+        let i = inner.hasSuffix("/") ? String(inner.dropLast()) : inner
+        return i == o || i.hasPrefix(o + "/")
+    }
+
     private func robustMove(from src: String, to dst: String) -> Bool {
         let normSrc = normalizePath(src)
         let normDst = normalizePath(dst)
@@ -118,6 +125,9 @@ final class TrashManager: ObservableObject {
         guard case .success = FileGuard.authorize(action: "mv", paths: [normSrc, normDst]) else {
             return false
         }
+        // 목적지가 원본 안쪽이면 이동·복사 후 삭제 모두 위험하다.
+        if Self.contains(normSrc.hasPrefix("/var/") ? "/private" + normSrc : normSrc,
+                         normDst.hasPrefix("/var/") ? "/private" + normDst : normDst) { return false }
 
         if fileManager.fileExists(atPath: normDst) || isSymbolicLink(atPath: normDst) {
             robustRemove(normDst)
@@ -247,6 +257,13 @@ final class TrashManager: ObservableObject {
         guard !normalized.isEmpty else { return false }
 
         if normalized == Self.trashRootPath || normalized.hasPrefix(Self.trashRootPath + "/") {
+            return false
+        }
+        // 휴지통이 들어 있는 폴더(/var/mobile/Media 등)나 그 위쪽은 휴지통으로 보낼 수 없다.
+        // 자기 안으로 옮기려다 3차 시도(복사 후 원본 삭제)가 내용을 지워 버린다.
+        let priv = normalized.hasPrefix("/private/") ? normalized : (normalized.hasPrefix("/var/") ? "/private" + normalized : normalized)
+        if Self.contains(priv, Self.trashRootPath) || priv == "/private/var/mobile" || priv == "/private/var" {
+            ArgoDiag.log("trash", "거부: 휴지통을 품은 폴더 \(normalized)")
             return false
         }
 
