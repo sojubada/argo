@@ -149,7 +149,6 @@ final class ArgoPDFReaderController: UIViewController {
     /// 야간(다크) 모드. 설정의 '문서 읽기 다크 모드'와 같은 키다.
     private var night = UserDefaults.settings.bool(forKey: "pdfSimple.isNightMode")
     private var nightButton = UIButton()
-    private static let ciContext = CIContext(options: nil)
     private var statusLabel = UILabel()
     private var fitButton: ArgoBarButton!
     private var toolbarVisible = true
@@ -327,7 +326,7 @@ final class ArgoPDFReaderController: UIViewController {
         }
 
         let numbers = pagesForCurrentView()
-        var pages: [(page: CGPDFPage, box: CGRect, raw: CGRect, boxKind: CGPDFBox, rotation: Int)] = []
+        var pages: [(page: CGPDFPage, box: CGRect, raw: CGRect, boxKind: CGPDFBox, rotation: Int, number: Int)] = []
         for n in numbers {
             guard let page = doc.page(at: n) else { continue }
             // cropBox 가 비어 있는 PDF 가 있다. 그때는 mediaBox 로 물러선다.
@@ -342,7 +341,7 @@ final class ArgoPDFReaderController: UIViewController {
             let rotation = Int(page.rotationAngle)
             let turned = (rotation / 90) % 2 != 0
             let shown = turned ? CGRect(x: 0, y: 0, width: box.height, height: box.width) : box
-            pages.append((page, shown, box, kind, rotation))
+            pages.append((page, shown, box, kind, rotation, n))
         }
         guard !pages.isEmpty else {
             showPageProblem(L("이 쪽의 크기를 읽을 수 없습니다."))
@@ -381,6 +380,47 @@ final class ArgoPDFReaderController: UIViewController {
         format.scale = Self.renderScale(for: size)
         format.opaque = true
 
+        // 쪽마다 놓일 자리와, PDF 좌표 → 화면 좌표 변환을 먼저 정한다.
+        // 그리기와 야간 모드(그림 자리 옮기기)가 같은 변환을 써야 한다.
+        var placed: [(page: CGPDFPage, slot: CGRect, transform: CGAffineTransform, number: Int)] = []
+        var along: CGFloat = 0
+        for item in pages {
+            let slot: CGRect
+            if stacked {
+                let hh = (item.box.height / item.box.width) * size.width
+                slot = CGRect(x: 0, y: along, width: size.width, height: hh)
+                along += hh
+            } else {
+                let ww = (item.box.width / item.box.height) * size.height
+                slot = CGRect(x: along, y: 0, width: ww, height: size.height)
+                along += ww
+            }
+            // 배율은 직접 구한다.
+            //
+            // getDrawingTransform 은 쪽이 rect 보다 **크면 줄이지만 작으면
+            // 키우지 않는다.** 슬라이드 PDF 는 보통 960×540 pt 라서,
+            // 1920×1080 에 그리면 원래 크기 그대로 가운데 놓이고 둘레가
+            // 흰 종이로 남는다 — '화면에 안 꽉 찬다'의 정체다.
+            // 두 쪽 모드에서는 칸이 960×540 이라 우연히 맞아떨어져
+            // 그때만 꽉 차 보였다.
+            let fit = min(slot.width / item.box.width,
+                          slot.height / item.box.height)
+            // 이 쪽의 자리로 원점을 옮긴 뒤, 그 안에서 뒤집는다.
+            var t = CGAffineTransform(translationX: slot.minX, y: slot.maxY)
+                .scaledBy(x: 1, y: -1)
+                .translatedBy(x: slot.width / 2, y: slot.height / 2)
+                .scaledBy(x: fit, y: fit)
+            // /Rotate 가 걸린 쪽은 여기서 돌린다. 가운데를 축으로 돌려야
+            // 돌린 뒤에도 칸 가운데에 남는다.
+            if item.rotation != 0 {
+                t = t.rotated(by: -CGFloat(item.rotation) * .pi / 180)
+            }
+            // 원본 박스의 가운데를 원점에 맞춘다. cropBox 는 원점이
+            // (0,0) 이 아닐 수 있다.
+            t = t.translatedBy(x: -item.raw.midX, y: -item.raw.midY)
+            placed.append((item.page, slot, t, item.number))
+        }
+
         let image = UIGraphicsImageRenderer(size: size, format: format).image { rc in
             let ctx = rc.cgContext
 
@@ -388,51 +428,26 @@ final class ArgoPDFReaderController: UIViewController {
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
 
-            var along: CGFloat = 0
-            for item in pages {
-                let slot: CGRect
-                if stacked {
-                    let hh = (item.box.height / item.box.width) * size.width
-                    slot = CGRect(x: 0, y: along, width: size.width, height: hh)
-                    along += hh
-                } else {
-                    let ww = (item.box.width / item.box.height) * size.height
-                    slot = CGRect(x: along, y: 0, width: ww, height: size.height)
-                    along += ww
-                }
+            for p in placed {
                 ctx.saveGState()
-                ctx.clip(to: slot)
-                // 이 쪽의 자리로 원점을 옮긴 뒤, 그 안에서 뒤집는다.
-                ctx.translateBy(x: slot.minX, y: slot.maxY)
-                ctx.scaleBy(x: 1, y: -1)
-
-                // 배율은 직접 구한다.
-                //
-                // getDrawingTransform 은 쪽이 rect 보다 **크면 줄이지만 작으면
-                // 키우지 않는다.** 슬라이드 PDF 는 보통 960×540 pt 라서,
-                // 1920×1080 에 그리면 원래 크기 그대로 가운데 놓이고 둘레가
-                // 흰 종이로 남는다 — '화면에 안 꽉 찬다'의 정체다.
-                // 두 쪽 모드에서는 칸이 960×540 이라 우연히 맞아떨어져
-                // 그때만 꽉 차 보였다.
-                let fit = min(slot.width / item.box.width,
-                              slot.height / item.box.height)
-                ctx.translateBy(x: slot.width / 2, y: slot.height / 2)
-                ctx.scaleBy(x: fit, y: fit)
-                // /Rotate 가 걸린 쪽은 여기서 돌린다. 가운데를 축으로 돌려야
-                // 돌린 뒤에도 칸 가운데에 남는다.
-                if item.rotation != 0 {
-                    ctx.rotate(by: -CGFloat(item.rotation) * .pi / 180)
-                }
-                // 원본 박스의 가운데를 원점에 맞춘다. cropBox 는 원점이
-                // (0,0) 이 아닐 수 있다.
-                ctx.translateBy(x: -item.raw.midX, y: -item.raw.midY)
-                ctx.drawPDFPage(item.page)
+                ctx.clip(to: p.slot)
+                ctx.concatenate(p.transform)
+                ctx.drawPDFPage(p.page)
                 ctx.restoreGState()
             }
         }
 
-        pageImage.image = night ? Self.nightImage(image) : image
-        pageImage.backgroundColor = night ? .black : .white
+        if night {
+            let slots = placed.map { p -> ArgoPDFNight.Slot in
+                let rects = imageRects(page: p.page, number: p.number)
+                    .map { $0.applying(p.transform) }
+                return ArgoPDFNight.Slot(frame: p.slot, images: rects)
+            }
+            pageImage.image = ArgoPDFNight.render(day: image, slots: slots)
+        } else {
+            pageImage.image = image
+        }
+        pageImage.backgroundColor = night ? ArgoPDFNight.paperColor : .white
         lastRenderKey = key
         renderedPageHeight = size.height
         layoutPage()
@@ -709,19 +724,14 @@ final class ArgoPDFReaderController: UIViewController {
         renderCurrentPage()
     }
 
-    /// 색 뒤집기 + 색상 180° 회전. 흰 종이는 검게, 검은 글자는 희게 되고
-    /// 색 있는 그림은 색상이 대략 제자리로 돌아온다.
-    private static func nightImage(_ image: UIImage) -> UIImage {
-        guard let cg = image.cgImage else { return image }
-        let input = CIImage(cgImage: cg)
-        guard let invert = CIFilter(name: "CIColorInvert") else { return image }
-        invert.setValue(input, forKey: kCIInputImageKey)
-        guard let hue = CIFilter(name: "CIHueAdjust"), let inverted = invert.outputImage else { return image }
-        hue.setValue(inverted, forKey: kCIInputImageKey)
-        hue.setValue(Float.pi, forKey: kCIInputAngleKey)
-        guard let out = hue.outputImage,
-              let result = ciContext.createCGImage(out, from: input.extent) else { return image }
-        return UIImage(cgImage: result, scale: image.scale, orientation: image.imageOrientation)
+    /// 쪽 안의 그림 자리. 쪽마다 한 번만 훑는다 (PDF 좌표).
+    private var imageRectCache: [Int: [CGRect]] = [:]
+
+    private func imageRects(page: CGPDFPage, number: Int) -> [CGRect] {
+        if let hit = imageRectCache[number] { return hit }
+        let rects = ArgoPDFImageScan.imageRects(in: page)
+        imageRectCache[number] = rects
+        return rects
     }
 
     @objc private func prevPage() { goToPage(previousViewStart()) }
