@@ -791,7 +791,9 @@ struct ContentView: View {
                         .sheet(isPresented: $showSubView[12], onDismiss: {
                             isImageSVG[0] = false
                         }, content: {
-                            ImageView(imagePath: newViewFilePath, imageName: newViewFileName, isSVG: isImageSVG[0])
+                            // 같은 폴더의 사진을 좌우로 넘겨 보는 앨범 보기.
+                            ArgoPhotoAlbumView(folder: newViewFilePath, fileName: newViewFileName)
+                                .ignoresSafeArea()
                         })
                         .sheet(isPresented: $showSubView[13], content: {
                             PlistView(filePath: newViewFilePath, fileName: newViewFileName)

@@ -259,12 +259,30 @@ final class TrashManager: ObservableObject {
         if normalized == Self.trashRootPath || normalized.hasPrefix(Self.trashRootPath + "/") {
             return false
         }
-        // 휴지통이 들어 있는 폴더(/var/mobile/Media 등)나 그 위쪽은 휴지통으로 보낼 수 없다.
-        // 자기 안으로 옮기려다 3차 시도(복사 후 원본 삭제)가 내용을 지워 버린다.
+        // 휴지통이 들어 있는 폴더(/var/mobile/Media 등)는 폴더째 옮길 수 없다(자기 안으로 들어감).
+        // 예전에는 이동이 실패한 뒤 '복사 후 원본 삭제'가 내용을 지워 버렸다.
+        // 이제는 폴더는 두고 안의 항목을 하나씩 휴지통으로 보낸다(휴지통 폴더만 뺀다).
         let priv = normalized.hasPrefix("/private/") ? normalized : (normalized.hasPrefix("/var/") ? "/private" + normalized : normalized)
-        if Self.contains(priv, Self.trashRootPath) || priv == "/private/var/mobile" || priv == "/private/var" {
-            ArgoDiag.log("trash", "거부: 휴지통을 품은 폴더 \(normalized)")
+        if priv == "/private/var/mobile" || priv == "/private/var" {
+            ArgoDiag.log("trash", "거부: 시스템 폴더 \(normalized)")
             return false
+        }
+        if Self.contains(priv, Self.trashRootPath) {
+            let children = (try? fileManager.contentsOfDirectory(atPath: normalized)) ?? []
+            var moved = 0, failed = 0
+            for name in children {
+                let child = (normalized as NSString).appendingPathComponent(name)
+                let childPriv = (priv as NSString).appendingPathComponent(name)
+                if Self.contains(childPriv, Self.trashRootPath) {
+                    // 휴지통 폴더 자신이거나 휴지통을 품은 하위 폴더 — 그 안을 다시 나눠 보낸다.
+                    if childPriv == Self.trashRootPath || Self.contains(Self.trashRootPath, childPriv) { continue }
+                    if moveToTrash(path: child) { moved += 1 } else { failed += 1 }
+                    continue
+                }
+                if moveToTrash(path: child) { moved += 1 } else { failed += 1 }
+            }
+            ArgoDiag.log("trash", "휴지통을 품은 폴더 \(normalized): 안의 항목 \(moved)개 이동, \(failed)개 실패")
+            return moved > 0 && failed == 0
         }
 
         // S5: 휴지통 이동 전 FileGuard 승인 검사 (금지 구역 및 안전 모드 차단 + UI 알림)
