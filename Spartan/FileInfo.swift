@@ -137,7 +137,10 @@ class FileInfo {
         "ogg", "oga", "opus", "wma", "ape", "wv", "dsf", "dff", "mka", "ra",
     ]
 
+    /// 영상·소리일 수 없는 확장자. AVAsset 으로 열어 볼 필요가 없다 (대용량 압축 파일 진입 시 부담).
+    private static let notMediaExtensions: Set<String> = ["zip","7z","rar","gz","tgz","bz2","xz","tar","iso","dmg","ipa","deb","pdf","docx","xlsx","pptx","hwp","hwpx","doc","xls","ppt","txt","json","plist","ttf","otf","ttc"]
     class func isAudio(filePath: String) -> Bool {
+        if notMediaExtensions.contains((filePath as NSString).pathExtension.lowercased()) { return false }
         let fileURL = URL(fileURLWithPath: filePath)
         let asset = AVAsset(url: fileURL)
         let playableKey = "playable"
@@ -148,6 +151,7 @@ class FileInfo {
         return playableItems.count > 0
     }
     class func isVideo(filePath: String) -> Bool {
+        if notMediaExtensions.contains((filePath as NSString).pathExtension.lowercased()) { return false }
         let fileURL = URL(fileURLWithPath: filePath)
         let asset = AVAsset(url: fileURL)
         let playableKey = "playable"
@@ -222,10 +226,11 @@ class FileInfo {
         return false
     }
     class func isCar(filePath: String) -> Bool {
-        guard let data = fileManager.contents(atPath: filePath) else {
+        // 머리 8바이트만 읽는다. 대용량 파일을 통째로 읽으면 폴더 진입 때 메모리 초과로 앱이 죽는다.
+        guard let data = headBytes(filePath, 8) else {
             return false
         }
-        if data.count > 8 {
+        if data.count >= 8 {
             if let header = String(data: data.subdata(in: 0..<8), encoding: .utf8) {
                 return header == "BOMStore"
             }
@@ -233,10 +238,10 @@ class FileInfo {
         return false
     }
     class func isHTML(filePath: String) -> Bool {
-        guard let data = fileManager.contents(atPath: filePath) else {
+        guard let data = headBytes(filePath, 15) else {
             return false
         }
-        if data.count > 15 {
+        if data.count >= 15 {
             if let header = String(data: data.subdata(in: 0..<15), encoding: .utf8) {
                 return header == "<!DOCTYPE html>"
             }
@@ -278,13 +283,11 @@ class func isOfficeDoc(filePath: String) -> Bool {
             return false
         }
         
-        guard let fileData = fileManager.contents(atPath: filePath) else {
+        guard let fileData = headBytes(filePath, 2) else {
             return false
         }
-        if fileData.count > 2 {
-            if fileData.subdata(in: 0..<2) == Data(fromHexEncodedString: "504B") {
-                return true
-            }
+        if fileData.count >= 2, fileData[fileData.startIndex] == 0x50, fileData[fileData.startIndex + 1] == 0x4B {
+            return true
         }
 
         let archive = archive_read_new()

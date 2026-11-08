@@ -322,10 +322,14 @@ final class FilePaneModel: ObservableObject {
     private func makeFile(_ name: String) -> SpartanFile {
         let full = directory + name
         let attrs = try? fileManager.attributesOfItem(atPath: full)
+        let bytes = (attrs?[.size] as? Int64) ?? 0
+        if bytes > 64 * 1024 * 1024 { ArgoDiag.log("enter", "대용량 분류 시작 \(name) \(bytes / 1_048_576)MB") }
+        let kind = FileInfo.yandereDevFileType(file: full)
+        if bytes > 64 * 1024 * 1024 { ArgoDiag.log("enter", "대용량 분류 끝 \(name) 유형 \(kind)") }
         return SpartanFile(name: name,
                            fullPath: full,
                            isSelected: false,
-                           fileType: FileInfo.yandereDevFileType(file: full),
+                           fileType: kind,
                            isLoadingFile: false,
                            size: attrs?[.size] as? Int64,
                            modified: attrs?[.modificationDate] as? Date)
