@@ -1,6 +1,7 @@
 mod doc;
 mod docx;
 mod fonts;
+pub mod fontprofile;
 mod office;
 mod pdf;
 mod pptx;
@@ -218,6 +219,7 @@ pub fn convert_bytes_to_pdf_with_options(
     options: &ConversionOptions,
 ) -> Result<Vec<u8>> {
     clear_notices();
+    fontprofile::set_default_family(None);
     // 옛 오피스 형식은 ZIP 이 아니라 CFB(OLE) 다. 그중 엑셀만 읽는다.
     if input.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
         // 워드(.doc)는 docx 모양으로 옮겨 docx 경로로 그린다.

@@ -118,6 +118,7 @@ private struct IslandButtonBody: View {
     let destructive: Bool
     @Environment(\.isFocused) private var focused
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.islandGap) private var gap
 
     var body: some View {
         let fill: Color = focused
@@ -134,8 +135,26 @@ private struct IslandButtonBody: View {
             .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 14 : 0, x: 0, y: 8)
             .animation(.easeOut(duration: 0.15), value: focused)
             // 단추 사이 간격. 막대 쪽 HStack 은 간격 0 이다(접힌 단추가 빈 칸을 남기지 않게).
-            .padding(.horizontal, 7)
+            // 간격은 막대가 화면 폭에 맞춰 계산해 내려 준다(islandGap, 기본 7).
+            .padding(.horizontal, gap)
+            // 보이는 단추 수를 막대에 알린다. 접힌 단추는 disabled 라 세지 않는다.
+            .preference(key: IslandButtonCount.self, value: enabled ? 1 : 0)
     }
+}
+
+/// 유리 막대 단추 한쪽 바깥 여백. 막대가 남는 폭을 단추 수로 나눠 정한다.
+struct IslandGapKey: EnvironmentKey { static let defaultValue: CGFloat = 7 }
+extension EnvironmentValues {
+    var islandGap: CGFloat {
+        get { self[IslandGapKey.self] }
+        set { self[IslandGapKey.self] = newValue }
+    }
+}
+
+/// 막대 안에서 보이는(눌 수 있는) 단추 수.
+struct IslandButtonCount: PreferenceKey {
+    static var defaultValue: Int = 0
+    static func reduce(value: inout Int, nextValue: () -> Int) { value += nextValue() }
 }
 
 @available(tvOS 15.0, *)

@@ -987,6 +987,15 @@ fn font_has_subsettable_outlines(face: &ttf_parser::RawFace<'_>) -> bool {
         || face.table(ttf_parser::Tag::from_bytes(b"CFF ")).is_some()
 }
 
+/// 모양 낸 글자 하나의 폭 배율. 글자 종류는 그 글자가 나온 자리(cluster)로 안다.
+fn class_factor(text: &str, cluster: usize, profile: Option<crate::fontprofile::ClassScale>) -> f32 {
+    let Some(p) = profile else { return 1.0 };
+    text.get(cluster..)
+        .and_then(|rest| rest.chars().next())
+        .map(|c| p.of(c))
+        .unwrap_or(1.0)
+}
+
 fn shape_text(text: &str, font_data: &[u8]) -> Option<ShapedText> {
     let face = rustybuzz::Face::from_slice(font_data, 0)?;
     let units_per_em = face.units_per_em();
@@ -1033,10 +1042,12 @@ pub(crate) fn styled_text_width_with_font(
                     return base14_text_width(&run.text, font_size, bold);
                 };
                 let scale = font_size / shaped.units_per_em as f32;
+                let requested = crate::fontprofile::requested_or_default(preferred_font);
+                let profile = crate::fontprofile::scale_for(&requested, &fonts[font_index].data, 0);
                 shaped
                     .glyphs
                     .iter()
-                    .map(|glyph| glyph.x_advance as f32 * scale)
+                    .map(|glyph| glyph.x_advance as f32 * scale * class_factor(&run.text, glyph.cluster, profile))
                     .sum::<f32>()
             })
             .sum()
@@ -1185,20 +1196,30 @@ fn write_content_stream(
                         continue;
                     };
                     let scale = font_size / shaped.units_per_em as f32;
+                    // 대체 글꼴 폭 보정(지침 A). 재는 쪽(styled_text_width_with_font)과 같은 값.
+                    let requested = crate::fontprofile::requested_or_default(preferred_font.as_deref());
+                    let profile = crate::fontprofile::scale_for(&requested, &fonts[font_index].data, 0);
+                    if profile.is_some() {
+                        crate::fontprofile::note_applied(&requested);
+                    }
                     content.push_str(&format!(
                         "/Span << /ActualText <{}> >> BDC\n",
                         utf16be_hex(&run.text, true)
                     ));
                     for glyph in shaped.glyphs {
+                        let factor = class_factor(&run.text, glyph.cluster, profile);
+                        // 모양은 MAX_GLYPH_X 까지만 늘리고, 나머지는 글자 뒤 간격으로 둔다.
+                        let sx = factor.min(crate::fontprofile::MAX_GLYPH_X);
                         let glyph_x = cursor_x + glyph.x_offset as f32 * scale;
                         let glyph_y = cursor_y + glyph.y_offset as f32 * scale;
                         content.push_str(&format!(
-                            "BT /{} {:.2} Tf {:.3} {:.3} {:.3} rg 1 0 0 1 {:.2} {:.2} Tm <{:04X}> Tj ET\n",
+                            "BT /{} {:.2} Tf {:.3} {:.3} {:.3} rg {:.3} 0 0 1 {:.2} {:.2} Tm <{:04X}> Tj ET\n",
                             resource.resource_name,
                             font_size,
                             clamp_color(color.r),
                             clamp_color(color.g),
                             clamp_color(color.b),
+                            sx,
                             glyph_x,
                             glyph_y,
                             resource
@@ -1206,7 +1227,7 @@ fn write_content_stream(
                                 .get(&glyph.id)
                                 .expect("shaped glyph was registered")
                         ));
-                        cursor_x += glyph.x_advance as f32 * scale;
+                        cursor_x += glyph.x_advance as f32 * scale * factor;
                         cursor_y += glyph.y_advance as f32 * scale;
                     }
                     content.push_str("EMC\n");

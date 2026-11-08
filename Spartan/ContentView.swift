@@ -45,6 +45,14 @@ struct ContentView: View {
     /// 처음부터 펼쳐 둔다 — 유리 막대에 자리가 남아, 자주 쓰는 검색·경로·정렬
     /// 단추까지 앞에 보이는 편이 리모컨으로 '…' 를 한 번 더 누르는 것보다 낫다.
     @State private var toolbarExpanded = true
+    // 상단 막대 반응형 간격 (refitIsland)
+    @State private var islandGap: CGFloat = 7
+    // G: 좌우 키 포커스 규칙
+    @FocusState private var barFocus: Bool
+    @State private var lastActivePane: PaneSide = .left
+    @State private var islandButtons = 0
+    @State private var islandContent: CGFloat = 0
+    @State private var islandAvailable: CGFloat = 0
     /// 대상 폴더를 고르는 중이면 true(이동)·false(복사), 아니면 nil.
     /// 리모컨으로 경로를 치는 대신 옆 칸에서 폴더를 찾아 들어가 '여기로' 를 누른다.
     @State private var pickMove: Bool? = nil
@@ -279,6 +287,8 @@ struct ContentView: View {
                         Image(systemName: "house")
                             .frame(width: 50, height: 50)
                     }
+                    // 칸에서 바깥쪽 끝으로 나가면 포커스가 여기로 온다 (G).
+                    .focused($barFocus)
 
                     Button(action: { //새로 읽기 — 두 칸 모두
                         refreshBothPanes()
@@ -654,29 +664,14 @@ struct ContentView: View {
                                 .frame(width: 50, height: 50)
                         }
 
-                        Button(action: { //반대 칸으로 이동
-                            copySelectionToOtherPane(move: true)
-                        }) {
-                            Image(systemName: "arrow.left.arrow.right")
-                                .frame(width: 50, height: 50)
-                        }
-
-                        Button(action: { //반대 칸을 이 폴더로 맞추기
-                            syncOtherPaneToActive()
-                        }) {
-                            Image(systemName: "equal.square")
-                                .frame(width: 50, height: 50)
-                        }
+                        // '반대 칸으로 이동'(⇄)·'반대 칸 맞추기'(=) 단추는 Rob 지시로 뺐다.
+                        // 단축키(.moveToOtherPane, .syncPanes)는 그대로 남아 있다.
                     }
 
                     Group {
-                    Button(action: {
-                        showSubView[21] = true
-                    }) {
-                        Image(systemName: "externaldrive")
-                            .frame(width:50, height:50)
-                    }
-
+                    // 디스크 정보(externaldrive)는 설정 → '디스크 및 도구' 로 옮겼다.
+                    // 시트(showSubView[21])는 아래 스크롤 뷰에 그대로 달려 있고,
+                    // 설정이 .argoOpenMountPoints 알림을 보내면 그것을 띄운다.
                     Button(action: { //단축키 도움말. tvOS에는 메뉴 막대가 없어 이 화면이 유일한 안내다
                         showSubView[39] = true
                     }) {
@@ -699,9 +694,23 @@ struct ContentView: View {
                     .collapsed(!toolbarExpanded || busyBar)
                 }
                 .buttonStyle(IslandButtonStyle())
+                .environment(\.islandGap, islandGap)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: IslandContentWidth.self, value: g.size.width)
+                })
+                .onPreferenceChange(IslandButtonCount.self) { islandButtons = $0; refitIsland() }
+                .onPreferenceChange(IslandContentWidth.self) { islandContent = $0; refitIsland() }
                 .glassIsland()
                 .padding(.horizontal, 8)
                 .padding(.vertical, 14)
+                }
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: IslandAvailableWidth.self, value: g.size.width)
+                })
+                .onPreferenceChange(IslandAvailableWidth.self) { islandAvailable = $0; refitIsland() }
+                .onReceive(NotificationCenter.default.publisher(for: .argoOpenMountPoints)) { _ in
+                    ArgoDiag.log("toolbar-settings", "디스크 정보 열기")
+                    showSubView[21] = true
                 }
                 // 남은 공간은 유리 막대 밖, 오른쪽 끝에 고정해 둔다. 막대 안 맨 끝에
                 // 두었더니 아이콘이 늘어 화면 밖으로 밀려나 글자가 잘렸다.
@@ -863,6 +872,7 @@ struct ContentView: View {
 
                 // 툴바를 하나의 포커스 구역으로 묶는다. 칸에서 좌우 끝으로 가면
                 // 더 갈 곳이 없어 포커스가 이 구역으로 올라온다.
+                .onMoveCommand { dir in if dir == .down { returnFromBar() } }
                 .focusSection()
                 HStack {
                     // 칸 둘. 활성 칸만 테두리가 켜지고, 툴바의 모든 명령은 그쪽으로 간다.
@@ -874,13 +884,15 @@ struct ContentView: View {
                                          onOpen: { index in openInPane(.left, index: index) },
                                          onGoUp: { activeSide = .left; leftPane.goUp() },
                                          onFocus: { if activeSide != .left { activeSide = .left } },
-                                         menu: rowMenu(for: .left))
+                                         menu: rowMenu(for: .left),
+                                         onHorizontal: { dir in handleHorizontalNavigation(from: .left, direction: dir) })
                             FilePaneView(model: rightPane,
                                          isActive: activeSide == .right,
                                          onOpen: { index in openInPane(.right, index: index) },
                                          onGoUp: { activeSide = .right; rightPane.goUp() },
                                          onFocus: { if activeSide != .right { activeSide = .right } },
-                                         menu: rowMenu(for: .right))
+                                         menu: rowMenu(for: .right),
+                                         onHorizontal: { dir in handleHorizontalNavigation(from: .right, direction: dir) })
                         }
                     } else {
                         FilePaneView(model: leftPane,
@@ -890,7 +902,8 @@ struct ContentView: View {
                                      onOpen: { index in openInPane(.left, index: index) },
                                      onGoUp: { activeSide = .left; leftPane.goUp() },
                                      onFocus: { if activeSide != .left { activeSide = .left } },
-                                     menu: rowMenu(for: .left))
+                                     menu: rowMenu(for: .left),
+                                     onHorizontal: { dir in handleHorizontalNavigation(from: .left, direction: dir) })
                     }
                 }
                 .alert(isPresented: $showAlert) {
@@ -1505,6 +1518,54 @@ struct ContentView: View {
     
     /// 상단 오른쪽 끝에 붙는 남은 공간 표시. 글자를 줄이고 폭을 고정해
     /// 막대가 몇 개의 아이콘을 품든 잘리지 않게 한다.
+    /// G. 단일창: ← 이면 상단 막대로. 분할창: 안쪽 방향은 반대 칸, 바깥쪽 끝이면 상단 막대로.
+    /// 안쪽 방향(왼쪽 칸 →, 오른쪽 칸 ←)은 tvOS 포커스 엔진이 이미 반대 칸으로 옮긴다 —
+    /// 여기서 또 옮기면 둘이 싸우므로 기록만 한다.
+    func handleHorizontalNavigation(from side: PaneSide, direction: MoveCommandDirection) {
+        lastActivePane = side
+        if !dualPaneEnabled {
+            if direction == .left {
+                barFocus = true
+                ArgoDiag.log("focus", "single-pane left -> topBar")
+            }
+            return
+        }
+        switch (side, direction) {
+        case (.left, .left), (.right, .right):
+            barFocus = true
+            ArgoDiag.log("focus", "dual-pane outer edge (\(side)) -> topBar")
+        case (.left, .right):
+            ArgoDiag.log("focus", "dual-pane left -> rightPane")
+        case (.right, .left):
+            ArgoDiag.log("focus", "dual-pane right -> leftPane")
+        default:
+            break
+        }
+    }
+
+    /// 상단 막대에서 ↓: 직전 칸의 마지막 줄로 돌아간다.
+    func returnFromBar() {
+        let target = (dualPaneEnabled && lastActivePane == .right) ? rightPane : leftPane
+        DispatchQueue.main.async { target.focusToken += 1 }
+        ArgoDiag.log("focus", "topBar down -> \(lastActivePane)")
+    }
+
+    /// 막대 폭에 맞춰 단추 간격을 다시 잡는다.
+    /// 잰 폭에는 지금 간격이 들어 있으므로, 기본 간격(7)일 때의 폭으로 되돌려 계산한다.
+    /// 그래야 간격을 바꿔도 다시 재는 값이 같아 오가며 흔들리지 않는다.
+    func refitIsland() {
+        let n = CGFloat(max(islandButtons, 1))
+        let base: CGFloat = 7
+        let natural = islandContent - n * 2 * (islandGap - base)
+        // 유리 섬 안쪽 여백 10×2, 바깥 여백 8×2
+        let room = islandAvailable - 36
+        guard room > 0, natural > 0 else { return }
+        let target = min(max(base + (room - natural) / (n * 2), base), 26)
+        if abs(target - islandGap) > 0.5 {
+            DispatchQueue.main.async { islandGap = target }
+        }
+    }
+
     var freeSpaceBadge: some View {
         let (value, unit) = freeSpace(path: "/")
         return HStack(spacing: 8) {
@@ -2653,4 +2714,20 @@ extension View {
             .opacity(yes ? 0 : 1)
             .disabled(yes)
     }
+}
+
+
+/// 상단 막대 안쪽 내용 폭 / 막대가 쓸 수 있는 폭.
+struct IslandContentWidth: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+struct IslandAvailableWidth: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+extension Notification.Name {
+    /// 설정의 '디스크 정보' 단추가 보낸다. ContentView 가 받아 MountPointsView 를 띄운다.
+    static let argoOpenMountPoints = Notification.Name("argoOpenMountPoints")
 }

@@ -23,6 +23,13 @@ struct Face {
     bold: bool,
     italic: bool,
     metrics: Metrics,
+    /// 대체 글꼴 폭 보정(지침 A). 원래 글꼴 이름별로 만든 '가상 얼굴'에만 있다.
+    profile: Option<minipdf::fontprofile::ClassScale>,
+    /// 가상 얼굴이면 참. 이름 찾기·대체 글자 찾기에서는 건너뛴다.
+    virt: bool,
+    /// 가상 얼굴이 빌린 실제 얼굴 번호. SVG 에는 이 번호를 적는다
+    /// (usvg 해결사는 가상 얼굴이 생기기 전에 만들어진다).
+    base: usize,
 }
 
 pub(crate) struct FontBook {
@@ -32,6 +39,8 @@ pub(crate) struct FontBook {
     pick_cache: HashMap<(String, bool, bool), Option<usize>>,
     glyph_cache: HashMap<(usize, char), Option<f32>>,
     fallback_cache: HashMap<(usize, char), usize>,
+    /// (실제 얼굴, 원래 글꼴 이름) → 보정이 붙은 가상 얼굴
+    profiled: HashMap<(usize, String), usize>,
 }
 
 pub(crate) fn is_east_asian(c: char) -> bool {
@@ -72,6 +81,9 @@ impl FontBook {
                 bold: info.weight.0 >= 600,
                 italic: info.style != Style::Normal,
                 metrics,
+                profile: None,
+                virt: false,
+                base: faces.len(),
             });
         }
         let aliases = aliases.iter().map(|(a, b)| (a.to_lowercase(), b.clone())).collect();
@@ -82,6 +94,7 @@ impl FontBook {
             pick_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             fallback_cache: HashMap::new(),
+            profiled: HashMap::new(),
         }
     }
 
@@ -132,8 +145,9 @@ impl FontBook {
         }
         candidates.push((family.to_owned(), false));
         for (name, bold_alias) in candidates {
-            let matches: Vec<usize> =
-                (0..self.faces.len()).filter(|&i| self.faces[i].names.iter().any(|n| *n == name)).collect();
+            let matches: Vec<usize> = (0..self.faces.len())
+                .filter(|&i| !self.faces[i].virt && self.faces[i].names.iter().any(|n| *n == name))
+                .collect();
             if matches.is_empty() {
                 continue;
             }
@@ -194,10 +208,64 @@ impl FontBook {
                         v
                     }
                 };
-                found.unwrap_or_else(|| self.default_face(bold, italic))
+                let face = found.unwrap_or_else(|| self.default_face(bold, italic));
+                self.profiled_face(face, f)
             }
             None => self.default_face(bold, italic),
         }
+    }
+
+    /// `requested` 글꼴을 `face` 로 대신 그릴 때, 폭 보정이 붙은 얼굴을 돌려준다.
+    /// 보정할 것이 없으면(원래 글꼴이 있거나 폭이 같으면) 그 얼굴 그대로.
+    fn profiled_face(&mut self, face: usize, requested: &str) -> usize {
+        let Some(base) = self.faces.get(face) else { return face };
+        if base.virt {
+            return face;
+        }
+        let key = (face, minipdf::fontprofile::normalize(requested));
+        if let Some(&v) = self.profiled.get(&key) {
+            return v;
+        }
+        let id = base.id;
+        let profile = self
+            .db
+            .with_face_data(id, |data, index| minipdf::fontprofile::scale_for(requested, data, index))
+            .flatten();
+        let out = match profile {
+            None => face,
+            Some(p) => {
+                minipdf::fontprofile::note_applied(requested);
+                let b = &self.faces[face];
+                let v = Face {
+                    id: b.id,
+                    names: b.names.clone(),
+                    bold: b.bold,
+                    italic: b.italic,
+                    metrics: b.metrics,
+                    profile: Some(p),
+                    virt: true,
+                    base: face,
+                };
+                self.faces.push(v);
+                self.faces.len() - 1
+            }
+        };
+        self.profiled.insert(key, out);
+        out
+    }
+
+    /// SVG 에 적을 얼굴 번호(가상 얼굴이면 빌린 실제 얼굴).
+    pub fn draw_face(&self, face: usize) -> usize {
+        self.faces.get(face).map(|f| f.base).unwrap_or(face)
+    }
+
+    /// 이 얼굴로 그 글자를 그릴 때의 가로 배율(폭 보정). 보정이 없으면 1.
+    pub fn class_scale(&self, face: usize, c: char) -> f64 {
+        self.faces
+            .get(face)
+            .and_then(|f| f.profile)
+            .map(|p| p.of(c) as f64)
+            .unwrap_or(1.0)
     }
 
     /// 글자 폭(em). 이 얼굴에 그 글자가 없으면 None.
@@ -233,6 +301,9 @@ impl FontBook {
         let (bold, italic) = (self.is_bold(face), self.is_italic(face));
         let mut best: Option<(u8, usize)> = None;
         for i in 0..self.faces.len() {
+            if self.faces[i].virt {
+                continue;
+            }
             if self.glyph(i, c).is_some() {
                 let score = (self.faces[i].bold != bold) as u8 * 2 + (self.faces[i].italic != italic) as u8;
                 if best.map(|b| score < b.0).unwrap_or(true) {
@@ -248,8 +319,13 @@ impl FontBook {
         pick
     }
 
-    /// 글자 폭 pt.
+    /// 글자 폭 pt. 대체 글꼴이면 원래 글꼴 폭으로 보정한다(지침 A).
     pub fn advance(&mut self, face: usize, c: char, size: f64) -> f64 {
+        self.advance_raw(face, c, size) * self.class_scale(face, c)
+    }
+
+    /// 보정 없는 글자 폭 pt. 차트 글씨처럼 한 덩어리로 그리는 곳에서 쓴다.
+    pub fn advance_raw(&mut self, face: usize, c: char, size: f64) -> f64 {
         if c == '\t' {
             return 0.0;
         }

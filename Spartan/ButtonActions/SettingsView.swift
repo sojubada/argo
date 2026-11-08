@@ -29,6 +29,9 @@ struct SettingsView: View {
     @State private var languagePre = ArgoLocale.current
     @State private var glassPre = UserDefaults.settings.object(forKey: "argoGlass") as? Bool ?? true
     @State private var showLanguageRestart = false
+    // 문서 읽기 다크 모드. PDF·변환 문서 뷰어의 Night 단추와 같은 키를 쓴다 — 양쪽이 늘 같다.
+    @State private var docDarkPre = UserDefaults.settings.bool(forKey: "pdfSimple.isNightMode")
+    @Environment(\.presentationMode) private var presentationMode
 
     var body: some View {
 		ScrollView {
@@ -67,6 +70,36 @@ struct SettingsView: View {
 					}),
 					secondaryButton: .cancel(Text(L("나중에")))
 				)
+			}
+			// 문서 읽기 다크 모드 — PDF·한글·워드·엑셀·발표 뷰어를 어둡게 연다.
+			Button(action: {
+				docDarkPre.toggle()
+				UserDefaults.settings.set(docDarkPre, forKey: "pdfSimple.isNightMode")
+				UserDefaults.settings.set(docDarkPre, forKey: "argo.document.darkMode")
+				ArgoDiag.log("toolbar-settings", "문서 다크 모드 \(docDarkPre ? "켬" : "끔")")
+			}) {
+				HStack {
+					Image(systemName: docDarkPre ? "moon.fill" : "sun.max")
+					Text(L("문서 읽기 다크 모드") + ": " + (docDarkPre ? L("켜짐") : L("꺼짐")))
+				}
+			}
+			// 디스크 및 도구 — 상단 막대에서 옮겨 온 것.
+			Text(L("디스크 및 도구"))
+				.font(.headline)
+				.foregroundColor(.secondary)
+				.padding(.top, 12)
+			Button(action: {
+				ArgoDiag.log("toolbar-settings", "디스크 정보 단추")
+				presentationMode.wrappedValue.dismiss()
+				// 설정 시트가 닫힌 뒤 띄운다. 시트 둘이 한꺼번에 뜨지 않는다.
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+					NotificationCenter.default.post(name: .argoOpenMountPoints, object: nil)
+				}
+			}) {
+				HStack {
+					Image(systemName: "externaldrive")
+					Text(L("디스크 정보 (마운트 지점)"))
+				}
 			}
 			// 유리 효과: 도구 모음을 반투명 유리 섬으로 그린다. 끄면 불투명 바탕.
 			Button(action: {

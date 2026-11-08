@@ -79,12 +79,18 @@ struct FilePaneView: View {
     /// 포커스 엔진이 옮겨 줄 때마다 model 로 옮겨 적는다.
     @FocusState private var focusedRow: Int?
 
+    /// 좌우 방향 입력. ContentView 가 단일·분할 창 규칙(G)에 따라 포커스를 옮긴다.
+    /// 목록은 한 열이라 모든 줄이 좌우 끝이다.
+    var onHorizontal: ((MoveCommandDirection) -> Void)? = nil
+
     init(model: FilePaneModel,
          isActive: Bool,
          onOpen: @escaping (Int) -> Void,
          onGoUp: @escaping () -> Void,
          onFocus: @escaping () -> Void,
-         menu: PaneRowMenu? = nil) {
+         menu: PaneRowMenu? = nil,
+         onHorizontal: ((MoveCommandDirection) -> Void)? = nil) {
+        self.onHorizontal = onHorizontal
         self.model = model
         self.isActive = isActive
         self.onOpen = onOpen
@@ -128,6 +134,9 @@ struct FilePaneView: View {
         // 1픽셀 투명 뷰로 포커스를 '받아서' 돌려보내는 방식은 쓰지 않는다.
         // SwiftUI에는 포커스를 보낼 수단이 없어, 받은 뒤 갇힐 수 있다 —
         // 파일 탐색기에서 포커스가 갇히면 앱을 끄는 수밖에 없다.
+        .onMoveCommand { dir in
+            if dir == .left || dir == .right { onHorizontal?(dir) }
+        }
         .focusSection()
     }
 

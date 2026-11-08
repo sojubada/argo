@@ -466,6 +466,10 @@ fn read_styles(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<DocxStyles> {
         .and_then(|node| node.descendants().find(|child| child.has_tag_name("rPr")))
         .map(read_run_properties)
         .unwrap_or_default();
+    // 글꼴 이름이 없는 글자는 문서 기본 글꼴로 그려진다. 폭 보정(fontprofile)에 알린다.
+    crate::fontprofile::set_default_family(
+        run_defaults.font_name.clone().or_else(|| theme_fonts.minor_east_asia.clone()),
+    );
     let styles = xml
         .descendants()
         .filter(|node| node.has_tag_name("style"))

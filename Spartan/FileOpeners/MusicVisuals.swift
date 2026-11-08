@@ -43,6 +43,16 @@ final class AudioSpectrum: ObservableObject {
     fileprivate var processCalls = 0
     fileprivate var loggedFirstCall = false
     private var retried = Set<ObjectIdentifier>()
+    // B. 레벨 적응: 띠 최댓값의 느린 추적값(dB). 올라갈 때 바로, 내려갈 때 약 5초 시정수.
+    private var runningPeakDb: Float = -40
+    // D. 재생당 한 줄 로그: 처음 5초의 띠 최댓값과 막대 최대 높이.
+    private var levelName = ""
+    private var levelSamples = 0
+    private var levelMaxDb: Float = -140
+    private var levelMaxBar: Float = 0
+    private var levelLogged = false
+    // 비인터리브 채널 평균용. 오디오 스레드에서 새로 할당하지 않게 미리 잡아 둔다.
+    fileprivate var mixBuffer = [Float](repeating: 0, count: 8192)
     private let lock = NSLock()
 
     init() {
@@ -60,7 +70,12 @@ final class AudioSpectrum: ObservableObject {
     func attach(to item: AVPlayerItem) {
         guard item.audioMix == nil else { return }
         let asset = item.asset
-        lock.lock(); processCalls = 0; loggedFirstCall = false; lock.unlock()
+        let display = (item.asset as? AVURLAsset)?.url.lastPathComponent ?? "?"
+        lock.lock()
+        processCalls = 0; loggedFirstCall = false
+        levelName = display; levelSamples = 0; levelMaxDb = -140; levelMaxBar = 0; levelLogged = false
+        runningPeakDb = -40
+        lock.unlock()
         // 내 기기의 파일이면 트랙을 바로 읽어, 재생이 시작되기 전에 탭을 건다.
         // 재생이 시작된 뒤에 소리 섞기를 넣으면 몇몇 mp3 에서 탭이 끝내 불리지
         // 않았다(막대가 안 움직임).
@@ -170,7 +185,21 @@ final class AudioSpectrum: ObservableObject {
                 guard let first = buffers.first, let data = first.mData else { return }
                 let channels = max(1, Int(first.mNumberChannels))
                 let frameCount = Int(framesOut.pointee)
-                if me.isFloat {
+                if me.isFloat && buffers.count > 1 && channels == 1 {
+                    // 비인터리브: 채널마다 버퍼가 따로 온다. 모두 평균한다(한쪽 채널이 빈 음원 대비).
+                    let count = min(Int(first.mDataByteSize) / MemoryLayout<Float>.size, frameCount, me.mixBuffer.count)
+                    let n = Float(buffers.count)
+                    me.mixBuffer.withUnsafeMutableBufferPointer { mp in
+                        for i in 0..<count { mp[i] = 0 }
+                        for buf in buffers {
+                            guard let d = buf.mData else { continue }
+                            let p = d.assumingMemoryBound(to: Float.self)
+                            let c = min(count, Int(buf.mDataByteSize) / MemoryLayout<Float>.size)
+                            for i in 0..<c { mp[i] += p[i] / n }
+                        }
+                        me.feed(UnsafePointer(mp.baseAddress!), count: count, stride: 1)
+                    }
+                } else if me.isFloat {
                     let count = Int(first.mDataByteSize) / MemoryLayout<Float>.size / channels
                     me.feed(data.assumingMemoryBound(to: Float.self), count: min(count, frameCount), stride: channels)
                 } else if me.intBits == 16 {
@@ -260,6 +289,7 @@ final class AudioSpectrum: ObservableObject {
         let nyquist = sampleRate / 2
         let lo = 40.0, hi = min(16_000.0, nyquist * 0.95)
         var out = [Float](repeating: 0, count: Self.bandCount)
+        var dbs = [Float](repeating: -140, count: Self.bandCount)
         for b in 0..<Self.bandCount {
             let f0 = lo * pow(hi / lo, Double(b) / Double(Self.bandCount))
             let f1 = lo * pow(hi / lo, Double(b + 1) / Double(Self.bandCount))
@@ -271,7 +301,33 @@ final class AudioSpectrum: ObservableObject {
             for k in k0..<k1 { peak = max(peak, mags[k]) }
             // 세기 → dB → 0~1. 높은 띠는 원래 약하므로 조금 올려 준다.
             let db = 20 * log10(max(peak / Float(fftSize), 1e-7)) + Float(b) * 0.35
-            out[b] = max(0, min(1, (db + 62) / 52))
+            dbs[b] = db
+        }
+        // B. 레벨 적응. 고정 창 (db+62)/52 는 조용한 음원에서 전 대역이 0으로 잘렸다.
+        // 띠 최댓값을 느리게 따라가며 창의 위쪽을 거기에 맞춘다.
+        let frameMax = dbs.max() ?? -140
+        let dt = Float(fftSize) / Float(sampleRate)
+        if frameMax > runningPeakDb {
+            runningPeakDb = frameMax
+        } else {
+            runningPeakDb += (frameMax - runningPeakDb) * min(1, dt / 5)
+        }
+        // 창 위쪽은 -60 dB 아래로 내리지 않는다(잡음이 막대로 커지지 않게). -70 미만이면 무음.
+        let top = max(runningPeakDb, -60)
+        let silent = runningPeakDb < -70
+        for b in 0..<Self.bandCount {
+            out[b] = silent ? 0 : max(0, min(1, (dbs[b] - (top - 52)) / 52))
+        }
+        // D. 처음 5초 기록 — 로그는 오디오 스레드 밖에서 남긴다.
+        if !levelLogged {
+            levelSamples += fftSize
+            levelMaxDb = max(levelMaxDb, frameMax)
+            levelMaxBar = max(levelMaxBar, out.max() ?? 0)
+            if Double(levelSamples) >= sampleRate * 5 {
+                levelLogged = true
+                let line = "레벨 \(levelName) — 처음 5초 띠 최댓값 \(Int(levelMaxDb)) dB, 막대 최대 \(Int(levelMaxBar * 100))%"
+                DispatchQueue.main.async { ArgoDiag.log("audio", line) }
+            }
         }
         for b in 0..<Self.bandCount {
             // 빨리 오르고 천천히 내린다.

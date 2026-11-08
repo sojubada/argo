@@ -28,6 +28,11 @@
 결론: 쪽 수와 줄바꿈 차이의 가장 큰 원인은 대체 글꼴(Pretendard)의 글자 폭이 원본보다 좁은 것이다. 한 줄에 글자가 더 들어가 문서가 짧아진다.
 확인되지 않은 것: 월성 hwp는 rhwp 엔진이 글자 폭을 직접 재므로 같은 원인인지 코드로 확인해야 한다.
 
+## 진행 상황 (2026-11-08)
+
+- A 워드·발표 완료(hwp 보류), B·D 완료, E 조사 완료(쓰기 없음), F·G 완료. 자세한 것은 `docs/RELEASE_2026-10-30.md` 항목 AA.
+- 프로필 위치는 지침의 `rust/argoconv/src/fontprofile.rs` 대신 `rust/vendor/minipdf/src/fontprofile.rs` 다(minipdf 가 argoconv 에 기댈 수 없어 공용 쪽에 둠).
+
 ## 1. 작업 순서
 
 | 순서 | 작업 | 이유 |

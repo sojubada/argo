@@ -199,7 +199,12 @@ enum MediaFolderProbe {
             lines.append(await probeOne(name: name, root: root))
         }
 
-        return finish("build \(build) · \(root)\n" + lines.joined(separator: "\n"))
+        // D. PC 변환본이 없어 비교 못 한 문서를 요약 맨 앞에 한 번만 알린다.
+        let missing = lines.filter { $0.contains("PC 변환본이 없어") }.count
+        let notice = missing > 0
+            ? "PC 변환본 없음 \(missing)건 — 같은 폴더에 같은 이름의 PC PDF 를 넣으면 다음 탐침에서 비교합니다\n"
+            : ""
+        return finish(notice + "build \(build) · \(root)\n" + lines.joined(separator: "\n"))
     }
 
     private static func finish(_ summary: String) -> String {

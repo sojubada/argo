@@ -26,7 +26,8 @@ struct OfficeDocReaderView: View {
     @State private var sections: [OfficeDocSection] = []
     @State private var selectedSectionIndex: Int = 0
     @State private var isLoading: Bool = true
-    @State private var isNightMode: Bool = false
+    // 설정의 '문서 읽기 다크 모드'와 PDF 뷰어 Night 단추가 같은 키를 쓴다.
+    @State private var isNightMode: Bool = UserDefaults.settings.bool(forKey: "pdfSimple.isNightMode")
     @State private var errorMessage: String? = nil
 
     private var fullPath: String {
@@ -86,6 +87,7 @@ struct OfficeDocReaderView: View {
 
             Button(action: {
                 isNightMode.toggle()
+                UserDefaults.settings.set(isNightMode, forKey: "pdfSimple.isNightMode")
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: isNightMode ? "moon.fill" : "sun.max.fill")

@@ -195,6 +195,7 @@ enum ArgoFontLibrary {
         }
 
         var report: [String] = []
+        var lines: [String] = []
         for wanted in documentFonts(document) {
             guard let pick = resolve(wanted, in: faces, consumer: consumer) else { continue }
             register(pick.regular, as: wanted)
@@ -203,7 +204,13 @@ enum ArgoFontLibrary {
             if !pick.exact {
                 report.append("\(wanted) → \(pick.regular.primaryName)")
             }
-            ArgoDiag.log("font", "\(wanted) → \(pick.regular.primaryName)\(pick.bold.map { " / 굵게 " + $0.primaryName } ?? "")\(pick.exact ? "" : " (닮은 글꼴)")")
+            lines.append("\(wanted)→\(pick.regular.primaryName)\(pick.exact ? "" : "*")")
+        }
+        // D. 글꼴 하나당 한 줄이던 것을 문서당 한 줄로. * 는 닮은 글꼴(대체)이다.
+        // 대체 글꼴 폭 보정(fontprofile)은 대체된 글꼴에만 적용된다.
+        if !lines.isEmpty {
+            ArgoDiag.log("font", "문서 글꼴 \(lines.count)개: " + lines.joined(separator: ", ")
+                         + (report.isEmpty ? "" : " · 폭 보정 적용 \(report.count)개"))
         }
         return report
     }

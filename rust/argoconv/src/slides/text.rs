@@ -411,6 +411,8 @@ struct Glyph {
     /// 얼굴에 굵은·기울인 꼴이 없으면 흉내 낸다
     fake_bold: bool,
     fake_italic: bool,
+    /// 대체 글꼴 폭 보정 배율(지침 A). adv 에 이미 들어 있다. 그릴 때 쓴다.
+    xs: f64,
 }
 
 struct Para {
@@ -855,9 +857,11 @@ fn push_text(env: &mut TextEnv<'_>, glyphs: &mut Vec<Glyph>, rs: &RunStyle, text
         let adv = if newline { 0.0 } else { env.fonts.advance(face, if c == '\u{a0}' { ' ' } else { c }, size) + spc };
         let fake_bold = bold && !env.fonts.is_bold(face);
         let fake_italic = italic && !env.fonts.is_italic(face);
+        let xs = if newline || tab { 1.0 } else { env.fonts.class_scale(face, c) };
         glyphs.push(Glyph {
             fake_bold,
             fake_italic,
+            xs,
             ch: if c == '\u{a0}' { ' ' } else { c },
             face,
             size,
@@ -1076,6 +1080,7 @@ fn emit_line(
             let indent = p.style.indent.unwrap_or(0.0);
             let bx = left + (mar_l + indent).max(0.0);
             let fill = color.unwrap_or(Color::BLACK);
+            let face = env.fonts.draw_face(*face);
             out.push_str(&format!(
                 "<text x=\"{}\" y=\"{}\" font-family=\"f{face}\" font-size=\"{}\" fill=\"{}\"{} font-kerning=\"none\">{}</text>",
                 f(bx),
@@ -1108,6 +1113,7 @@ fn emit_line(
             if h.tab || h.face != gl.face || h.size != gl.size || h.color != gl.color || h.shift != gl.shift
                 || h.fake_bold != gl.fake_bold || h.fake_italic != gl.fake_italic
                 || h.underline != gl.underline || h.strike != gl.strike || h.highlight != gl.highlight
+                || h.xs != gl.xs
                 || (justify && h.ch == ' ' && j > i)
                 || (upright_cjk && is_east_asian(h.ch) && j > i)
                 || (upright_cjk && is_east_asian(gl.ch) && j > i)
@@ -1140,12 +1146,22 @@ fn emit_line(
                     "x=\"{}\" y=\"{}\" font-family=\"f{}\" font-size=\"{}\" fill=\"{}\"{} font-kerning=\"none\"",
                     f(x),
                     f(y),
-                    gl.face,
+                    env.fonts.draw_face(gl.face),
                     f(gl.size),
                     color.css(),
                     opacity(color.a)
                 );
-                if gl.spc != 0.0 {
+                // 대체 글꼴 폭 보정: 모양은 MAX_GLYPH_X 까지 늘리고, 나머지는 글자 사이로.
+                // 배치에서 잡은 폭(seg 의 adv 합)과 그린 폭이 같게 맞춘다.
+                let mut xscale = 1.0;
+                if (gl.xs - 1.0).abs() > 1e-6 && !(upright_cjk && is_east_asian(gl.ch)) {
+                    let n = text.chars().count().max(1) as f64;
+                    let target: f64 = g[i..j].iter().take(text.chars().count()).map(|h| h.adv).sum();
+                    let natural: f64 = g[i..j].iter().take(text.chars().count()).map(|h| (h.adv - h.spc) / h.xs).sum();
+                    xscale = gl.xs.min(minipdf::fontprofile::MAX_GLYPH_X as f64);
+                    let ls = (target / xscale - natural) / n;
+                    attrs.push_str(&format!(" letter-spacing=\"{}\"", f(ls)));
+                } else if gl.spc != 0.0 {
                     attrs.push_str(&format!(" letter-spacing=\"{}\"", f(gl.spc)));
                 }
                 if gl.fake_bold {
@@ -1160,8 +1176,10 @@ fn emit_line(
                     let cxm = x + seg_w / 2.0;
                     let cym = y - gl.size * 0.38;
                     attrs.push_str(&format!(" transform=\"rotate(-90 {} {})\"", f(cxm), f(cym)));
-                } else if gl.fake_italic {
-                    attrs.push_str(&format!(" transform=\"translate({} {}) skewX(-11) translate({} {})\"", f(x), f(y), f(-x), f(-y)));
+                } else if gl.fake_italic || xscale != 1.0 {
+                    let skew = if gl.fake_italic { " skewX(-11)" } else { "" };
+                    let sc = if xscale != 1.0 { format!(" scale({} 1)", f(xscale)) } else { String::new() };
+                    attrs.push_str(&format!(" transform=\"translate({} {}){sc}{skew} translate({} {})\"", f(x), f(y), f(-x), f(-y)));
                 }
                 if text.starts_with(' ') || text.contains("  ") {
                     attrs.push_str(" xml:space=\"preserve\"");
@@ -1237,8 +1255,10 @@ pub(crate) fn label(
     let base = fonts.resolve(family, bold, false);
     let mut segs: Vec<(usize, String, f64)> = Vec::new();
     for c in text.chars() {
-        let face = fonts.face_for_char(base, c);
-        let adv = fonts.advance(face, c, size);
+        // 차트 글씨는 보정하지 않는다(한 덩어리로 그려 글자 종류별로 나눌 수 없다).
+        let fc = fonts.face_for_char(base, c);
+        let face = fonts.draw_face(fc);
+        let adv = fonts.advance_raw(face, c, size);
         match segs.last_mut() {
             Some(s) if s.0 == face => {
                 s.1.push(c);
@@ -1280,8 +1300,9 @@ pub(crate) fn label_width(fonts: &mut FontBook, family: Option<&str>, text: &str
     let base = fonts.resolve(family, bold, false);
     text.chars()
         .map(|c| {
-            let face = fonts.face_for_char(base, c);
-            fonts.advance(face, c, size)
+            let fc = fonts.face_for_char(base, c);
+        let face = fonts.draw_face(fc);
+            fonts.advance_raw(face, c, size)
         })
         .sum()
 }
