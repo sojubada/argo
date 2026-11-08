@@ -1755,6 +1755,19 @@ struct ContentView: View {
         presentReader(vc)
     }
 
+    private func presentPhotoAlbum() {
+        let vc = ArgoPhotoAlbumController()
+        if newViewFilePath.hasSuffix("/") {
+            vc.folder = newViewFilePath
+            vc.startName = newViewFileName
+        } else {
+            vc.folder = (newViewFilePath as NSString).deletingLastPathComponent
+            vc.startName = (newViewFilePath as NSString).lastPathComponent
+        }
+        vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+        presentReader(vc)
+    }
+
     private func presentTextReader() {
         let vc = ArgoTextReaderController()
         vc.filePath = readerPath()
@@ -1838,7 +1851,9 @@ struct ContentView: View {
             case 2:
                 showSubView[11] = true
             case 3:
-                showSubView[12] = true
+                // SwiftUI 시트 안에서는 UIKit 캔버스가 포커스를 못 받아 좌우 넘기기가
+                // 듣지 않았다. PDF·글 뷰어처럼 UIKit 전체 화면으로 띄운다.
+                presentPhotoAlbum()
             case 4:
                 // 편집기가 아니라 읽기 뷰어로 연다. 줄이 접히고 글자 크기를
                 // 바꿀 수 있다 — 로그는 읽는 것이 목적이지 고치는 것이 아니다.
@@ -1880,8 +1895,7 @@ struct ContentView: View {
             case 11:
                 showSubView[30] = true
 			case 12:
-				isImageSVG[0] = true
-				showSubView[12] = true
+				presentPhotoAlbum()
 			case 13:
                 if isJB {
                     showSubView[32] = true

@@ -120,8 +120,27 @@ final class ArgoPhotoAlbumController: UIViewController {
             canvas.addGestureRecognizer(g)
         }
 
+        // 메뉴 = 닫기 (UIKit 전체 화면으로 띄우므로 직접 닫는다)
+        let menu = UITapGestureRecognizer(target: self, action: #selector(closeNow))
+        menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        view.addGestureRecognizer(menu)
+
         loadNames()
         show(index: index, direction: 0)
+    }
+
+    var onClose: (() -> Void)?
+
+    @objc private func closeNow() {
+        if let onClose = onClose { onClose() } else { dismiss(animated: true) }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // 포커스를 캔버스로 — 이게 없으면 좌우 입력이 아무 데도 가지 않는다.
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        ArgoDiag.log("photo", "표시 focused=\(canvas.isFocused)")
     }
 
     override func viewDidLayoutSubviews() {

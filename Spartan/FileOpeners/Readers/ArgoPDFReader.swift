@@ -14,6 +14,7 @@
 //
 
 import UIKit
+import CoreImage
 import SwiftUI
 import CoreGraphics
 
@@ -145,6 +146,10 @@ final class ArgoPDFReaderController: UIViewController {
 
     private var toolbarSurface = ArgoSurfaceView.makeSurface()
     private var toolbar = UIStackView()
+    /// 야간(다크) 모드. 설정의 '문서 읽기 다크 모드'와 같은 키다.
+    private var night = UserDefaults.settings.bool(forKey: "pdfSimple.isNightMode")
+    private var nightButton = UIButton()
+    private static let ciContext = CIContext(options: nil)
     private var statusLabel = UILabel()
     private var fitButton: ArgoBarButton!
     private var toolbarVisible = true
@@ -315,7 +320,7 @@ final class ArgoPDFReaderController: UIViewController {
 
         // 포커스가 도구 모음 버튼 사이를 옮길 때마다 레이아웃이 다시 돌고,
         // 그때마다 수천만 화소를 다시 그리고 있었다. 조건이 같으면 건너뛴다.
-        let key = "\(view.bounds.size)|\(currentPage)|\(fitMode.rawValue)"
+        let key = "\(view.bounds.size)|\(currentPage)|\(fitMode.rawValue)|\(night)"
         if key == lastRenderKey, pageImage.image != nil {
             layoutPage()
             return
@@ -426,7 +431,8 @@ final class ArgoPDFReaderController: UIViewController {
             }
         }
 
-        pageImage.image = image
+        pageImage.image = night ? Self.nightImage(image) : image
+        pageImage.backgroundColor = night ? .black : .white
         lastRenderKey = key
         renderedPageHeight = size.height
         layoutPage()
@@ -675,11 +681,14 @@ final class ArgoPDFReaderController: UIViewController {
         let last = ArgoBarButton.make(title: L("끝"))
         last.addTarget(self, action: #selector(goLast), for: .primaryActionTriggered)
 
+        nightButton = ArgoBarButton.make(title: night ? L("주간") : L("야간"))
+        nightButton.addTarget(self, action: #selector(toggleNight), for: .primaryActionTriggered)
+
         let close = ArgoBarButton.make(title: L("닫기"))
         close.addTarget(self, action: #selector(closeNow), for: .primaryActionTriggered)
 
         toolbar = UIStackView(arrangedSubviews: [prev, next, statusLabel,
-                                                 fitButton, first, last, close])
+                                                 fitButton, nightButton, first, last, close])
         toolbar.axis = .horizontal
         toolbar.spacing = ArgoTheme.gutter()
         toolbar.alignment = .center
@@ -687,6 +696,32 @@ final class ArgoPDFReaderController: UIViewController {
 
         view.addSubview(toolbarSurface)
         toolbarSurface.addSubview(toolbar)
+    }
+
+    /// 야간 모드 켜기·끄기. 설정·다른 뷰어와 같은 키에 저장한다.
+    @objc private func toggleNight() {
+        night.toggle()
+        UserDefaults.settings.set(night, forKey: "pdfSimple.isNightMode")
+        UserDefaults.settings.set(night, forKey: "argo.document.darkMode")
+        nightButton.setTitle(night ? L("주간") : L("야간"), for: .normal)
+        ArgoDiag.log("toolbar-settings", "PDF 야간 \(night ? "켬" : "끔")")
+        lastRenderKey = ""
+        renderCurrentPage()
+    }
+
+    /// 색 뒤집기 + 색상 180° 회전. 흰 종이는 검게, 검은 글자는 희게 되고
+    /// 색 있는 그림은 색상이 대략 제자리로 돌아온다.
+    private static func nightImage(_ image: UIImage) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let input = CIImage(cgImage: cg)
+        guard let invert = CIFilter(name: "CIColorInvert") else { return image }
+        invert.setValue(input, forKey: kCIInputImageKey)
+        guard let hue = CIFilter(name: "CIHueAdjust"), let inverted = invert.outputImage else { return image }
+        hue.setValue(inverted, forKey: kCIInputImageKey)
+        hue.setValue(Float.pi, forKey: kCIInputAngleKey)
+        guard let out = hue.outputImage,
+              let result = ciContext.createCGImage(out, from: input.extent) else { return image }
+        return UIImage(cgImage: result, scale: image.scale, orientation: image.imageOrientation)
     }
 
     @objc private func prevPage() { goToPage(previousViewStart()) }
