@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var showView: [Bool] = [Bool](repeating: false, count: 8)
     @State private var probeRunning = false
     @State private var probeStatus = ""
+    @State private var fontStatus = ""
+    @State private var fontScanning = false
     @State private var descriptiveTitlesPre = UserDefaults.settings.bool(forKey: "descriptiveTitles")
     @State private var descriptiveTimestampsPre = UserDefaults.settings.bool(forKey: "verboseTimestamps")
     @State private var autoCompletePre = UserDefaults.settings.bool(forKey: "autoComplete")
@@ -101,6 +103,46 @@ struct SettingsView: View {
 					Text(L("디스크 정보 (마운트 지점)"))
 				}
 			}
+			// 글꼴 폴더 다시 읽기 — 글꼴을 넣은 뒤 앱을 다시 켜지 않아도 되게.
+			Button(action: {
+				guard !fontScanning else { return }
+				fontScanning = true
+				fontStatus = L("읽는 중…")
+				DispatchQueue.global(qos: .userInitiated).async {
+					ArgoFontLibrary.invalidate()
+					let roots = ArgoFontLibrary.userRoots()
+					let faces = ArgoFontLibrary.allFaces()
+					let mine = faces.filter(ArgoFontLibrary.isUserFace)
+					let families = Set(mine.compactMap { $0.names.first?.lowercased() }).count
+					let text: String
+					if mine.isEmpty {
+						text = roots.isEmpty
+							? L("글꼴 폴더가 없습니다") + " — " + ArgoFontLibrary.userDir
+							: L("찾은 글꼴 없음") + " — " + roots.joined(separator: ", ")
+					} else {
+						text = "\(mine.count)" + L("개 얼굴") + " · \(families)" + L("개 글꼴") + " · " + roots.joined(separator: ", ")
+					}
+					DispatchQueue.main.async {
+						fontStatus = text
+						fontScanning = false
+					}
+				}
+			}) {
+				HStack {
+					Image(systemName: "textformat")
+					Text(L("글꼴 폴더 다시 읽기"))
+				}
+			}
+			if !fontStatus.isEmpty {
+				Text(fontStatus)
+					.font(.caption)
+					.foregroundColor(.secondary)
+					.multilineTextAlignment(.leading)
+			}
+			Text(L("글꼴은 여기에 넣으십시오") + ": " + ArgoFontLibrary.userDir)
+				.font(.caption2)
+				.foregroundColor(.secondary)
+
 			// 유리 효과: 도구 모음을 반투명 유리 섬으로 그린다. 끄면 불투명 바탕.
 			Button(action: {
 				glassPre.toggle()

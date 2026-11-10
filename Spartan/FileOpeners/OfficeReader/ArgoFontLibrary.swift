@@ -39,6 +39,46 @@ enum ArgoFontLibrary {
     static let userDir = "/var/mobile/Media/Argo/fonts"
     private static let indexName = ".argo-font-index.json"
 
+    /// 글꼴을 찾을 폴더들.
+    ///
+    /// 기기의 파일 체계는 대소문자를 가린다(`Fonts` 와 `fonts` 는 다른 폴더다). 그래서
+    /// 표준 자리 한 곳만 보면, 글꼴을 넣고도 "사용자 폴더 0개" 가 된다. Media 바로 아래에서
+    /// 이름이 argo·fonts 인 폴더를 대소문자 가리지 않고 찾아 같이 본다.
+    private static var cachedRoots: [String]?
+
+    static func userRoots() -> [String] {
+        if let cachedRoots { return cachedRoots }
+        let fm = FileManager.default
+        var roots: [String] = []
+        func add(_ p: String) {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue else { return }
+            // 이미 보고 있는 폴더의 하위면 또 넣지 않는다(두 번 읽지 않게).
+            guard !roots.contains(where: { p == $0 || p.hasPrefix($0 + "/") }) else { return }
+            roots.append(p)
+        }
+        add(userDir)
+        let media = "/var/mobile/Media"
+        for name in (try? fm.contentsOfDirectory(atPath: media)) ?? [] {
+            let low = name.lowercased()
+            let path = (media as NSString).appendingPathComponent(name)
+            if low == "fonts" { add(path) }
+            if low == "argo" {
+                for sub in (try? fm.contentsOfDirectory(atPath: path)) ?? [] where sub.lowercased() == "fonts" {
+                    add((path as NSString).appendingPathComponent(sub))
+                }
+            }
+        }
+        add((NSHomeDirectory() as NSString).appendingPathComponent("Documents/fonts"))
+        cachedRoots = roots
+        return roots
+    }
+
+    /// 이 얼굴이 사용자가 넣은 글꼴인가(앱에 든 것·기기 것과 가르기 위해).
+    static func isUserFace(_ face: ArgoFontFace) -> Bool {
+        userRoots().contains { face.path.hasPrefix($0 + "/") }
+    }
+
     /// 어떤 변환기에 넣을 글꼴인가. 오피스 쪽은 TrueType 만 심을 수 있다.
     enum Consumer { case office, hangul }
 
@@ -95,12 +135,18 @@ enum ArgoFontLibrary {
             faces += readFaces(p)
         }
         cached = faces
-        ArgoDiag.log("font", "글꼴 얼굴 \(faces.count)개 (사용자 폴더 \(faces.filter { $0.path.hasPrefix(userDir) }.count)개)")
+        let mine = faces.filter(isUserFace)
+        // 오피스 문서(워드·엑셀·파워포인트)에는 TrueType 만 심을 수 있다. OTF 는 한글 문서에만 쓴다.
+        let ttf = mine.filter { $0.ttf }.count
+        ArgoDiag.log("font", "글꼴 얼굴 \(faces.count)개 (사용자 폴더 \(mine.count)개 중 오피스용 TrueType \(ttf)개, 앱·기기 \(faces.count - mine.count)개)")
         return faces
     }
 
     /// 폴더 내용이 바뀌었을 수 있을 때. 다음에 allFaces 를 부르면 다시 훑는다.
-    static func invalidate() { cached = nil }
+    static func invalidate() {
+        cached = nil
+        cachedRoots = nil
+    }
 
     private static let systemCandidates = [
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
@@ -119,23 +165,45 @@ enum ArgoFontLibrary {
         var changed = false
         var out: [ArgoFontFace] = []
 
-        let walker = fm.enumerator(atPath: userDir)
-        while let rel = walker?.nextObject() as? String {
-            let ext = (rel as NSString).pathExtension.lowercased()
-            guard ["ttf", "otf", "ttc", "otc"].contains(ext) else { continue }
-            let path = (userDir as NSString).appendingPathComponent(rel)
-            guard let attrs = try? fm.attributesOfItem(atPath: path) else { continue }
-            let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-            let mod = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-            seen.insert(path)
-            if let e = index.files[path], e.size == size, e.modified == mod {
-                out += e.faces
-                continue
+        for root in userRoots() {
+            var files = 0      // 폴더 안 파일 전부
+            var fonts = 0      // 글꼴 확장자인 것
+            var failed = 0     // 글꼴인데 이름표를 못 읽은 것
+            var faceCount = 0
+            let walker = fm.enumerator(atPath: root)
+            while let rel = walker?.nextObject() as? String {
+                files += 1
+                let name = (rel as NSString).lastPathComponent
+                // 맥에서 복사하면 생기는 짝 파일(._이름.ttf)은 글꼴이 아니다.
+                if name.hasPrefix("._") { continue }
+                let ext = (rel as NSString).pathExtension.lowercased()
+                guard ["ttf", "otf", "ttc", "otc"].contains(ext) else { continue }
+                fonts += 1
+                let path = (root as NSString).appendingPathComponent(rel)
+                guard let attrs = try? fm.attributesOfItem(atPath: path) else { failed += 1; continue }
+                let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+                let mod = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                seen.insert(path)
+                if let e = index.files[path], e.size == size, e.modified == mod {
+                    out += e.faces
+                    faceCount += e.faces.count
+                    if e.faces.isEmpty { failed += 1 }
+                    continue
+                }
+                let faces = readFaces(path)
+                if faces.isEmpty { failed += 1 }
+                index.files[path] = .init(size: size, modified: mod, faces: faces)
+                changed = true
+                out += faces
+                faceCount += faces.count
             }
-            let faces = readFaces(path)
-            index.files[path] = .init(size: size, modified: mod, faces: faces)
-            changed = true
-            out += faces
+            ArgoDiag.log("font", "폴더 \(root): 파일 \(files)개 · 글꼴 파일 \(fonts)개 · 얼굴 \(faceCount)개 · 못 읽음 \(failed)개")
+        }
+        if out.isEmpty {
+            ArgoDiag.log("font", "사용자 글꼴 0개 — 넣을 자리: \(userDir) (README.txt 가 있는 폴더)")
+            for (dir, n) in findFontsNearby() {
+                ArgoDiag.log("font", "글꼴 파일을 여기서 봤습니다: \(dir) — \(n)개. 이 폴더를 \(userDir) 로 옮기거나 그 안에 넣으십시오.")
+            }
         }
         // 지운 파일은 색인에서도 뺀다.
         for path in index.files.keys where !seen.contains(path) {
@@ -146,6 +214,30 @@ enum ArgoFontLibrary {
             try? data.write(to: URL(fileURLWithPath: indexPath), options: .atomic)
         }
         return out
+    }
+
+    /// 사용자 글꼴이 하나도 없을 때, Media 아래 두 단계까지만 훑어 글꼴 파일이 어디 있는지 찾아본다.
+    /// 어디에 넣었는지 로그로 알려 주기 위한 것이다(읽어서 쓰지는 않는다).
+    private static func findFontsNearby() -> [(String, Int)] {
+        let fm = FileManager.default
+        let media = "/var/mobile/Media"
+        var counts: [String: Int] = [:]
+        func scan(_ dir: String, depth: Int) {
+            guard depth <= 2, counts.count < 40 else { return }
+            for name in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] {
+                if name.hasPrefix(".") { continue }
+                let path = (dir as NSString).appendingPathComponent(name)
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
+                if isDir.boolValue {
+                    scan(path, depth: depth + 1)
+                } else if ["ttf", "otf", "ttc", "otc"].contains((name as NSString).pathExtension.lowercased()) {
+                    counts[dir, default: 0] += 1
+                }
+            }
+        }
+        scan(media, depth: 0)
+        return counts.sorted { $0.value > $1.value }.prefix(3).map { ($0.key, $0.value) }
     }
 
     /// 글꼴 파일 하나의 이름표를 읽는다. 파일을 메모리에 올리지 않고 비춰 본다.
@@ -194,7 +286,7 @@ enum ArgoFontLibrary {
                 return argoconv_register_font(alias, base, data.count)
             }
         }
-        for face in faces where !face.path.hasPrefix(userDir) && face.index == 0 {
+        for face in faces where !isUserFace(face) && face.index == 0 {
             register(face, as: ((face.path as NSString).lastPathComponent as NSString).deletingPathExtension.lowercased())
         }
 
@@ -256,7 +348,7 @@ enum ArgoFontLibrary {
 
         // 2. 닮은 갈래 (명조·고딕·손글씨·고정폭·제목용)
         let want = category(of: [wanted])
-        let userFaces = usable.filter { $0.path.hasPrefix(userDir) }
+        let userFaces = usable.filter(isUserFace)
         let pool = userFaces.isEmpty ? usable : userFaces
         var candidates = pool.filter { category(of: $0.names) == want }
         if candidates.isEmpty && want == .display { candidates = pool.filter { category(of: $0.names) == .sans } }
