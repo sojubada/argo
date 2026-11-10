@@ -130,8 +130,23 @@ pub(crate) struct GMap {
 
 impl GMap {
     pub const ID: GMap = GMap { ox: 0.0, oy: 0.0, sx: 1.0, sy: 1.0 };
+
+    /// 묶음 배율을 도형에 먹인다.
+    ///
+    /// 파워포인트는 배율을 도형이 **보이는 상자**에 먹인다. 90°·270° 로 돌린 도형은
+    /// 보이는 가로가 안 돌린 상자의 세로이므로, 가로 배율이 세로 길이에 붙는다.
+    /// (162쪽 주황 머리 막대: 묶음이 가로 1.476배인데 막대는 90° 돌아 있다.
+    ///  파워포인트 524pt, 예전 Argo 347pt — 안 돌린 상자에 먹였기 때문이다.)
+    /// 위치는 가운데를 옮긴 뒤 새 크기로 다시 잡는다. 안 돌린 도형에서는 예전과 같은 값이다.
     pub fn apply(&self, x: Xfrm) -> Xfrm {
-        Xfrm { x: self.ox + x.x * self.sx, y: self.oy + x.y * self.sy, w: x.w * self.sx, h: x.h * self.sy, ..x }
+        let quarter = {
+            let r = x.rot.rem_euclid(360.0);
+            (r - 90.0).abs() < 0.5 || (r - 270.0).abs() < 0.5
+        };
+        let (w, h) = if quarter { (x.w * self.sy, x.h * self.sx) } else { (x.w * self.sx, x.h * self.sy) };
+        let cx = self.ox + (x.x + x.w / 2.0) * self.sx;
+        let cy = self.oy + (x.y + x.h / 2.0) * self.sy;
+        Xfrm { x: cx - w / 2.0, y: cy - h / 2.0, w, h, ..x }
     }
 }
 

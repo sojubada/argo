@@ -11,6 +11,10 @@ import sys
 import pdfplumber
 
 
+# 문장부호는 글자마다 폭이 달라 한 덩어리로 묶지 않는다. 쓰이는 것만 따로 잰다.
+PUNCT = ",.()[]:;'\"/%·…-"
+
+
 def klass(c):
     o = ord(c)
     if 0xAC00 <= o <= 0xD7A3:
@@ -21,11 +25,15 @@ def klass(c):
         return "digit"
     if c.isascii() and c.isalpha() and c.islower():
         return "latin"
+    if c in PUNCT:
+        return "punct:" + c
     return None
 
 
 def measure(path):
     out = {"hangul": [], "latin": [], "digit": [], "space": []}
+    for c in PUNCT:
+        out["punct:" + c] = []
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             for ch in page.chars:
