@@ -720,7 +720,7 @@ fn draw_xy(
     palette: &Palette,
     mut left: f64,
     top: f64,
-    right: f64,
+    mut right: f64,
     mut bottom: f64,
     fam: Option<&str>,
     size: f64,
@@ -729,58 +729,89 @@ fn draw_xy(
     let horizontal = groups.iter().any(|g| g.kind == Kind::Bar && g.horizontal);
     let scatter = groups.iter().all(|g| g.kind == Kind::Scatter);
     let ax_of = |kind: &[&str]| axes.iter().find(|a| kind.contains(&a.kind.as_str()));
-    let val_ax = if scatter { axes.iter().filter(|a| a.kind == "valAx").nth(1).or(ax_of(&["valAx"])) } else { ax_of(&["valAx"]) };
     let cat_ax = if scatter { axes.iter().find(|a| a.kind == "valAx") } else { ax_of(&["catAx", "dateAx"]) };
 
-    // 값 범위 (쌓기 고려)
-    let mut lo = f64::MAX;
-    let mut hi = f64::MIN;
+    // 값 축은 계열 묶음마다 다를 수 있다(보조 축). 묶음의 axId 로 자기 축을 찾는다.
+    // 이것이 없으면 막대와 선이 한 축에 눌려 선이 바닥에 깔린다 — 콤보 차트의 흔한 모양.
+    let val_axes: Vec<&Axis> = axes.iter().filter(|a| a.kind == "valAx").collect();
+    let sec_ax: Option<&Axis> = if scatter || val_axes.len() < 2 {
+        None
+    } else {
+        let first_ids = groups.first().map(|g| g.ax_ids.clone()).unwrap_or_default();
+        val_axes.iter().find(|a| !first_ids.iter().any(|id| *id == a.id)).copied()
+    };
+    let on_sec = |g: &Group| match sec_ax {
+        Some(a) => g.ax_ids.iter().any(|id| *id == a.id),
+        None => false,
+    };
+    let sec_used = sec_ax.is_some() && groups.iter().any(on_sec);
+    let val_ax = if scatter {
+        axes.iter().filter(|a| a.kind == "valAx").nth(1).or(ax_of(&["valAx"]))
+    } else if sec_used {
+        // 주 축 = 보조 축이 아닌 값 축
+        val_axes.iter().find(|a| Some(a.id.as_str()) != sec_ax.map(|s| s.id.as_str())).copied().or(ax_of(&["valAx"]))
+    } else {
+        ax_of(&["valAx"])
+    };
+
+    // 값 범위 (쌓기 고려). 보조 축을 쓰는 묶음은 따로 잰다.
     let ncat = groups.iter().flat_map(|g| g.series.iter()).map(|s| s.vals.len().max(s.cats.len())).max().unwrap_or(0).max(1);
-    let mut percent = false;
-    for g in groups {
-        if g.kind == Kind::Scatter {
-            for s in &g.series {
-                for v in s.vals.iter().flatten() {
-                    lo = lo.min(*v);
-                    hi = hi.max(*v);
-                }
-            }
-            continue;
-        }
-        if g.grouping == "stacked" || g.grouping == "percentStacked" {
-            percent |= g.grouping == "percentStacked";
-            for i in 0..ncat {
-                let (mut pos, mut neg) = (0.0, 0.0);
+    let span = |want_sec: bool| -> (f64, f64, bool) {
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
+        let mut percent = false;
+        for g in groups.iter().filter(|g| on_sec(g) == want_sec) {
+            if g.kind == Kind::Scatter {
                 for s in &g.series {
-                    let v = s.vals.get(i).copied().flatten().unwrap_or(0.0);
-                    if v >= 0.0 {
-                        pos += v
-                    } else {
-                        neg += v
+                    for v in s.vals.iter().flatten() {
+                        lo = lo.min(*v);
+                        hi = hi.max(*v);
                     }
                 }
-                if g.grouping == "percentStacked" {
-                    lo = lo.min(if neg < 0.0 { -1.0 } else { 0.0 });
-                    hi = hi.max(1.0);
-                } else {
-                    lo = lo.min(neg);
-                    hi = hi.max(pos);
-                }
+                continue;
             }
-        } else {
-            for s in &g.series {
-                for v in s.vals.iter().flatten() {
-                    lo = lo.min(*v);
-                    hi = hi.max(*v);
+            if g.grouping == "stacked" || g.grouping == "percentStacked" {
+                percent |= g.grouping == "percentStacked";
+                for i in 0..ncat {
+                    let (mut pos, mut neg) = (0.0, 0.0);
+                    for s in &g.series {
+                        let v = s.vals.get(i).copied().flatten().unwrap_or(0.0);
+                        if v >= 0.0 {
+                            pos += v
+                        } else {
+                            neg += v
+                        }
+                    }
+                    if g.grouping == "percentStacked" {
+                        lo = lo.min(if neg < 0.0 { -1.0 } else { 0.0 });
+                        hi = hi.max(1.0);
+                    } else {
+                        lo = lo.min(neg);
+                        hi = hi.max(pos);
+                    }
+                }
+            } else {
+                for s in &g.series {
+                    for v in s.vals.iter().flatten() {
+                        lo = lo.min(*v);
+                        hi = hi.max(*v);
+                    }
                 }
             }
         }
-    }
-    if lo == f64::MAX {
-        lo = 0.0;
-        hi = 1.0;
-    }
+        if lo == f64::MAX {
+            lo = 0.0;
+            hi = 1.0;
+        }
+        (lo, hi, percent)
+    };
+    let (lo, hi, percent) = span(false);
+    let (lo2, hi2, percent2) = if sec_used { span(true) } else { (0.0, 1.0, false) };
     let (vmin, mut vmax, step) = axis_range_cap(lo, hi, val_ax, 6, Some(10));
+    let (vmin2, mut vmax2, step2) = axis_range_cap(lo2, hi2, sec_ax, 6, Some(10));
+    if percent2 && sec_ax.and_then(|a| a.max).is_none() {
+        vmax2 = 1.0;
+    }
     // 100% 기준 누적은 여유 없이 100%에서 끝난다.
     if percent && val_ax.and_then(|a| a.max).is_none() {
         vmax = 1.0;
@@ -791,21 +822,28 @@ fn draw_xy(
     let lab_color = val_ax.and_then(|a| a.label_color).unwrap_or(color);
     let cat_size = cat_ax.and_then(|a| a.label_size).unwrap_or(size);
     let cat_color = cat_ax.and_then(|a| a.label_color).unwrap_or(color);
+    let sec_fmt = sec_ax.map(|a| a.format.clone()).unwrap_or_else(|| "General".into());
+    let sec_fmt = if percent2 && !sec_fmt.contains('%') { "0%".to_owned() } else { sec_fmt };
+    let sec_lab_size = sec_ax.and_then(|a| a.label_size).unwrap_or(size);
+    let sec_lab_color = sec_ax.and_then(|a| a.label_color).unwrap_or(color);
 
     // 이름표 자리 만들기
-    let ticks: Vec<f64> = {
+    let tick_list = |mn: f64, mx: f64, st: f64| -> Vec<f64> {
         let mut v = Vec::new();
-        let mut t = vmin;
+        let mut t = mn;
         let mut n = 0;
-        while t <= vmax + step * 1e-6 && n < 60 {
+        while t <= mx + st * 1e-6 && n < 60 {
             v.push(t);
-            t += step;
+            t += st;
             n += 1;
         }
         v
     };
+    let ticks = tick_list(vmin, vmax, step);
+    let ticks2 = if sec_used { tick_list(vmin2, vmax2, step2) } else { Vec::new() };
     let show_val = val_ax.map(|a| !a.deleted && !a.no_labels).unwrap_or(true);
     let show_cat = cat_ax.map(|a| !a.deleted && !a.no_labels).unwrap_or(true);
+    let show_sec = sec_used && sec_ax.map(|a| !a.deleted && !a.no_labels).unwrap_or(true);
     let cats: Vec<String> = groups
         .iter()
         .flat_map(|g| g.series.iter())
@@ -819,6 +857,10 @@ fn draw_xy(
         }
         if show_cat {
             bottom -= cat_size * 1.6;
+        }
+        if show_sec {
+            let wmax = ticks2.iter().map(|t| text::label_width(&mut r.fonts, fam, &format_number(*t, &sec_fmt), sec_lab_size, false)).fold(0.0, f64::max);
+            right -= wmax + 6.0;
         }
     } else {
         if show_cat {
@@ -845,6 +887,14 @@ fn draw_xy(
     let mirror = |p: f64, len: f64| if !flip_cat { p } else if horizontal { top + bottom - p - len } else { left + right - p - len };
     // 값 → 좌표
     let to_val = |v: f64| if horizontal { left + vmap(v) * pw } else { bottom - vmap(v) * ph };
+    let sec_rev = sec_ax.map(|a| a.reverse).unwrap_or(false);
+    let to_val2 = |v: f64| {
+        let t = (v - vmin2) / (vmax2 - vmin2).max(1e-12);
+        let t = if sec_rev { 1.0 - t } else { t };
+        if horizontal { left + t * pw } else { bottom - t * ph }
+    };
+    // 묶음이 보조 축을 쓰면 그 축으로 옮긴다.
+    let tv = |sec: bool, v: f64| if sec { to_val2(v) } else { to_val(v) };
 
     // 눈금선과 값 이름표
     let grid = val_ax.and_then(|a| a.grid.clone()).or_else(|| val_ax.is_none().then(|| Line { fill: Fill::Solid(Color::rgb(217, 217, 217)), ..Default::default() }));
@@ -866,6 +916,14 @@ fn draw_xy(
             } else {
                 text::label(svg, &mut r.fonts, fam, &s, left - 4.0, p + lab_size * 0.35, lab_size, lab_color, false, 'r', 0.0);
             }
+        }
+    }
+
+    if show_sec && !horizontal {
+        for t in &ticks2 {
+            let p = to_val2(*t);
+            let s2 = format_number(*t, &sec_fmt);
+            text::label(svg, &mut r.fonts, fam, &s2, right + 4.0, p + sec_lab_size * 0.35, sec_lab_size, sec_lab_color, false, 'l', 0.0);
         }
     }
 
@@ -956,6 +1014,8 @@ fn draw_xy(
     let mut bar_index = 0usize;
     for g in groups {
         let n = g.series.len().max(1);
+        let sec = on_sec(g);
+        let (amin, amax) = if sec { (vmin2, vmax2) } else { (vmin, vmax) };
         let stacked = g.grouping == "stacked" || g.grouping == "percentStacked";
         let pct = g.grouping == "percentStacked";
         let totals: Vec<f64> = (0..ncat)
@@ -982,11 +1042,11 @@ fn draw_xy(
                             *acc += v;
                             (a, a + v)
                         } else {
-                            (0.0_f64.clamp(vmin, vmax), v)
+                            (0.0_f64.clamp(amin, amax), v)
                         };
                         let off = if stacked { 0.0 } else { si as f64 * bw * (1.0 - overlap) };
                         let start = mirror((if horizontal { top } else { left }) + slot * i as f64 + gslot * bar_index as f64 + bw * g.gap / 2.0 + off, bw);
-                        let (p0, p1) = (to_val(v0), to_val(v1));
+                        let (p0, p1) = (tv(sec, v0), tv(sec, v1));
                         let (x, y, ww, hh) = if horizontal {
                             (p0.min(p1), start, (p1 - p0).abs(), bw)
                         } else {
@@ -1031,11 +1091,11 @@ fn draw_xy(
                             pos_acc[i] += v;
                             (a, a + v)
                         } else {
-                            (0.0_f64.clamp(vmin, vmax), v)
+                            (0.0_f64.clamp(amin, amax), v)
                         };
                         let x = cat_pos_line(i);
-                        pts.push((x, to_val(v1)));
-                        base_pts.push((x, to_val(v0)));
+                        pts.push((x, tv(sec, v1)));
+                        base_pts.push((x, tv(sec, v0)));
                     }
                     if pts.is_empty() {
                         continue;
@@ -1082,7 +1142,7 @@ fn draw_xy(
                         .filter_map(|(i, v)| {
                             let v = (*v)?;
                             let x = s.xs.get(i).copied().flatten().unwrap_or(i as f64 + 1.0);
-                            Some((to_x(x), to_val(v)))
+                            Some((to_x(x), tv(sec, v)))
                         })
                         .collect();
                     let has_line = s.line.as_ref().map(|l| !matches!(l.fill, Fill::None)).unwrap_or(false);

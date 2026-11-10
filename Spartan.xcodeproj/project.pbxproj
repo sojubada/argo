@@ -73,6 +73,9 @@
 		F82095202A2622D100DC6D79 /* CarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F820951F2A2622D100DC6D79 /* CarView.swift */; };
 		F83CB3C02A41170F005BF95A /* FontView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83CB3BF2A41170F005BF95A /* FontView.swift */; };
 		887834CE394349558A3CDD8A /* Pretendard-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 96CA230996A7471682696862 /* Pretendard-Regular.ttf */; };
+		A0C0FFEE0000000000000B01 /* ArgoHanja-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000B02 /* ArgoHanja-Regular.ttf */; };
+		A0C0FFEE0000000000000B03 /* LiberationSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000B04 /* LiberationSans-Regular.ttf */; };
+		A0C0FFEE0000000000000B05 /* LiberationSans-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000B06 /* LiberationSans-Bold.ttf */; };
 		CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */; };
 		1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */; };
 		F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F83F052D2A297CDE00EB0720 /* Sheikah.ttf */; };
@@ -200,6 +203,9 @@
 		F820951F2A2622D100DC6D79 /* CarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarView.swift; sourceTree = "<group>"; };
 		F83CB3BF2A41170F005BF95A /* FontView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontView.swift; sourceTree = "<group>"; };
 		96CA230996A7471682696862 /* Pretendard-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-Regular.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000B02 /* ArgoHanja-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/ArgoHanja-Regular.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000B04 /* LiberationSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/LiberationSans-Regular.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000B06 /* LiberationSans-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/LiberationSans-Bold.ttf"; sourceTree = "<group>"; };
 		6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-Bold.ttf"; sourceTree = "<group>"; };
 		8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-LICENSE.txt"; sourceTree = "<group>"; };
 		F83F052D2A297CDE00EB0720 /* Sheikah.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Sheikah.ttf; sourceTree = "<group>"; };
@@ -502,6 +508,9 @@
 				F853AB3229DBCB1E006EA2D5 /* Assets.xcassets */,
 				F845C82A29F4D77C0025AC0A /* Localizable.strings */,
 				96CA230996A7471682696862 /* Pretendard-Regular.ttf */,
+				A0C0FFEE0000000000000B02 /* ArgoHanja-Regular.ttf */,
+				A0C0FFEE0000000000000B04 /* LiberationSans-Regular.ttf */,
+				A0C0FFEE0000000000000B06 /* LiberationSans-Bold.ttf */,
 				6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */,
 				8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */,
 				F83F052D2A297CDE00EB0720 /* Sheikah.ttf */,
@@ -692,6 +701,9 @@
 			files = (
 				F88CC4A02A44AE40001FACFC /* SF Mono.otf in Resources */,
 				887834CE394349558A3CDD8A /* Pretendard-Regular.ttf in Resources */,
+				A0C0FFEE0000000000000B01 /* ArgoHanja-Regular.ttf in Resources */,
+				A0C0FFEE0000000000000B03 /* LiberationSans-Regular.ttf in Resources */,
+				A0C0FFEE0000000000000B05 /* LiberationSans-Bold.ttf in Resources */,
 				CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */,
 				1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */,
 				F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */,

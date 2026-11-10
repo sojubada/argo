@@ -84,7 +84,11 @@ enum ArgoFontLibrary {
         if let cached { return cached }
         ensureFolder()
         var faces = indexedUserFaces()
-        for name in ["Pretendard-Regular", "Pretendard-Bold"] {
+        // ArgoHanja: 한자(4,899자, Noto Sans KR 에서 한자만 추려냄). Pretendard 에 한자가 없어
+        // '新'·'社' 가 네모로 나오던 것을 글자 대체로 메운다 — 글꼴 이름으로 고르지는 않는다.
+        // LiberationSans: Arial 과 글자 폭·모양이 같은 글꼴(OFL). 'Arial' 을 이것으로 그린다.
+        for name in ["Pretendard-Regular", "Pretendard-Bold",
+                     "ArgoHanja-Regular", "LiberationSans-Regular", "LiberationSans-Bold"] {
             if let p = Bundle.main.path(forResource: name, ofType: "ttf") { faces += readFaces(p) }
         }
         for p in systemCandidates where FileManager.default.fileExists(atPath: p) {
@@ -311,7 +315,9 @@ enum ArgoFontLibrary {
         ["나눔고딕", "nanumgothic"], ["나눔명조", "nanummyeongjo"], ["나눔바른고딕", "nanumbarungothic"],
         ["나눔스퀘어", "nanumsquare"], ["본고딕", "sourcehansanskr", "notosanskr", "notosanscjkkr"],
         ["본명조", "sourcehanserifkr", "notoserifkr", "notoserifcjkkr"],
-        ["애플산돌고딕네오", "applesdgothicneo"], ["한컴바탕", "hancombatang"], ["한컴돋움", "hancomdotum"],
+        ["애플산돌고딕네오", "applesdgothicneo"],
+        // Arial·Helvetica 계열은 글자 폭이 같은 Liberation Sans 로 그린다(앱에 들어 있다).
+        ["arial", "liberationsans", "helvetica", "arialmt"], ["한컴바탕", "hancombatang"], ["한컴돋움", "hancomdotum"],
     ]
 
     private static func aliases(of name: String) -> [String] {

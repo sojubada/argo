@@ -7,11 +7,20 @@ fn main() {
     let input = std::fs::read(&args[1]).expect("input");
     unsafe {
         argoconv::fonts::argoconv_clear_fonts();
+        // 3번째부터: 보통·굵게·(그 뒤로는 파일 이름을 글꼴 이름으로). 앱이 하는 것과 같게,
+        // ArgoHanja(한자 대체)·LiberationSans(Arial) 도 같이 넣어 시험한다.
         for (i, path) in args.iter().skip(3).enumerate() {
             let bytes = std::fs::read(path).expect("font");
-            let name = CString::new(if i == 0 { "Pretendard" } else { "Pretendard bold" }).unwrap();
+            let stem = std::path::Path::new(path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let label = match i {
+                0 => "Pretendard".to_owned(),
+                1 => "Pretendard bold".to_owned(),
+                _ => stem.clone(),
+            };
+            let name = CString::new(label).unwrap();
             argoconv::argoconv_register_font(name.as_ptr(), bytes.as_ptr(), bytes.len());
         }
+        let has_liberation = args.iter().skip(3).any(|p| p.to_lowercase().contains("liberationsans"));
         let mut buf = vec![0u8; 1 << 20];
         let n = argoconv::fonts::argoconv_doc_fonts(input.as_ptr(), input.len(), buf.as_mut_ptr(), buf.len());
         let list = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -21,7 +30,9 @@ fn main() {
                 continue;
             }
             let req = CString::new(name).unwrap();
-            let act = CString::new("Pretendard").unwrap();
+            let low = name.to_lowercase().replace([' ', '-', '_'], "");
+            let arial = has_liberation && (low.starts_with("arial") || low.starts_with("helvetica"));
+            let act = CString::new(if arial { "Liberation Sans" } else { "Pretendard" }).unwrap();
             argoconv::fonts::argoconv_font_alias(req.as_ptr(), act.as_ptr());
         }
         let mut out: *mut u8 = std::ptr::null_mut();
