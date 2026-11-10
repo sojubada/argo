@@ -112,10 +112,13 @@ final class WebDAVClient: NSObject {
                 if entryPath == requested { continue } // the collection itself
                 items.append(entry)
             }
-            items.sort { lhs, rhs in
-                if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
+            // localizedCaseInsensitiveCompare 는 비교마다 ICU 를 돌려 수만 항목에서 수 초가 걸린다.
+            // 이름을 소문자로 한 번만 바꿔 두고 단순 비교로 정렬한다(한글은 코드 순서 = 가나다 순).
+            let keyed = items.map { ($0, $0.name.lowercased()) }
+            items = keyed.sorted { l, r in
+                if l.0.isDirectory != r.0.isDirectory { return l.0.isDirectory }
+                return l.1 < r.1
+            }.map { $0.0 }
             self.finish(completion, .success(items))
         }
         task.resume()

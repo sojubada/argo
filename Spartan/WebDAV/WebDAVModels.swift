@@ -101,18 +101,33 @@ struct WebDAVItem: Identifiable, Hashable {
         return ext == "ipa" || ext == "tipa"
     }
 
+    // 포맷터는 만드는 데 비용이 크다. 행마다 새로 만들면 수천 항목에서 화면이 멈춘다 → 하나만 만들어 쓴다.
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
+    private static var dateFormatter: DateFormatter?
+    private static var dateFormatterPattern = ""
+    private static let formatLock = NSLock()
+
     var sizeDescription: String {
         if isDirectory { return "" }
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: size)
+        WebDAVItem.formatLock.lock(); defer { WebDAVItem.formatLock.unlock() }
+        return WebDAVItem.byteFormatter.string(fromByteCount: size)
     }
 
     var modifiedDescription: String {
         guard let modified = modified else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = UserDefaults.settings.string(forKey: "dateFormat") ?? "MM-dd-yyyy HH:mm"
-        return formatter.string(from: modified)
+        let pattern = UserDefaults.settings.string(forKey: "dateFormat") ?? "MM-dd-yyyy HH:mm"
+        WebDAVItem.formatLock.lock(); defer { WebDAVItem.formatLock.unlock() }
+        if WebDAVItem.dateFormatter == nil || WebDAVItem.dateFormatterPattern != pattern {
+            let f = DateFormatter()
+            f.dateFormat = pattern
+            WebDAVItem.dateFormatter = f
+            WebDAVItem.dateFormatterPattern = pattern
+        }
+        return WebDAVItem.dateFormatter!.string(from: modified)
     }
 }
 

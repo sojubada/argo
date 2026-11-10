@@ -256,10 +256,37 @@ fn nice_step(range: f64, target: usize) -> f64 {
     nice * mag
 }
 
+/// 눈금 간격: 1·2·5 × 10^k 중 칸 수가 `cap` 이하가 되는 가장 작은 것.
+/// 엑셀·파워포인트는 자동 눈금을 이렇게 잡는다 — 0~18,000 은 2,000 간격(9칸),
+/// 150~220 은 10 간격(7칸). 칸 수를 6 에 맞추던 것은 5,000·50 처럼 성긴 눈금을 만들었다.
+fn nice_step_capped(range: f64, cap: usize) -> f64 {
+    if range <= 0.0 || !range.is_finite() {
+        return 1.0;
+    }
+    let e0 = (range / cap.max(1) as f64).log10().floor() as i32 - 1;
+    for e in e0..e0 + 4 {
+        for m in [1.0, 2.0, 5.0] {
+            let step = m * 10f64.powi(e);
+            if (range / step).ceil() as usize <= cap {
+                return step;
+            }
+        }
+    }
+    nice_step(range, cap)
+}
+
 fn axis_range(min_v: f64, max_v: f64, ax: Option<&Axis>, target: usize) -> (f64, f64, f64) {
+    axis_range_cap(min_v, max_v, ax, target, None)
+}
+
+fn axis_range_cap(min_v: f64, max_v: f64, ax: Option<&Axis>, target: usize, cap: Option<usize>) -> (f64, f64, f64) {
     let (mut lo, mut hi) = (min_v.min(0.0), max_v.max(0.0));
     if min_v > 0.0 && (max_v - min_v) < max_v * 0.15 {
         lo = min_v;
+    }
+    // 축 최솟값이 정해져 있으면 눈금 간격도 그 범위로 잡는다(0 부터 재면 간격이 성기게 나온다).
+    if let Some(m) = ax.and_then(|a| a.min) {
+        lo = m;
     }
     if (hi - lo).abs() < 1e-12 {
         hi = lo + 1.0;
@@ -272,7 +299,10 @@ fn axis_range(min_v: f64, max_v: f64, ax: Option<&Axis>, target: usize) -> (f64,
     if ax.and_then(|a| a.min).is_none() && lo < 0.0 && hi > lo {
         lo -= (hi - lo) * 0.05;
     }
-    let step = ax.and_then(|a| a.major).unwrap_or_else(|| nice_step(hi - lo, target));
+    let step = ax.and_then(|a| a.major).unwrap_or_else(|| match cap {
+        Some(c) => nice_step_capped(hi - lo, c),
+        None => nice_step(hi - lo, target),
+    });
     let lo2 = ax.and_then(|a| a.min).unwrap_or_else(|| (lo / step).floor() * step);
     let mut hi2 = ax.and_then(|a| a.max).unwrap_or_else(|| (hi / step).ceil() * step);
     if hi2 <= lo2 {
@@ -487,6 +517,16 @@ pub(crate) fn render<'d, 'i>(
                 }
             }
         }
+    }
+    // 쌓은 세로 막대·영역 그래프의 세로 범례는 쌓인 순서대로, 곧 위에 놓인 계열이 맨 위에 온다.
+    // 파워포인트가 이렇게 뒤집어 보여 준다(범례 맨 위 = 그래프 맨 위).
+    if groups.len() == 1
+        && !pie_like
+        && matches!(legend_pos.as_str(), "r" | "l")
+        && groups[0].grouping.contains("tacked")
+        && (groups[0].kind == Kind::Area || (groups[0].kind == Kind::Bar && !groups[0].horizontal))
+    {
+        entries.reverse();
     }
     let (mut left, mut right, mut bottom) = (8.0, w - 8.0, h - 6.0);
     if !entries.is_empty() {
@@ -740,7 +780,7 @@ fn draw_xy(
         lo = 0.0;
         hi = 1.0;
     }
-    let (vmin, mut vmax, step) = axis_range(lo, hi, val_ax, 6);
+    let (vmin, mut vmax, step) = axis_range_cap(lo, hi, val_ax, 6, Some(10));
     // 100% 기준 누적은 여유 없이 100%에서 끝난다.
     if percent && val_ax.and_then(|a| a.max).is_none() {
         vmax = 1.0;

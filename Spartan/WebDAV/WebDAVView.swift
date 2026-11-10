@@ -281,6 +281,8 @@ struct WebDAVBrowserView: View {
     @State private var client: RemoteFileClient
     @State private var path: String
     @State private var items: [WebDAVItem] = []
+    /// 한 번에 그리는 행 수. 수천 항목을 한꺼번에 그리면 멈추므로 끝에 닿을 때마다 늘린다.
+    @State private var visibleCount = 150
     @State private var loading = false
     @State private var message = ""
 
@@ -457,7 +459,8 @@ struct WebDAVBrowserView: View {
     // MARK: Listing
 
     private var listPanel: some View {
-        List(items) { item in
+        List {
+            ForEach(items.prefix(visibleCount)) { item in
             Button(action: { open(item) }) {
                 HStack {
                     if multiSelect && !item.isDirectory {
@@ -473,6 +476,13 @@ struct WebDAVBrowserView: View {
                         }
                     }
                 }
+            }
+            }
+            if items.count > visibleCount {
+                Text("\(visibleCount) / \(items.count) 항목 — 계속 내리면 더 불러옵니다")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .onAppear { visibleCount = min(items.count, visibleCount + 200) }
             }
         }
     }
@@ -567,6 +577,7 @@ struct WebDAVBrowserView: View {
             loading = false
             switch result {
             case .success(let listed):
+                visibleCount = 150
                 items = listed
                 if listed.isEmpty { message = "This folder is empty." }
             case .failure(let error):

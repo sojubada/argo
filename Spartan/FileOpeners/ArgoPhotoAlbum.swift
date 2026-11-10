@@ -66,19 +66,24 @@ final class ArgoPhotoAlbumController: UIViewController {
         for iv in [current, incoming] {
             iv.contentMode = .scaleAspectFit
             iv.clipsToBounds = true
-            iv.frame = view.bounds
-            iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            iv.frame = photoRect
             view.addSubview(iv)
         }
         incoming.isHidden = true
 
         // 위 정보줄
-        topBar.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        topBar.layer.cornerRadius = 18
+        // 사진 위에 얹히는 글자 줄 — 바탕은 투명, 밝은 사진 위에서도 읽히게 글자에 그림자만 준다.
+        topBar.backgroundColor = .clear
         view.addSubview(topBar)
         titleLabel.textColor = .white
         titleLabel.font = .systemFont(ofSize: 30, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingMiddle
+        for l in [titleLabel, infoLabel] {
+            l.layer.shadowColor = UIColor.black.cgColor
+            l.layer.shadowOpacity = 0.9
+            l.layer.shadowRadius = 4
+            l.layer.shadowOffset = .zero
+        }
         infoLabel.textColor = UIColor.white.withAlphaComponent(0.8)
         infoLabel.font = .systemFont(ofSize: 22)
         infoLabel.numberOfLines = 0
@@ -143,8 +148,18 @@ final class ArgoPhotoAlbumController: UIViewController {
         ArgoDiag.log("photo", "표시 focused=\(canvas.isFocused)")
     }
 
+    /// 사진이 놓이는 영역. 아래 필름 띠가 보이는 동안은 그만큼 비워 사진과 겹치지 않게 한다.
+    private var photoRect: CGRect {
+        let b = view.bounds
+        let bottom: CGFloat = overlayVisible ? 170 : 0
+        return CGRect(x: 0, y: 0, width: b.width, height: max(0, b.height - bottom))
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        if !animating {
+            current.frame = photoRect
+        }
         let w = view.bounds.width, h = view.bounds.height
         topBar.frame = CGRect(x: 60, y: 40, width: w - 120, height: showInfo ? 150 : 70)
         titleLabel.frame = CGRect(x: 24, y: 14, width: topBar.bounds.width - 48, height: 40)
@@ -281,14 +296,14 @@ final class ArgoPhotoAlbumController: UIViewController {
         let w = view.bounds.width
         incoming.image = img
         incoming.isHidden = false
-        incoming.frame = view.bounds.offsetBy(dx: direction > 0 ? w : -w, dy: 0)
+        incoming.frame = photoRect.offsetBy(dx: direction > 0 ? w : -w, dy: 0)
         animating = true
         UIView.animate(withDuration: 0.32, delay: 0, options: [.curveEaseOut], animations: {
-            self.incoming.frame = self.view.bounds
-            self.current.frame = self.view.bounds.offsetBy(dx: direction > 0 ? -w : w, dy: 0)
+            self.incoming.frame = self.photoRect
+            self.current.frame = self.photoRect.offsetBy(dx: direction > 0 ? -w : w, dy: 0)
         }, completion: { _ in
             self.current.image = img
-            self.current.frame = self.view.bounds
+            self.current.frame = self.photoRect
             self.incoming.isHidden = true
             self.incoming.image = nil
             self.animating = false
@@ -370,9 +385,13 @@ final class ArgoPhotoAlbumController: UIViewController {
         UIView.animate(withDuration: 0.25) {
             self.topBar.alpha = on ? 1 : 0
             self.stripBack.alpha = on ? 1 : 0
+            if !self.animating { self.current.frame = self.photoRect }
         }
         if on && autoHide && !showInfo {
-            let work = DispatchWorkItem { [weak self] in self?.setOverlay(false, autoHide: false) }
+            // 자동으로 숨길 때는 위 글자줄만 — 아래 띠까지 숨기면 사진 크기가 3초마다 바뀌어 눈에 거슬린다.
+            let work = DispatchWorkItem { [weak self] in
+                UIView.animate(withDuration: 0.25) { self?.topBar.alpha = 0 }
+            }
             hideWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
         }
