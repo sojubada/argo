@@ -1,0 +1,21 @@
+[package]
+name = "argosheet"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "argosheet"
+crate-type = ["staticlib", "rlib"]
+
+[[example]]
+name = "argosheet_dump"
+path = "examples/argosheet_dump.rs"
+
+[dependencies]
+quick-xml = "0.36"
+rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3.10"
+

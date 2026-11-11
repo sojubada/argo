@@ -1,0 +1,50 @@
+name: argosheet CI
+
+# argosheet 가 바뀔 때만 돈다. 모든 푸시마다 돌면 본 빌드와 겹쳐 두 번 돈다.
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "rust/argosheet/**"
+      - ".github/workflows/argosheet-ci.yml"
+  pull_request:
+    paths:
+      - "rust/argosheet/**"
+  workflow_dispatch:
+
+jobs:
+  linux-test:
+    name: Linux cargo test & CLI check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust/argosheet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run cargo test
+        run: cargo test --all-targets
+      - name: Build argosheet_dump example
+        run: cargo build --release --example argosheet_dump
+
+  tvos-build:
+    name: tvOS arm64 staticlib (-Z build-std)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: rust/argosheet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Compile aarch64-apple-tvos
+        env:
+          TVOS_DEPLOYMENT_TARGET: "16.0"
+        run: |
+          cargo +nightly build \
+            -Z build-std=std,panic_unwind \
+            --target aarch64-apple-tvos \
+            --release
+          ls -lh target/aarch64-apple-tvos/release/libargosheet.a
+
