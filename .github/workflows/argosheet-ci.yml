@@ -26,6 +26,12 @@ jobs:
         run: cargo test --all-targets
       - name: Build argosheet_dump example
         run: cargo build --release --example argosheet_dump
+      - name: P1b corpus vs LibreOffice/Excel golden (fails under 99%)
+        run: |
+          ./target/release/examples/argosheet_dump tests/corpus/p1b_corpus.xlsx \
+            --check-golden tests/corpus/p1b_golden.json | tail -3
+          ./target/release/examples/argosheet_dump tests/corpus/p1b_corpus.xlsx \
+            --check-golden tests/corpus/p1b_golden.json > /dev/null
 
   tvos-build:
     name: tvOS arm64 staticlib (-Z build-std)

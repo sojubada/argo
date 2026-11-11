@@ -46,9 +46,20 @@ impl CalcErr {
             _ => None,
         }
     }
+
+    pub fn error_type_num(self) -> f64 {
+        match self {
+            CalcErr::Null => 1.0,
+            CalcErr::Div0 => 2.0,
+            CalcErr::Value => 3.0,
+            CalcErr::Ref => 4.0,
+            CalcErr::Name => 5.0,
+            CalcErr::Num => 6.0,
+            CalcErr::Na => 7.0,
+        }
+    }
 }
 
-/// 참조 주소 (시트 인덱스, 시작 행, 시작 열, 끝 행, 끝 열 — 모두 1-based)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RefRange {
     pub sheet_idx: usize,
@@ -64,7 +75,6 @@ impl RefRange {
     }
 }
 
-/// 수식 값 모델: 빈 칸(Blank)은 수식 문맥에 따라 0 이자 "" 로 동작한다.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Num(f64),
@@ -78,7 +88,6 @@ pub enum Value {
 }
 
 impl Value {
-    /// 산술 연산용 숫자 강제 변환 (빈 칸은 0, TRUE=1, FALSE=0, 숫자 문자열은 파싱)
     pub fn coerce_num(&self) -> Result<f64, CalcErr> {
         match self {
             Value::Num(n) => {
@@ -108,7 +117,6 @@ impl Value {
         }
     }
 
-    /// 문자열 연산용 강제 변환 (빈 칸은 "")
     pub fn coerce_str(&self) -> Result<String, CalcErr> {
         match self {
             Value::Str(s) => Ok(s.clone()),
@@ -133,16 +141,16 @@ impl Value {
         }
     }
 
-    /// 논리 연산용 강제 변환 (빈 칸은 FALSE, 0은 FALSE, 0이 아닌 숫자는 TRUE)
     pub fn coerce_bool(&self) -> Result<bool, CalcErr> {
         match self {
             Value::Bool(b) => Ok(*b),
             Value::Blank => Ok(false),
             Value::Num(n) => Ok(*n != 0.0),
             Value::Str(s) => {
-                if s.eq_ignore_ascii_case("true") {
+                let lower = s.trim().to_ascii_lowercase();
+                if lower == "true" {
                     Ok(true)
-                } else if s.eq_ignore_ascii_case("false") {
+                } else if lower == "false" {
                     Ok(false)
                 } else {
                     Err(CalcErr::Value)
@@ -160,7 +168,7 @@ impl Value {
 }
 
 // ============================================================================
-// 2. 토크나이저 & Pratt 파서 (참조 연산자 `:`, 공백 교집합, `,` 합집합 포함)
+// 2. 파서 및 AST
 // ============================================================================
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,10 +177,10 @@ pub enum Token {
     Str(String),
     Bool(bool),
     ErrorLit(CalcErr),
-    Ident(String), // 함수 이름, 참조 토큰, 정의된 이름, '시트'!A1 등
-    Colon,         // : 범위
-    Intersect,     // 공백 교집합
-    Comma,         // , 인수 구분 또는 합집합
+    Ident(String),
+    Colon,
+    Intersect,
+    Comma,
     Plus,
     Minus,
     Mul,
@@ -196,15 +204,15 @@ pub enum Token {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
-    Range,     // :
-    Intersect, // (공백)
-    Union,     // , (괄호 안 합집합)
-    Pow,       // ^
-    Mul,       // *
-    Div,       // /
-    Add,       // +
-    Sub,       // -
-    Concat,    // &
+    Range,
+    Intersect,
+    Union,
+    Pow,
+    Mul,
+    Div,
+    Add,
+    Sub,
+    Concat,
     Eq,
     Neq,
     Lt,
@@ -217,7 +225,7 @@ pub enum BinOp {
 pub enum UnaryOp {
     Plus,
     Minus,
-    Percent, // 후위 %
+    Percent,
 }
 
 #[derive(Debug, Clone)]
@@ -226,7 +234,7 @@ pub enum Expr {
     Str(String),
     Bool(bool),
     Err(CalcErr),
-    EmptyArg, // IF(A1, , 0) 처럼 비어 있는 인수
+    EmptyArg,
     RefOrName {
         sheet: Option<String>,
         name: String,
@@ -247,8 +255,6 @@ pub enum Expr {
     ArrayLit(Vec<Vec<Expr>>),
 }
 
-/// 수식 문자열을 토큰열로 분해한다.
-/// 왜: 공백이 일반 공백인지 참조 교집합 연산자인지는 앞뒤 토큰 문맥으로만 판별할 수 있다.
 pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
     let s = input.trim().strip_prefix('=').unwrap_or(input.trim());
     let chars: Vec<char> = s.chars().collect();
@@ -265,13 +271,11 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             continue;
         }
 
-        // 앞 토큰이 참조/닫는괄호이고 현재 토큰이 참조/여는괄호이면 공백 교집합 토큰 삽입
         if had_whitespace {
             if let Some(prev) = tokens.last() {
                 let prev_can_end_ref = matches!(prev, Token::Ident(_) | Token::RParen);
                 let next_can_start_ref =
                     ch == '(' || ch == '\'' || ch == '$' || ch.is_ascii_alphabetic() || ch == '_';
-                // 단, 뒤따르는 식별자가 함수 호출인 경우는 제외하기 위해 미리 살펴본다
                 if prev_can_end_ref && next_can_start_ref && !looks_like_func_call(&chars, i) {
                     tokens.push(Token::Intersect);
                 }
@@ -279,7 +283,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             had_whitespace = false;
         }
 
-        // 1. 문자열 리터럴 ("..." 내부 ""는 " 하나로)
         if ch == '"' {
             i += 1;
             let mut lit = String::new();
@@ -301,7 +304,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             continue;
         }
 
-        // 2. 오류 리터럴 (#DIV/0!, #N/A 등)
         if ch == '#' {
             let start = i;
             i += 1;
@@ -322,14 +324,14 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             continue;
         }
 
-        // 3. 숫자 리터럴 (소수 및 지수 1.5E-3 포함)
         if ch.is_ascii_digit() || (ch == '.' && i + 1 < len && chars[i + 1].is_ascii_digit()) {
             let start = i;
             while i < len && (chars[i].is_ascii_digit() || chars[i] == '.') {
                 i += 1;
             }
             if i < len && (chars[i] == 'e' || chars[i] == 'E') {
-                if i + 1 < len && (chars[i + 1] == '+' || chars[i + 1] == '-' || chars[i + 1].is_ascii_digit())
+                if i + 1 < len
+                    && (chars[i + 1] == '+' || chars[i + 1] == '-' || chars[i + 1].is_ascii_digit())
                 {
                     i += 1;
                     if chars[i] == '+' || chars[i] == '-' {
@@ -342,7 +344,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             }
             let num_s: String = chars[start..i].iter().collect();
             let n = num_s.parse::<f64>().map_err(|_| CalcErr::Value)?;
-            // 만약 숫자 바로 뒤에 `:` 이 오고 앞 토큰도 `:` 이 아니거나 `1:1` 행 전체 참조인 경우 처리
             if i < len && chars[i] == ':' && num_s.chars().all(|c| c.is_ascii_digit()) {
                 tokens.push(Token::Ident(num_s));
             } else if matches!(tokens.last(), Some(Token::Colon))
@@ -355,7 +356,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             continue;
         }
 
-        // 4. 작은따옴표 시트 참조 ('01_시트'!$A$5) 또는 일반 식별자/셀 참조
         if ch == '\'' || ch.is_alphabetic() || ch == '$' || ch == '_' {
             let start = i;
             if ch == '\'' {
@@ -396,7 +396,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, CalcErr> {
             continue;
         }
 
-        // 5. 연산자 및 괄호
         match ch {
             ':' => {
                 tokens.push(Token::Colon);
@@ -571,7 +570,6 @@ impl FormulaParser {
         let mut lhs = self.parse_prefix()?;
 
         loop {
-            // 후위 연산자 `%`
             if matches!(self.peek(), Token::Percent) && 70 > min_bp {
                 self.next();
                 self.bump_depth()?;
@@ -651,9 +649,9 @@ impl FormulaParser {
             Token::LBrace => self.parse_array_literal(),
             Token::Ident(raw) => {
                 if matches!(self.peek(), Token::LParen) {
-                    self.next(); // consume '('
+                    self.next();
                     let saved_depth = self.paren_depth;
-                    self.paren_depth = 0; // 함수 인수 내부 쉼표는 Union이 아니라 인수 구분자
+                    self.paren_depth = 0;
                     let mut args = Vec::new();
                     if !matches!(self.peek(), Token::RParen) {
                         loop {
@@ -718,8 +716,6 @@ impl FormulaParser {
     }
 }
 
-/// `_xlfn.`, `_xlws.` 접두어를 제거하고 대문자로 통일한다.
-/// 왜: 06 시트 STDEV.S·STDEV.P·VAR.S는 `_xlfn.` 유무와 상관없이 모두 동일하게 계산해야 한다(Rob 결정).
 pub fn normalize_func_name(raw: &str) -> String {
     let up = raw.trim().to_ascii_uppercase();
     let stripped = up
@@ -737,7 +733,6 @@ fn split_sheet_and_ref(raw: &str) -> Expr {
             .and_then(|s| s.strip_suffix('\''))
             .unwrap_or(sh.trim())
             .replace("''", "'");
-        // `'01_시트'!$A$5:$A$64` 처럼 `:` 뒤쪽만 있는 것이 아니라 전체가 한 토큰으로 안 묶였을 때 대비
         Expr::RefOrName {
             sheet: Some(clean_sheet),
             name: rest.to_string(),
@@ -751,20 +746,20 @@ fn split_sheet_and_ref(raw: &str) -> Expr {
 }
 
 // ============================================================================
-// 3. 의존 그래프 · 위상 정렬 · 동적 참조(OFFSET) 재계산 표시기
+// 3. 의존 그래프 & 계산기 코어
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellAddr {
     pub sheet: usize,
-    pub row: u32, // 1-based
-    pub col: u32, // 1-based
+    pub row: u32,
+    pub col: u32,
 }
 
 pub struct WorkbookCalcResult {
     pub values: HashMap<CellAddr, Value>,
-    pub dynamic_recalc_cells: HashSet<CellAddr>, // OFFSET 등 실행 중 참조가 정해지는 칸
-    pub circular_warnings: Vec<CellAddr>,        // 순환 참조로 인해 0으로 처리된 칸
+    pub dynamic_recalc_cells: HashSet<CellAddr>,
+    pub circular_warnings: Vec<CellAddr>,
 }
 
 /// 계산 전용 스레드의 스택 크기. tvOS 의 보조 스레드 기본값은 512KB 라서
@@ -811,7 +806,6 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
         }
     }
 
-    // 1. 모든 수식 셀 AST 파싱 및 정적 의존성 추출
     for (s_idx, sheet) in wb.sheets.iter().enumerate() {
         for (&key, f_entry) in &sheet.formulas {
             let row = (key >> 32) as u32;
@@ -832,7 +826,6 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
                     }
                     let mut deps = Vec::new();
                     collect_static_dependencies(wb, s_idx, &expr, &defined_ast, &mut deps);
-                    // 실제로 수식이 있는 셀만 의존 간선으로 유지
                     deps.retain(|d| {
                         wb.sheets
                             .get(d.sheet)
@@ -852,7 +845,6 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
         }
     }
 
-    // 2. 위상 정렬 (Kahn's Algorithm)
     let mut in_degree: HashMap<CellAddr, usize> = HashMap::new();
     let mut reverse_edges: HashMap<CellAddr, Vec<CellAddr>> = HashMap::new();
 
@@ -884,7 +876,6 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
         }
     }
 
-    // 3. 위상 정렬에 포함되지 못한 노드는 순환 참조(Cycle) -> 0.0으로 설정하고 경고 목록에 기록
     let mut values: HashMap<CellAddr, Value> = HashMap::new();
     let mut circular_warnings: Vec<CellAddr> = Vec::new();
 
@@ -899,7 +890,6 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
         circular_warnings.sort_by_key(|a| (a.sheet, a.row, a.col));
     }
 
-    // 4. 위상 정렬 순서대로 계산 수행 (OFFSET 등 동적 참조가 중간에 미계산 셀을 부르면 즉시 재귀 계산)
     let mut evaluator = Evaluator {
         wb,
         ast_map: &ast_map,
@@ -923,7 +913,10 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
 fn contains_dynamic_ref_func(expr: &Expr) -> bool {
     match expr {
         Expr::Func { name, args } => {
-            if name == "OFFSET" || name == "INDIRECT" {
+            if matches!(
+                name.as_str(),
+                "OFFSET" | "INDIRECT" | "RAND" | "RANDBETWEEN" | "TODAY" | "NOW"
+            ) {
                 return true;
             }
             args.iter().any(contains_dynamic_ref_func)
@@ -1009,7 +1002,11 @@ fn collect_static_dependencies(
     }
 }
 
-fn resolve_sheet_index(wb: &Workbook, current_sheet: usize, sheet_name: Option<&str>) -> Option<usize> {
+fn resolve_sheet_index(
+    wb: &Workbook,
+    current_sheet: usize,
+    sheet_name: Option<&str>,
+) -> Option<usize> {
     match sheet_name {
         None => Some(current_sheet),
         Some(target) => wb
@@ -1029,7 +1026,6 @@ fn resolve_ref_token(
     let sheet = wb.sheets.get(s_idx)?;
     let clean = token.trim();
 
-    // 1. 일반 셀 주소 (A1, $B$12)
     if let Some((r, c)) = parse_cell_ref_1based(clean) {
         return Some(RefRange {
             sheet_idx: s_idx,
@@ -1040,12 +1036,17 @@ fn resolve_ref_token(
         });
     }
 
-    // 2. 전체 열 참조 (A, $C) 또는 전체 행 참조 (1, $5) — `A:A`, `1:1` 의 양변으로 등장할 때
     let no_dollar = clean.replace('$', "");
     if !no_dollar.is_empty() && no_dollar.chars().all(|c| c.is_ascii_alphabetic()) {
+        if no_dollar.len() > 3 {
+            return None; // XFD(16384) 보다 긴 열 이름 — 곱하다 넘치지 않게 먼저 거른다
+        }
         let mut col = 0u32;
         for b in no_dollar.bytes() {
             col = col * 26 + (b.to_ascii_uppercase() - b'A' + 1) as u32;
+        }
+        if col > 16384 {
+            return None;
         }
         let max_r = sheet.max_row.max(1);
         return Some(RefRange {
@@ -1058,6 +1059,9 @@ fn resolve_ref_token(
     }
     if !no_dollar.is_empty() && no_dollar.chars().all(|c| c.is_ascii_digit()) {
         let row = no_dollar.parse::<u32>().ok()?;
+        if row == 0 || row > 1_048_576 {
+            return None;
+        }
         let max_c = sheet.max_col.max(1);
         return Some(RefRange {
             sheet_idx: s_idx,
@@ -1102,7 +1106,7 @@ fn resolve_static_range_pair(
 }
 
 // ============================================================================
-// 4. 평가기 (Evaluator) & 64개 함수 전체 구현
+// 4. 평가기 & 120개 함수 완전 디스패처
 // ============================================================================
 
 struct Evaluator<'a> {
@@ -1120,7 +1124,6 @@ impl<'a> Evaluator<'a> {
             return v.clone();
         }
         if self.visiting.contains(&addr) {
-            // 실행 중 순환 참조 감지 -> #VALUE! 대신 0으로 두고 경고 목록에 추가
             if !self.circular_warnings.contains(&addr) {
                 self.circular_warnings.push(addr);
             }
@@ -1137,7 +1140,6 @@ impl<'a> Evaluator<'a> {
             return scalar;
         }
 
-        // 수식이 없는 일반 셀 읽기
         self.read_raw_cell(addr)
     }
 
@@ -1172,7 +1174,6 @@ impl<'a> Evaluator<'a> {
                         col: rr.start_col,
                     })
                 } else {
-                    // 암묵적 교차 또는 첫 칸(배열 수식 결과 한 칸만 쓰는 꼴)
                     let r = if caller.sheet == rr.sheet_idx
                         && caller.row >= rr.start_row
                         && caller.row <= rr.end_row
@@ -1315,7 +1316,6 @@ impl<'a> Evaluator<'a> {
                 _ => {
                     let lv = self.eval_expr(caller, left);
                     let rv = self.eval_expr(caller, right);
-                    // 배열 수식(예: A1:A5 * B1:B5 또는 A1:A5 - 10) 지원
                     if matches!(lv, Value::Ref(_) | Value::Array(_))
                         || matches!(rv, Value::Ref(_) | Value::Array(_))
                     {
@@ -1384,6 +1384,27 @@ impl<'a> Evaluator<'a> {
     }
 
     fn range_to_2d(&mut self, rr: RefRange) -> Vec<Vec<Value>> {
+        // 열 전체(A:A)·시트 전체(A:XFD) 같은 큰 범위는 그대로 펼치면 수십억 칸이 되어
+        // 메모리가 터진다. 100만 칸을 넘으면 시트에서 실제로 쓰는 영역까지만 자른다
+        // (그 밖은 빈 칸이라 집계 결과는 같다). 최소 1칸은 남긴다.
+        let mut rr = rr;
+        let cells = (rr.end_row.saturating_sub(rr.start_row) as u64 + 1)
+            * (rr.end_col.saturating_sub(rr.start_col) as u64 + 1);
+        if cells > 1_000_000 {
+            let (mr, mc) = self
+                .wb
+                .sheets
+                .get(rr.sheet_idx)
+                .map(|s| (s.max_row.max(1), s.max_col.max(1)))
+                .unwrap_or((1, 1));
+            rr.end_row = rr.end_row.min(mr).max(rr.start_row);
+            rr.end_col = rr.end_col.min(mc).max(rr.start_col);
+            let clipped = (rr.end_row - rr.start_row + 1) as u64 * (rr.end_col - rr.start_col + 1) as u64;
+            if clipped > 20_000_000 {
+                rr.end_row = rr.start_row;
+                rr.end_col = rr.start_col;
+            }
+        }
         let mut rows = Vec::with_capacity((rr.end_row - rr.start_row + 1) as usize);
         for r in rr.start_row..=rr.end_row {
             let mut row_vec = Vec::with_capacity((rr.end_col - rr.start_col + 1) as usize);
@@ -1399,7 +1420,6 @@ impl<'a> Evaluator<'a> {
         rows
     }
 
-    /// 범위 내 숫자만 추출한다 (글·논리·빈칸 제외, 오류는 즉시 전파).
     fn collect_numbers_from_args(
         &mut self,
         caller: CellAddr,
@@ -1441,7 +1461,6 @@ impl<'a> Evaluator<'a> {
                         match cv {
                             Value::Err(e) => return Err(e),
                             Value::Num(n) => out.push(n),
-                            // 범위 내부의 글·논리·빈칸은 무시한다 (SUM, AVERAGE, STDEV.S 공통 규칙)
                             _ => {}
                         }
                     }
@@ -1468,12 +1487,7 @@ impl<'a> Evaluator<'a> {
         Ok(())
     }
 
-    // ========================================================================
-    // 64개 함수 디스패처
-    // ========================================================================
-
     fn eval_function(&mut self, caller: CellAddr, name: &str, args: &[Expr]) -> Value {
-        // 미지원 동적 배열 함수 (이번 범위 제외 -> 지정된 문구 반환)
         if matches!(
             name,
             "XLOOKUP" | "FILTER" | "SORT" | "UNIQUE" | "SEQUENCE"
@@ -1493,16 +1507,16 @@ impl<'a> Evaluator<'a> {
         name: &str,
         args: &[Expr],
     ) -> Result<Value, CalcErr> {
+        let clean_name = name;
         match name {
             // ----------------------------------------------------------------
-            // [1] 논리·정보 (6개): IF, AND, OR, IFERROR, ISNUMBER, ISTEXT
+            // [1] 논리·정보 (11개)
             // ----------------------------------------------------------------
             "IF" => {
                 if args.is_empty() || args.len() > 3 {
                     return Err(CalcErr::Value);
                 }
                 let cond = self.eval_scalar(caller, &args[0]).coerce_bool()?;
-                // 지연 평가: 고르지 않은 가지는 계산하지 않는다.
                 if cond {
                     if args.len() >= 2 && !matches!(args[1], Expr::EmptyArg) {
                         Ok(self.eval_expr(caller, &args[1]))
@@ -1517,6 +1531,41 @@ impl<'a> Evaluator<'a> {
                     }
                 } else {
                     Ok(Value::Bool(false))
+                }
+            }
+            "IFS" => {
+                if args.is_empty() || args.len() % 2 != 0 {
+                    return Err(CalcErr::Value);
+                }
+                for chunk in args.chunks(2) {
+                    let cond = self.eval_scalar(caller, &chunk[0]).coerce_bool()?;
+                    if cond {
+                        return Ok(self.eval_expr(caller, &chunk[1]));
+                    }
+                }
+                Err(CalcErr::Na)
+            }
+            "SWITCH" => {
+                if args.len() < 3 {
+                    return Err(CalcErr::Value);
+                }
+                let target = self.eval_scalar(caller, &args[0]);
+                let has_default = (args.len() - 1) % 2 != 0;
+                let pairs_end = if has_default {
+                    args.len() - 1
+                } else {
+                    args.len()
+                };
+                for i in (1..pairs_end).step_by(2) {
+                    let case_val = self.eval_scalar(caller, &args[i]);
+                    if excel_compare_values(&target, &case_val) == Ordering::Equal {
+                        return Ok(self.eval_expr(caller, &args[i + 1]));
+                    }
+                }
+                if has_default {
+                    Ok(self.eval_expr(caller, args.last().unwrap()))
+                } else {
+                    Err(CalcErr::Na)
                 }
             }
             "AND" => {
@@ -1583,12 +1632,63 @@ impl<'a> Evaluator<'a> {
                     Ok(Value::Bool(false))
                 }
             }
+            "NOT" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let b = self.eval_scalar(caller, &args[0]).coerce_bool()?;
+                Ok(Value::Bool(!b))
+            }
+            "XOR" => {
+                if args.is_empty() {
+                    return Err(CalcErr::Value);
+                }
+                let mut true_count = 0usize;
+                let mut found_any = false;
+                for arg in args {
+                    let v = self.eval_expr(caller, arg);
+                    for item in self.flatten_value(v) {
+                        match item {
+                            Value::Err(e) => return Err(e),
+                            Value::Bool(b) => {
+                                found_any = true;
+                                if b {
+                                    true_count += 1;
+                                }
+                            }
+                            Value::Num(n) => {
+                                found_any = true;
+                                if n != 0.0 {
+                                    true_count += 1;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if !found_any {
+                    Err(CalcErr::Value)
+                } else {
+                    Ok(Value::Bool(true_count % 2 == 1))
+                }
+            }
             "IFERROR" => {
                 if args.len() != 2 {
                     return Err(CalcErr::Value);
                 }
                 let v = self.eval_scalar(caller, &args[0]);
                 if matches!(v, Value::Err(_)) {
+                    Ok(self.eval_expr(caller, &args[1]))
+                } else {
+                    Ok(v)
+                }
+            }
+            "IFNA" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                if matches!(v, Value::Err(CalcErr::Na)) {
                     Ok(self.eval_expr(caller, &args[1]))
                 } else {
                     Ok(v)
@@ -1608,14 +1708,69 @@ impl<'a> Evaluator<'a> {
                 let v = self.eval_scalar(caller, &args[0]);
                 Ok(Value::Bool(matches!(v, Value::Str(_))))
             }
+            "ISBLANK" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                Ok(Value::Bool(matches!(v, Value::Blank)))
+            }
+            "ISERR" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                Ok(Value::Bool(
+                    matches!(v, Value::Err(e) if e != CalcErr::Na),
+                ))
+            }
+            "ISERROR" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                Ok(Value::Bool(matches!(v, Value::Err(_))))
+            }
+            "ISNA" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                Ok(Value::Bool(matches!(v, Value::Err(CalcErr::Na))))
+            }
+            "ISLOGICAL" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                Ok(Value::Bool(matches!(v, Value::Bool(_))))
+            }
+            "NA" => Ok(Value::Err(CalcErr::Na)),
+            "ERROR.TYPE" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                match v {
+                    Value::Err(e) => Ok(Value::Num(e.error_type_num())),
+                    _ => Err(CalcErr::Na),
+                }
+            }
 
             // ----------------------------------------------------------------
-            // [2] 수학 (7개): SUM, ABS, ROUND, MAX, SUMPRODUCT, LARGE, RANK
-            // (+ 보조 MIN)
+            // [2] 수학·삼각 (23개)
             // ----------------------------------------------------------------
             "SUM" => {
                 let nums = self.collect_numbers_from_args(caller, args)?;
                 Ok(Value::Num(nums.into_iter().sum()))
+            }
+            "PRODUCT" => {
+                let nums = self.collect_numbers_from_args(caller, args)?;
+                if nums.is_empty() {
+                    Ok(Value::Num(0.0))
+                } else {
+                    Ok(Value::Num(nums.into_iter().product()))
+                }
             }
             "ABS" => {
                 if args.len() != 1 {
@@ -1623,6 +1778,19 @@ impl<'a> Evaluator<'a> {
                 }
                 let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
                 Ok(Value::Num(n.abs()))
+            }
+            "SIGN" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                if n > 0.0 {
+                    Ok(Value::Num(1.0))
+                } else if n < 0.0 {
+                    Ok(Value::Num(-1.0))
+                } else {
+                    Ok(Value::Num(0.0))
+                }
             }
             "ROUND" => {
                 if args.len() != 2 {
@@ -1632,16 +1800,192 @@ impl<'a> Evaluator<'a> {
                 let digits = self.eval_scalar(caller, &args[1]).coerce_num()?.trunc() as i32;
                 Ok(Value::Num(excel_round_away_from_zero(n, digits)?))
             }
+            "ROUNDUP" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let digits = self.eval_scalar(caller, &args[1]).coerce_num()?.trunc() as i32;
+                Ok(Value::Num(excel_round_up(n, digits)?))
+            }
+            "ROUNDDOWN" | "TRUNC" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let digits = if args.len() == 2 {
+                    self.eval_scalar(caller, &args[1]).coerce_num()?.trunc() as i32
+                } else {
+                    0
+                };
+                Ok(Value::Num(excel_round_down(n, digits)?))
+            }
+            "INT" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                Ok(Value::Num(n.floor()))
+            }
+            "MOD" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let d = self.eval_scalar(caller, &args[1]).coerce_num()?;
+                if d == 0.0 {
+                    return Err(CalcErr::Div0);
+                }
+                Ok(Value::Num(n - d * (n / d).floor()))
+            }
+            "POWER" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let base = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let exp = self.eval_scalar(caller, &args[1]).coerce_num()?;
+                let res = base.powf(exp);
+                if res.is_nan() || res.is_infinite() {
+                    Err(CalcErr::Num)
+                } else {
+                    Ok(Value::Num(res))
+                }
+            }
+            "SQRT" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                if n < 0.0 {
+                    return Err(CalcErr::Num);
+                }
+                Ok(Value::Num(n.sqrt()))
+            }
+            "EXP" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let r = n.exp();
+                if r.is_infinite() {
+                    Err(CalcErr::Num)
+                } else {
+                    Ok(Value::Num(r))
+                }
+            }
+            "LN" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                if n <= 0.0 {
+                    return Err(CalcErr::Num);
+                }
+                Ok(Value::Num(n.ln()))
+            }
+            "LOG" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let base = if args.len() == 2 {
+                    self.eval_scalar(caller, &args[1]).coerce_num()?
+                } else {
+                    10.0
+                };
+                if n <= 0.0 || base <= 0.0 || base == 1.0 {
+                    return Err(CalcErr::Num);
+                }
+                Ok(Value::Num(n.log(base)))
+            }
+            "LOG10" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                if n <= 0.0 {
+                    return Err(CalcErr::Num);
+                }
+                Ok(Value::Num(n.log10()))
+            }
+            "PI" => Ok(Value::Num(std::f64::consts::PI)),
+            "CEILING" | "FLOOR" => {
+                // 옛 함수: 기준값 생략 불가(엑셀은 CEILING(x) 를 받지 않음), 양수에 음수 기준이면 #NUM!
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let sig = self.eval_scalar(caller, &args[1]).coerce_num()?;
+                if sig == 0.0 || n == 0.0 {
+                    return Ok(Value::Num(0.0));
+                }
+                if n > 0.0 && sig < 0.0 {
+                    return Err(CalcErr::Num);
+                }
+                let up = clean_quotient(n / sig);
+                let q = if clean_name == "CEILING" { up.ceil() } else { up.floor() };
+                Ok(Value::Num(clean_product(q, sig)))
+            }
+            "CEILING.MATH" | "FLOOR.MATH" => {
+                // 기준값은 절댓값, 음수는 mode 0 이면 (CEILING: 0 쪽 / FLOOR: 0 에서 먼 쪽),
+                // mode 가 0 이 아니면 반대.
+                if args.is_empty() || args.len() > 3 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let sig = if args.len() >= 2 && !matches!(args[1], Expr::EmptyArg) {
+                    self.eval_scalar(caller, &args[1]).coerce_num()?.abs()
+                } else {
+                    1.0
+                };
+                let mode = if args.len() == 3 && !matches!(args[2], Expr::EmptyArg) {
+                    self.eval_scalar(caller, &args[2]).coerce_num()?
+                } else {
+                    0.0
+                };
+                if sig == 0.0 || n == 0.0 {
+                    return Ok(Value::Num(0.0));
+                }
+                let q = clean_quotient(n / sig);
+                let ceiling = clean_name == "CEILING.MATH";
+                let r = if n >= 0.0 || mode == 0.0 {
+                    if ceiling { q.ceil() } else { q.floor() }
+                } else if ceiling {
+                    q.floor()
+                } else {
+                    q.ceil()
+                };
+                Ok(Value::Num(clean_product(r, sig)))
+            }
+            "MROUND" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let m = self.eval_scalar(caller, &args[1]).coerce_num()?;
+                if m == 0.0 {
+                    return Ok(Value::Num(0.0));
+                }
+                if (n > 0.0 && m < 0.0) || (n < 0.0 && m > 0.0) {
+                    return Err(CalcErr::Num);
+                }
+                Ok(Value::Num((n / m).round() * m))
+            }
+            "RAND" => Ok(Value::Num(next_random())),
+            "RANDBETWEEN" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let b = self.eval_scalar(caller, &args[0]).coerce_num()?.ceil();
+                let t = self.eval_scalar(caller, &args[1]).coerce_num()?.floor();
+                if b > t || !b.is_finite() || !t.is_finite() {
+                    return Err(CalcErr::Num);
+                }
+                Ok(Value::Num((b + (next_random() * (t - b + 1.0)).floor()).min(t)))
+            }
             "MAX" => {
                 let nums = self.collect_numbers_from_args(caller, args)?;
-                Ok(Value::Num(
-                    nums.into_iter().fold(f64::NEG_INFINITY, f64::max).max(if false {
-                        0.0
-                    } else {
-                        f64::NEG_INFINITY
-                    }),
-                )
-                .map_inf_to_zero())
+                Ok(Value::Num(nums.into_iter().fold(f64::NEG_INFINITY, f64::max)).map_inf_to_zero())
             }
             "MIN" => {
                 let nums = self.collect_numbers_from_args(caller, args)?;
@@ -1681,7 +2025,6 @@ impl<'a> Evaluator<'a> {
                             match item {
                                 Value::Err(e) => return Err(*e),
                                 Value::Num(n) => prod *= *n,
-                                // SUMPRODUCT에서 비교식 결과 등 논리값은 1/0으로 센다, 문자는 0
                                 Value::Bool(b) => prod *= if *b { 1.0 } else { 0.0 },
                                 _ => prod *= 0.0,
                             }
@@ -1731,8 +2074,7 @@ impl<'a> Evaluator<'a> {
             }
 
             // ----------------------------------------------------------------
-            // [3] 조건 집계 (9개): SUMIF, SUMIFS, COUNTIF, COUNTIFS, AVERAGEIF,
-            //                    SUBTOTAL, COUNT, COUNTA, AVERAGE
+            // [3] 조건 집계 (11개)
             // ----------------------------------------------------------------
             "COUNT" => {
                 let nums = self.collect_numbers_from_args(caller, args)?;
@@ -1750,12 +2092,58 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(Value::Num(cnt as f64))
             }
+            "COUNTBLANK" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_expr(caller, &args[0]);
+                let cnt = self
+                    .flatten_value(v)
+                    .into_iter()
+                    .filter(|item| match item {
+                        Value::Blank => true,
+                        Value::Str(s) => s.is_empty(),
+                        _ => false,
+                    })
+                    .count();
+                Ok(Value::Num(cnt as f64))
+            }
             "AVERAGE" => {
                 let nums = self.collect_numbers_from_args(caller, args)?;
                 if nums.is_empty() {
                     Err(CalcErr::Div0)
                 } else {
                     Ok(Value::Num(nums.iter().sum::<f64>() / (nums.len() as f64)))
+                }
+            }
+            "AVERAGEA" => {
+                let mut sum = 0.0;
+                let mut cnt = 0usize;
+                for arg in args {
+                    let v = self.eval_expr(caller, arg);
+                    for item in self.flatten_value(v) {
+                        match item {
+                            Value::Num(n) => {
+                                sum += n;
+                                cnt += 1;
+                            }
+                            Value::Bool(b) => {
+                                sum += if b { 1.0 } else { 0.0 };
+                                cnt += 1;
+                            }
+                            Value::Str(_) => {
+                                cnt += 1;
+                            }
+                            Value::Blank => {}
+                            Value::Err(e) => return Err(e),
+                            _ => {}
+                        }
+                    }
+                }
+                if cnt == 0 {
+                    Err(CalcErr::Div0)
+                } else {
+                    Ok(Value::Num(sum / (cnt as f64)))
                 }
             }
             "SUMIF" => {
@@ -1873,10 +2261,50 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(Value::Num(total))
             }
+            "MAXIFS" | "MINIFS" => {
+                if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+                    return Err(CalcErr::Value);
+                }
+                let target_vals = self.eval_range_flat(caller, &args[0])?;
+                let pair_cnt = (args.len() - 1) / 2;
+                let mut cols_data = Vec::with_capacity(pair_cnt);
+                let mut matchers = Vec::with_capacity(pair_cnt);
+                for p in 0..pair_cnt {
+                    cols_data.push(self.eval_range_flat(caller, &args[1 + p * 2])?);
+                    let crit = self.eval_scalar(caller, &args[2 + p * 2]);
+                    matchers.push(CriteriaMatcher::parse(&crit));
+                }
+                let len = target_vals.len();
+                for c in &cols_data {
+                    if c.len() != len {
+                        return Err(CalcErr::Value);
+                    }
+                }
+                let mut matched_nums = Vec::new();
+                for i in 0..len {
+                    if (0..pair_cnt).all(|p| matchers[p].matches(&cols_data[p][i])) {
+                        if let Value::Num(n) = target_vals[i] {
+                            matched_nums.push(n);
+                        }
+                    }
+                }
+                if name == "MAXIFS" {
+                    Ok(Value::Num(
+                        matched_nums.into_iter().fold(f64::NEG_INFINITY, f64::max),
+                    )
+                    .map_inf_to_zero())
+                } else if matched_nums.is_empty() {
+                    Ok(Value::Num(0.0))
+                } else {
+                    Ok(Value::Num(
+                        matched_nums.into_iter().fold(f64::INFINITY, f64::min),
+                    ))
+                }
+            }
             "SUBTOTAL" => self.eval_subtotal(caller, args),
 
             // ----------------------------------------------------------------
-            // [4] 조회 (6개): INDEX, MATCH, VLOOKUP, CHOOSE, OFFSET, ADDRESS
+            // [4] 조회·참조 (11개)
             // ----------------------------------------------------------------
             "INDEX" => {
                 if args.len() < 2 || args.len() > 3 {
@@ -1965,7 +2393,6 @@ impl<'a> Evaluator<'a> {
                     _ => return Err(CalcErr::Value),
                 };
                 let col_idx = self.eval_scalar(caller, &args[2]).coerce_num()?.trunc() as isize;
-                // 네 번째 인수를 생략하면 기본값 TRUE(근사 일치 = 1)
                 let approx = if args.len() == 4 && !matches!(args[3], Expr::EmptyArg) {
                     self.eval_scalar(caller, &args[3]).coerce_bool()?
                 } else {
@@ -1982,6 +2409,52 @@ impl<'a> Evaluator<'a> {
                 let m_type = if approx { 1 } else { 0 };
                 match match_index(&lookup, &first_col, m_type) {
                     Some(r_1based) => Ok(table[r_1based - 1][c_u].clone()),
+                    None => Err(CalcErr::Na),
+                }
+            }
+            "HLOOKUP" => {
+                if args.len() < 3 || args.len() > 4 {
+                    return Err(CalcErr::Value);
+                }
+                let lookup = self.eval_scalar(caller, &args[0]);
+                if let Value::Err(e) = lookup {
+                    return Err(e);
+                }
+                let table_val = self.eval_expr(caller, &args[1]);
+                let table = match table_val {
+                    Value::Ref(rr) => self.range_to_2d(rr),
+                    Value::Array(rows) => rows,
+                    _ => return Err(CalcErr::Value),
+                };
+                let row_idx = self.eval_scalar(caller, &args[2]).coerce_num()?.trunc() as isize;
+                let approx = if args.len() == 4 && !matches!(args[3], Expr::EmptyArg) {
+                    self.eval_scalar(caller, &args[3]).coerce_bool()?
+                } else {
+                    true
+                };
+                if row_idx < 1 || (row_idx as usize) > table.len() {
+                    return Err(CalcErr::Ref);
+                }
+                let first_row = table[0].clone();
+                let m_type = if approx { 1 } else { 0 };
+                match match_index(&lookup, &first_row, m_type) {
+                    Some(c_1based) => Ok(table[(row_idx as usize) - 1][c_1based - 1].clone()),
+                    None => Err(CalcErr::Na),
+                }
+            }
+            "LOOKUP" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(CalcErr::Value);
+                }
+                let lookup = self.eval_scalar(caller, &args[0]);
+                let lookup_vec = self.eval_range_flat(caller, &args[1])?;
+                let res_vec = if args.len() == 3 {
+                    self.eval_range_flat(caller, &args[2])?
+                } else {
+                    lookup_vec.clone()
+                };
+                match match_index(&lookup, &lookup_vec, 1) {
+                    Some(idx) => Ok(res_vec.get(idx - 1).cloned().unwrap_or(Value::Blank)),
                     None => Err(CalcErr::Na),
                 }
             }
@@ -2089,17 +2562,57 @@ impl<'a> Evaluator<'a> {
                     Ok(Value::Str(coord))
                 }
             }
+            "ROW" => {
+                if args.is_empty() {
+                    Ok(Value::Num(caller.row as f64))
+                } else {
+                    match self.eval_expr(caller, &args[0]) {
+                        Value::Ref(rr) => Ok(Value::Num(rr.start_row as f64)),
+                        _ => Err(CalcErr::Value),
+                    }
+                }
+            }
+            "COLUMN" => {
+                if args.is_empty() {
+                    Ok(Value::Num(caller.col as f64))
+                } else {
+                    match self.eval_expr(caller, &args[0]) {
+                        Value::Ref(rr) => Ok(Value::Num(rr.start_col as f64)),
+                        _ => Err(CalcErr::Value),
+                    }
+                }
+            }
+            "ROWS" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                match self.eval_expr(caller, &args[0]) {
+                    Value::Ref(rr) => Ok(Value::Num((rr.end_row - rr.start_row + 1) as f64)),
+                    Value::Array(rows) => Ok(Value::Num(rows.len() as f64)),
+                    _ => Ok(Value::Num(1.0)),
+                }
+            }
+            "COLUMNS" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                match self.eval_expr(caller, &args[0]) {
+                    Value::Ref(rr) => Ok(Value::Num((rr.end_col - rr.start_col + 1) as f64)),
+                    Value::Array(rows) => {
+                        Ok(Value::Num(rows.first().map(|r| r.len()).unwrap_or(0) as f64))
+                    }
+                    _ => Ok(Value::Num(1.0)),
+                }
+            }
 
             // ----------------------------------------------------------------
-            // [5] 문자 (9개): LEN, TRIM, MID, RIGHT, FIND, SUBSTITUTE, REPT,
-            //                PROPER, TEXT (+ 보조 LEFT, UPPER, LOWER)
+            // [5] 문자열 (19개)
             // ----------------------------------------------------------------
             "LEN" => {
                 if args.len() != 1 {
                     return Err(CalcErr::Value);
                 }
                 let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
-                // 왜: 한글 한 글자는 바이트(3)가 아니라 문자(char) 개수 1로 센다.
                 Ok(Value::Num(s.chars().count() as f64))
             }
             "TRIM" => {
@@ -2107,7 +2620,6 @@ impl<'a> Evaluator<'a> {
                     return Err(CalcErr::Value);
                 }
                 let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
-                // 왜: 엑셀 TRIM은 ASCII 공백(0x20)에 대해 앞뒤 공백을 제거하고 안쪽 연속 공백을 한 칸으로 줄인다.
                 let mut out = String::with_capacity(s.len());
                 let mut prev_space = true;
                 for ch in s.chars() {
@@ -2205,6 +2717,30 @@ impl<'a> Evaluator<'a> {
                 }
                 Err(CalcErr::Value)
             }
+            "SEARCH" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(CalcErr::Value);
+                }
+                let find_s = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                let within_s = self.eval_scalar(caller, &args[1]).coerce_str()?;
+                let start_num = if args.len() == 3 {
+                    self.eval_scalar(caller, &args[2]).coerce_num()?.trunc() as isize
+                } else {
+                    1
+                };
+                let within_chars: Vec<char> = within_s.chars().collect();
+                if start_num < 1 || (start_num as usize) > within_chars.len().max(1) {
+                    return Err(CalcErr::Value);
+                }
+                let start_idx = (start_num as usize) - 1;
+                for pos in start_idx..within_chars.len() {
+                    let sub: String = within_chars[pos..].iter().collect();
+                    if wildcard_match_ci(&format!("{}*", find_s), &sub) {
+                        return Ok(Value::Num((pos + 1) as f64));
+                    }
+                }
+                Err(CalcErr::Value)
+            }
             "SUBSTITUTE" => {
                 if args.len() < 3 || args.len() > 4 {
                     return Err(CalcErr::Value);
@@ -2241,6 +2777,25 @@ impl<'a> Evaluator<'a> {
                     Ok(Value::Str(text.replace(&old_t, &new_t)))
                 }
             }
+            "REPLACE" => {
+                if args.len() != 4 {
+                    return Err(CalcErr::Value);
+                }
+                let old_t = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                let start = self.eval_scalar(caller, &args[1]).coerce_num()?.trunc() as isize;
+                let count = self.eval_scalar(caller, &args[2]).coerce_num()?.trunc() as isize;
+                let new_t = self.eval_scalar(caller, &args[3]).coerce_str()?;
+                if start < 1 || count < 0 {
+                    return Err(CalcErr::Value);
+                }
+                let chars: Vec<char> = old_t.chars().collect();
+                let st = ((start - 1) as usize).min(chars.len());
+                let en = (st + (count as usize)).min(chars.len());
+                let mut out: String = chars[..st].iter().collect();
+                out.push_str(&new_t);
+                out.extend(&chars[en..]);
+                Ok(Value::Str(out))
+            }
             "REPT" => {
                 if args.len() != 2 {
                     return Err(CalcErr::Value);
@@ -2258,7 +2813,6 @@ impl<'a> Evaluator<'a> {
                 }
                 let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
                 let mut out = String::with_capacity(s.len());
-                // 왜: 엑셀 PROPER는 영문자가 아닌 모든 문자(공백, 숫자, 문장부호 등) 뒤의 첫 글자를 대문자로 만든다.
                 let mut cap_next = true;
                 for ch in s.chars() {
                     if ch.is_alphabetic() {
@@ -2279,6 +2833,158 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(Value::Str(out))
             }
+            "UPPER" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                Ok(Value::Str(s.to_uppercase()))
+            }
+            "LOWER" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                Ok(Value::Str(s.to_lowercase()))
+            }
+            "CONCATENATE" | "CONCAT" => {
+                let mut out = String::new();
+                for arg in args {
+                    let v = self.eval_expr(caller, arg);
+                    for item in self.flatten_value(v) {
+                        out.push_str(&item.coerce_str()?);
+                    }
+                }
+                Ok(Value::Str(out))
+            }
+            "TEXTJOIN" => {
+                if args.len() < 3 {
+                    return Err(CalcErr::Value);
+                }
+                let delim = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                let ignore_empty = self.eval_scalar(caller, &args[1]).coerce_bool()?;
+                let mut pieces = Vec::new();
+                for arg in &args[2..] {
+                    let v = self.eval_expr(caller, arg);
+                    for item in self.flatten_value(v) {
+                        let s = item.coerce_str()?;
+                        if ignore_empty && s.is_empty() {
+                            continue;
+                        }
+                        pieces.push(s);
+                    }
+                }
+                Ok(Value::Str(pieces.join(&delim)))
+            }
+            "EXACT" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let s1 = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                let s2 = self.eval_scalar(caller, &args[1]).coerce_str()?;
+                Ok(Value::Bool(s1 == s2))
+            }
+            "VALUE" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                if let Value::Num(n) = v {
+                    return Ok(Value::Num(n));
+                }
+                let s = v.coerce_str()?;
+                let t = s.trim();
+                let (body, pct) = match t.strip_suffix('%') {
+                    Some(b) => (b.trim_end(), true),
+                    None => (t, false),
+                };
+                let body = body.replace(',', "");
+                if let Ok(n) = body.parse::<f64>() {
+                    if n.is_finite() {
+                        return Ok(Value::Num(if pct { n / 100.0 } else { n }));
+                    }
+                }
+                // 날짜 글자("2026-11-12")도 엑셀은 숫자로 바꾼다
+                parse_date_text(t).map(|d| Value::Num(d as f64)).ok_or(CalcErr::Value)
+            }
+            "FIXED" => {
+                if args.is_empty() || args.len() > 3 {
+                    return Err(CalcErr::Value);
+                }
+                let n = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let decimals = if args.len() >= 2 {
+                    self.eval_scalar(caller, &args[1]).coerce_num()?.trunc() as i32
+                } else {
+                    2
+                };
+                // 엑셀 한도: 소수 자릿수 127. 넘으면 #VALUE!(서식 문자열이 기가바이트로 커지는 것도 막음)
+                if decimals > 127 {
+                    return Err(CalcErr::Value);
+                }
+                let n = excel_round_away_from_zero(n, decimals.max(-127))?;
+                let no_commas = if args.len() == 3 {
+                    self.eval_scalar(caller, &args[2]).coerce_bool()?
+                } else {
+                    false
+                };
+                let pat = if no_commas {
+                    if decimals > 0 {
+                        format!("0.{}", "0".repeat(decimals as usize))
+                    } else {
+                        "0".into()
+                    }
+                } else if decimals > 0 {
+                    format!("#,##0.{}", "0".repeat(decimals as usize))
+                } else {
+                    "#,##0".into()
+                };
+                let comp = FormatCompiler::compile(&pat);
+                Ok(Value::Str(FormatEngine::format_value(
+                    &FormatValue::Number(n),
+                    &comp,
+                )))
+            }
+            "CHAR" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let code = self.eval_scalar(caller, &args[0]).coerce_num()?.trunc() as u32;
+                if !(1..=255).contains(&code) {
+                    return Err(CalcErr::Value);
+                }
+                let ch = char::from_u32(code).ok_or(CalcErr::Value)?;
+                Ok(Value::Str(ch.to_string()))
+            }
+            "CODE" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                let first = s.chars().next().ok_or(CalcErr::Value)?;
+                Ok(Value::Num((first as u32) as f64))
+            }
+            "T" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                match v {
+                    Value::Str(s) => Ok(Value::Str(s)),
+                    _ => Ok(Value::Str(String::new())),
+                }
+            }
+            "N" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let v = self.eval_scalar(caller, &args[0]);
+                match v {
+                    Value::Num(n) => Ok(Value::Num(n)),
+                    Value::Bool(b) => Ok(Value::Num(if b { 1.0 } else { 0.0 })),
+                    Value::Err(e) => Err(e),
+                    _ => Ok(Value::Num(0.0)),
+                }
+            }
             "TEXT" => {
                 if args.len() != 2 {
                     return Err(CalcErr::Value);
@@ -2298,8 +3004,107 @@ impl<'a> Evaluator<'a> {
             }
 
             // ----------------------------------------------------------------
-            // [6] 날짜 (5개): DATEDIF, NETWORKDAYS, EOMONTH, EDATE, WEEKDAY
+            // [6] 날짜·시간 (13개)
             // ----------------------------------------------------------------
+            "DATE" => {
+                if args.len() != 3 {
+                    return Err(CalcErr::Value);
+                }
+                let y = self.eval_scalar(caller, &args[0]).coerce_num()?.trunc() as i32;
+                let m = self.eval_scalar(caller, &args[1]).coerce_num()?.trunc() as i32;
+                let d = self.eval_scalar(caller, &args[2]).coerce_num()?.trunc() as i64;
+                let year = if (0..=1899).contains(&y) { 1900 + y } else { y };
+                let (ny, nm) = add_months(year, m, 0);
+                let base_serial = ymd_to_serial_1900(ny, nm as u32, 1);
+                Ok(Value::Num((base_serial + d - 1) as f64))
+            }
+            "TIME" => {
+                if args.len() != 3 {
+                    return Err(CalcErr::Value);
+                }
+                let h = self.eval_scalar(caller, &args[0]).coerce_num()?;
+                let m = self.eval_scalar(caller, &args[1]).coerce_num()?;
+                let s = self.eval_scalar(caller, &args[2]).coerce_num()?;
+                let total_secs = h * 3600.0 + m * 60.0 + s;
+                let fract = (total_secs / 86400.0).rem_euclid(1.0);
+                Ok(Value::Num(fract))
+            }
+            "YEAR" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let serial = self.eval_scalar(caller, &args[0]).coerce_num()?.floor() as i64;
+                let (y, _, _) = serial_to_ymd_1900(serial);
+                Ok(Value::Num(y as f64))
+            }
+            "MONTH" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let serial = self.eval_scalar(caller, &args[0]).coerce_num()?.floor() as i64;
+                let (_, m, _) = serial_to_ymd_1900(serial);
+                Ok(Value::Num(m as f64))
+            }
+            "DAY" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let serial = self.eval_scalar(caller, &args[0]).coerce_num()?.floor() as i64;
+                let (_, _, d) = serial_to_ymd_1900(serial);
+                Ok(Value::Num(d as f64))
+            }
+            "HOUR" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let f = self.eval_scalar(caller, &args[0]).coerce_num()?.rem_euclid(1.0);
+                let secs = (f * 86400.0).round() as u64;
+                Ok(Value::Num(((secs / 3600) % 24) as f64))
+            }
+            "MINUTE" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let f = self.eval_scalar(caller, &args[0]).coerce_num()?.rem_euclid(1.0);
+                let secs = (f * 86400.0).round() as u64;
+                Ok(Value::Num(((secs % 3600) / 60) as f64))
+            }
+            "SECOND" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let f = self.eval_scalar(caller, &args[0]).coerce_num()?.rem_euclid(1.0);
+                let secs = (f * 86400.0).round() as u64;
+                Ok(Value::Num((secs % 60) as f64))
+            }
+            "TODAY" => Ok(Value::Num(now_serial().floor())),
+            "NOW" => Ok(Value::Num(now_serial())),
+            "DAYS" => {
+                if args.len() != 2 {
+                    return Err(CalcErr::Value);
+                }
+                let end = self.eval_scalar(caller, &args[0]).coerce_num()?.floor();
+                let start = self.eval_scalar(caller, &args[1]).coerce_num()?.floor();
+                Ok(Value::Num(end - start))
+            }
+            "DATEVALUE" => {
+                if args.len() != 1 {
+                    return Err(CalcErr::Value);
+                }
+                let s = self.eval_scalar(caller, &args[0]).coerce_str()?;
+                parse_date_text(s.trim()).map(|d| Value::Num(d as f64)).ok_or(CalcErr::Value)
+            }
+            "WEEKNUM" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(CalcErr::Value);
+                }
+                let serial = self.eval_scalar(caller, &args[0]).coerce_num()?.floor() as i64;
+                let (y, _, _) = serial_to_ymd_1900(serial);
+                let jan1_serial = ymd_to_serial_1900(y, 1, 1);
+                let days = serial - jan1_serial;
+                let jan1_sun0 = (jan1_serial - 1).rem_euclid(7);
+                Ok(Value::Num(((days + jan1_sun0) / 7 + 1) as f64))
+            }
             "DATEDIF" => {
                 if args.len() != 3 {
                     return Err(CalcErr::Value);
@@ -2316,13 +3121,52 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(Value::Num(calc_datedif(start, end, &unit)? as f64))
             }
-            "NETWORKDAYS" => {
-                if args.len() < 2 || args.len() > 3 {
+            "NETWORKDAYS" | "NETWORKDAYS.INTL" | "WORKDAY" | "WORKDAY.INTL" => {
+                let intl = clean_name.ends_with(".INTL");
+                let max_args = if intl { 4 } else { 3 };
+                if args.len() < 2 || args.len() > max_args {
                     return Err(CalcErr::Value);
                 }
-                let s = self.eval_scalar(caller, &args[0]).coerce_num()?.floor() as i64;
-                let e = self.eval_scalar(caller, &args[1]).coerce_num()?.floor() as i64;
-                Ok(Value::Num(calc_networkdays(s, e) as f64))
+                let a = check_serial(self.eval_scalar(caller, &args[0]).coerce_num()?)?;
+                let b_raw = self.eval_scalar(caller, &args[1]).coerce_num()?;
+                let weekend = if intl && args.len() >= 3 && !matches!(args[2], Expr::EmptyArg) {
+                    let v = self.eval_scalar(caller, &args[2]);
+                    if let Value::Err(e) = v {
+                        return Err(e);
+                    }
+                    parse_weekend(Some(&v))?
+                } else {
+                    parse_weekend(None)?
+                };
+                let hol_idx = if intl { 3 } else { 2 };
+                let mut holidays = HashSet::new();
+                if args.len() > hol_idx && !matches!(args[hol_idx], Expr::EmptyArg) {
+                    for h in self.collect_numbers_from_args(caller, &args[hol_idx..=hol_idx])? {
+                        holidays.insert(check_serial(h)?);
+                    }
+                }
+                if clean_name.starts_with("NETWORKDAYS") {
+                    let b = check_serial(b_raw)?;
+                    return Ok(Value::Num(calc_networkdays_intl(a, b, &weekend, &holidays) as f64));
+                }
+                // WORKDAY: 시작일 다음 날부터 근무일을 days 개 센다.
+                if !b_raw.is_finite() || b_raw.abs() > MAX_SERIAL as f64 {
+                    return Err(CalcErr::Num);
+                }
+                let days = b_raw.trunc() as i64;
+                let step = if days >= 0 { 1 } else { -1 };
+                let mut cur = a;
+                let mut left = days.abs();
+                while left > 0 {
+                    cur += step;
+                    if cur < 0 || cur > MAX_SERIAL {
+                        return Err(CalcErr::Num);
+                    }
+                    if !weekend[weekday_mon0(cur)] && !holidays.contains(&cur) {
+                        left -= 1;
+                    }
+                }
+                Ok(Value::Num(cur as f64))
             }
             "EDATE" => {
                 if args.len() != 2 {
@@ -2357,25 +3201,23 @@ impl<'a> Evaluator<'a> {
                 } else {
                     1
                 };
-                // 1900-01-01 (serial 1, 윤년 버그 보정 후) 요일 계산:
-                // 엑셀은 serial >= 61 기준 실제 요일과 일치하며, (serial - 1) % 7 에서 0=일, 1=월, ..., 6=토
-                let sun0 = ((serial - 1).rem_euclid(7)) as i32; // 0=Sun, 1=Mon, ..., 6=Sat
+                let sun0 = ((serial - 1).rem_euclid(7)) as i32;
                 let ans = match ret_type {
-                    1 | 17 => sun0 + 1,                       // 1(Sun)..7(Sat)
-                    2 | 11 => ((sun0 + 6) % 7) + 1,           // 1(Mon)..7(Sun)
-                    3 => (sun0 + 6) % 7,                      // 0(Mon)..6(Sun)
-                    12 => ((sun0 + 5) % 7) + 1,               // 1(Tue)..7(Mon)
-                    13 => ((sun0 + 4) % 7) + 1,               // 1(Wed)..7(Tue)
-                    14 => ((sun0 + 3) % 7) + 1,               // 1(Thu)..7(Wed)
-                    15 => ((sun0 + 2) % 7) + 1,               // 1(Fri)..7(Thu)
-                    16 => (sun0 % 7) + 1,                     // 1(Sat)..7(Fri)
+                    1 | 17 => sun0 + 1,
+                    2 | 11 => ((sun0 + 6) % 7) + 1,
+                    3 => (sun0 + 6) % 7,
+                    12 => ((sun0 + 5) % 7) + 1,
+                    13 => ((sun0 + 4) % 7) + 1,
+                    14 => ((sun0 + 3) % 7) + 1,
+                    15 => ((sun0 + 2) % 7) + 1,
+                    16 => (sun0 % 7) + 1,
                     _ => return Err(CalcErr::Num),
                 };
                 Ok(Value::Num(ans as f64))
             }
 
             // ----------------------------------------------------------------
-            // [7] 재무 (10개): NPV, IRR, MIRR, SLN, DB, DDB, SYD, PMT, IPMT, PPMT
+            // [7] 재무 (10개)
             // ----------------------------------------------------------------
             "NPV" => {
                 if args.len() < 2 {
@@ -2386,7 +3228,6 @@ impl<'a> Evaluator<'a> {
                     return Err(CalcErr::Div0);
                 }
                 let flows = self.collect_numbers_from_args(caller, &args[1..])?;
-                // 왜: 엑셀 NPV는 첫 번째 현금흐름을 0기가 아니라 1기 말(t=1)로 할인한다.
                 let mut total = 0.0;
                 for (i, &cf) in flows.iter().enumerate() {
                     total += cf / (1.0 + rate).powi((i + 1) as i32);
@@ -2533,12 +3374,10 @@ impl<'a> Evaluator<'a> {
             }
 
             // ----------------------------------------------------------------
-            // [8] 통계 (11개): FORECAST, STDEV.S, STDEV.P, VAR.S, CORREL,
-            //                 SLOPE, INTERCEPT, RSQ, MEDIAN, QUARTILE, PERCENTILE
+            // [8] 통계 (11개)
             // ----------------------------------------------------------------
             "STDEV.S" | "STDEV" | "STDEVS" => {
                 let nums = self.collect_numbers_from_args(caller, args)?;
-                // Rob 지정 셈법: ① 숫자만 고름 ② n < 2 이면 #DIV/0! ③ 평균 ④ (값-평균)^2 합 / (n-1) 제곱근
                 if nums.len() < 2 {
                     return Err(CalcErr::Div0);
                 }
@@ -2648,7 +3487,7 @@ impl<'a> Evaluator<'a> {
             }
 
             // ----------------------------------------------------------------
-            // [9] 기타 (1개): HYPERLINK
+            // [9] 기타 (1개)
             // ----------------------------------------------------------------
             "HYPERLINK" => {
                 if args.is_empty() || args.len() > 2 {
@@ -2666,10 +3505,6 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    // ========================================================================
-    // 보조 평가 헬퍼 (SUBTOTAL, 범위 평탄화, 쌍 데이터 추출)
-    // ========================================================================
-
     fn eval_subtotal(&mut self, caller: CellAddr, args: &[Expr]) -> Result<Value, CalcErr> {
         if args.len() < 2 {
             return Err(CalcErr::Value);
@@ -2686,7 +3521,6 @@ impl<'a> Evaluator<'a> {
             if let Value::Ref(rr) = v {
                 let sheet = self.wb.sheets.get(rr.sheet_idx).ok_or(CalcErr::Ref)?;
                 for r in rr.start_row..=rr.end_row {
-                    // SUBTOTAL 101~111은 숨은 행(row_height == 0.0)을 제외한다.
                     if skip_hidden {
                         let rh = sheet
                             .row_heights_pt
@@ -2698,7 +3532,6 @@ impl<'a> Evaluator<'a> {
                         }
                     }
                     for c in rr.start_col..=rr.end_col {
-                        // 중첩된 SUBTOTAL 셀은 이중 합산을 막기 위해 건너뛴다.
                         let f_str = sheet.formula_str(&self.wb.pool, r, c);
                         if f_str.to_ascii_uppercase().contains("SUBTOTAL(") {
                             continue;
@@ -2897,7 +3730,7 @@ impl MapInfToZero for Value {
 }
 
 // ============================================================================
-// 5. 산술·비교·조건 매칭·재무·통계·날짜 수학 구현부
+// 5. 연산자·보조 수학 함수
 // ============================================================================
 
 fn eval_binary_scalar(op: BinOp, left: &Value, right: &Value) -> Value {
@@ -2965,9 +3798,6 @@ fn eval_binary_scalar(op: BinOp, left: &Value, right: &Value) -> Value {
     }
 }
 
-/// 엑셀 값 비교 규칙:
-/// 빈 칸(Blank)은 숫자와 비교할 때 0, 문자와 비교할 때 "", 논리와 비교할 때 FALSE.
-/// 서로 다른 타입끼리는 Number < Text < Bool 순서이며 대소문자를 구분하지 않는다.
 pub fn excel_compare_values(a: &Value, b: &Value) -> Ordering {
     match (a, b) {
         (Value::Blank, Value::Blank) => Ordering::Equal,
@@ -3024,7 +3854,175 @@ pub fn excel_round_away_from_zero(val: f64, digits: i32) -> Result<f64, CalcErr>
     }
 }
 
-/// SUMIF / COUNTIF / SUMIFS 조건 매처 (`>=100`, `<>`, 와일드카드 `*`, `?`, `~*`)
+pub fn excel_round_up(val: f64, digits: i32) -> Result<f64, CalcErr> {
+    excel_round_with(val, digits, RoundingStrategy::AwayFromZero)
+}
+
+pub fn excel_round_down(val: f64, digits: i32) -> Result<f64, CalcErr> {
+    excel_round_with(val, digits, RoundingStrategy::ToZero)
+}
+
+/// ROUNDUP/ROUNDDOWN 공통: 15자리 유효숫자로 정리한 뒤(0.1+0.2 → 0.3) 자릿수에서 자른다.
+/// 여기서만 RoundingStrategy::AwayFromZero(무조건 올림)가 맞다 — ROUND 에는 쓰지 말 것.
+fn excel_round_with(val: f64, digits: i32, strategy: RoundingStrategy) -> Result<f64, CalcErr> {
+    if !val.is_finite() {
+        return Err(CalcErr::Num);
+    }
+    if val == 0.0 {
+        return Ok(0.0);
+    }
+    let d = crate::numfmt::round_sig15(Decimal::from_f64_retain(val).ok_or(CalcErr::Num)?);
+    if digits >= 0 {
+        d.round_dp_with_strategy(digits.min(28) as u32, strategy).to_f64().ok_or(CalcErr::Num)
+    } else {
+        let p = (-digits).min(28) as u32;
+        let factor = Decimal::from_i128_with_scale(10i128.pow(p), 0);
+        ((d / factor).round_dp_with_strategy(0, strategy) * factor).to_f64().ok_or(CalcErr::Num)
+    }
+}
+
+/// n/sig 같은 몫을 15자리로 정리(4.2/0.1 = 41.99999… → 42)
+fn clean_quotient(q: f64) -> f64 {
+    Decimal::from_f64_retain(q)
+        .map(crate::numfmt::round_sig15)
+        .and_then(|d| d.to_f64())
+        .unwrap_or(q)
+}
+
+fn clean_product(q: f64, sig: f64) -> f64 {
+    clean_quotient(q * sig)
+}
+
+/// "2026-11-12" "2024/2/29" "2024.2.29" 꼴만 받는다(연-월-일). 범위 밖이면 None.
+fn parse_date_text(s: &str) -> Option<i64> {
+    let parts: Vec<&str> = s.split(|c| c == '-' || c == '/' || c == '.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let y: i32 = parts[0].trim().parse().ok()?;
+    let m: u32 = parts[1].trim().parse().ok()?;
+    let d: u32 = parts[2].trim().parse().ok()?;
+    if !(1900..=9999).contains(&y) || !(1..=12).contains(&m) || d == 0 {
+        return None;
+    }
+    if !(y == 1900 && m == 2 && d == 29) && d > days_in_month_gregorian(y, m) {
+        return None;
+    }
+    Some(ymd_to_serial_1900(y, m, d))
+}
+
+/// 기기 시간대(초). Swift 쪽에서 TimeZone.current.secondsFromGMT() 로 넣어 준다.
+static TZ_OFFSET_SECS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+pub fn set_timezone_offset_seconds(secs: i64) {
+    TZ_OFFSET_SECS.store(secs.clamp(-14 * 3600, 14 * 3600), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 지금 시각의 엑셀 일련번호(1970-01-01 = 25569).
+fn now_serial() -> f64 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+        + TZ_OFFSET_SECS.load(std::sync::atomic::Ordering::Relaxed) as f64;
+    25569.0 + secs / 86400.0
+}
+
+/// 0 이상 1 미만 난수(xorshift64*, 시각으로 씨앗). 보기용이라 암호 품질은 필요 없다.
+fn next_random() -> f64 {
+    use std::sync::atomic::{AtomicU64, Ordering as AO};
+    static STATE: AtomicU64 = AtomicU64::new(0);
+    let mut x = STATE.load(AO::Relaxed);
+    if x == 0 {
+        x = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9E37_79B9_7F4A_7C15)
+            | 1;
+    }
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    STATE.store(x, AO::Relaxed);
+    (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// 주말 표: 월=0 … 일=6. true 면 쉬는 날.
+fn parse_weekend(v: Option<&Value>) -> Result<[bool; 7], CalcErr> {
+    let mut w = [false; 7];
+    match v {
+        None | Some(Value::Blank) => {
+            w[5] = true;
+            w[6] = true;
+        }
+        Some(Value::Str(s)) => {
+            let b = s.as_bytes();
+            if b.len() != 7 || !b.iter().all(|c| *c == b'0' || *c == b'1') {
+                return Err(CalcErr::Value);
+            }
+            for i in 0..7 {
+                w[i] = b[i] == b'1';
+            }
+            if w.iter().all(|x| *x) {
+                return Err(CalcErr::Value);
+            }
+        }
+        Some(other) => {
+            let n = other.coerce_num()?;
+            if n.fract() != 0.0 {
+                return Err(CalcErr::Num);
+            }
+            match n as i64 {
+                // 1: 토·일, 2: 일·월, … 7: 금·토
+                k @ 1..=7 => {
+                    let first = ((k + 4) % 7) as usize; // 1 → 토(5), 7 → 금(4)
+                    w[first] = true;
+                    w[(first + 1) % 7] = true;
+                }
+                // 11: 일만, 12: 월만, … 17: 토만
+                k @ 11..=17 => w[((k - 11 + 6) % 7) as usize] = true,
+                _ => return Err(CalcErr::Num),
+            }
+        }
+    }
+    Ok(w)
+}
+
+/// 일련번호의 요일(월=0 … 일=6). 엑셀은 일련번호 1(1900-01-01)을 일요일로 본다.
+fn weekday_mon0(serial: i64) -> usize {
+    ((serial - 1).rem_euclid(7) as usize + 6) % 7
+}
+
+const MAX_SERIAL: i64 = 2_958_465; // 9999-12-31
+
+fn check_serial(v: f64) -> Result<i64, CalcErr> {
+    if !v.is_finite() || v < 0.0 || v > MAX_SERIAL as f64 + 1.0 {
+        return Err(CalcErr::Num);
+    }
+    Ok(v.floor() as i64)
+}
+
+/// NETWORKDAYS(.INTL): 주 단위로 셈하고 남은 날만 하나씩 본다(긴 구간에서도 즉시 끝남).
+fn calc_networkdays_intl(start: i64, end: i64, weekend: &[bool; 7], holidays: &HashSet<i64>) -> i64 {
+    let sign = if start <= end { 1 } else { -1 };
+    let (a, b) = if start <= end { (start, end) } else { (end, start) };
+    let per_week = weekend.iter().filter(|x| !**x).count() as i64;
+    let total = b - a + 1;
+    let mut count = (total / 7) * per_week;
+    let rem_start = a + (total / 7) * 7;
+    for s in rem_start..=b {
+        if !weekend[weekday_mon0(s)] {
+            count += 1;
+        }
+    }
+    for h in holidays {
+        if *h >= a && *h <= b && !weekend[weekday_mon0(*h)] {
+            count -= 1;
+        }
+    }
+    count * sign
+}
+
 struct CriteriaMatcher {
     op: BinOp,
     num_target: Option<f64>,
@@ -3192,7 +4190,6 @@ fn wildcard_helper(p: &[char], pi: usize, t: &[char], ti: usize) -> bool {
     ti < t.len() && p[pi] == t[ti] && wildcard_helper(p, pi + 1, t, ti + 1)
 }
 
-/// MATCH / VLOOKUP 인덱스 검색 (1-based 반환)
 fn match_index(lookup: &Value, values: &[Value], match_type: i32) -> Option<usize> {
     if match_type == 0 {
         let is_wild = if let Value::Str(s) = lookup {
@@ -3207,14 +4204,14 @@ fn match_index(lookup: &Value, values: &[Value], match_type: i32) -> Option<usiz
                         return Some(i + 1);
                     }
                 }
-            } else if same_variant_type(lookup, v) && excel_compare_values(lookup, v) == Ordering::Equal
+            } else if same_variant_type(lookup, v)
+                && excel_compare_values(lookup, v) == Ordering::Equal
             {
                 return Some(i + 1);
             }
         }
         None
     } else if match_type > 0 {
-        // 오름차순 근사 일치: lookup 이하인 가장 큰 값
         let mut best_idx: Option<usize> = None;
         for (i, v) in values.iter().enumerate() {
             if !same_variant_type(lookup, v) {
@@ -3228,7 +4225,6 @@ fn match_index(lookup: &Value, values: &[Value], match_type: i32) -> Option<usiz
         }
         best_idx
     } else {
-        // 내림차순 근사 일치(-1): lookup 이상인 가장 작은 값
         let mut best_idx: Option<usize> = None;
         for (i, v) in values.iter().enumerate() {
             if !same_variant_type(lookup, v) {
@@ -3252,10 +4248,6 @@ fn same_variant_type(a: &Value, b: &Value) -> bool {
             | (Value::Bool(_), Value::Bool(_))
     )
 }
-
-// ============================================================================
-// 6. 날짜 계산 헬퍼 (1900 윤년 버그 포함)
-// ============================================================================
 
 fn serial_to_ymd_1900(serial: i64) -> (i32, u32, u32) {
     if serial <= 0 {
@@ -3377,29 +4369,6 @@ fn calc_datedif(start: i64, end: i64, unit: &str) -> Result<i64, CalcErr> {
     }
 }
 
-fn calc_networkdays(start: i64, end: i64) -> i64 {
-    let sign = if start <= end { 1 } else { -1 };
-    let (a, b) = if start <= end {
-        (start, end)
-    } else {
-        (end, start)
-    };
-    let mut workdays = 0i64;
-    for s in a..=b {
-        let sun0 = (s - 1).rem_euclid(7); // 0=Sun, 6=Sat
-        if sun0 != 0 && sun0 != 6 {
-            workdays += 1;
-        }
-    }
-    workdays * sign
-}
-
-// ============================================================================
-// 7. 재무·통계 수학 함수 구현부 (DB 3자리 반올림, DDB 잔존가 하한, IRR 뉴턴+이분법)
-// ============================================================================
-
-/// DB (정률법 감가상각):
-/// 왜: 엑셀 DB 함수는 감가율 `1 - (salvage / cost)^(1 / life)`를 반드시 **소수 셋째 자리에서 반올림**한다.
 fn calc_db(cost: f64, salvage: f64, life: f64, period: f64, month: f64) -> Result<f64, CalcErr> {
     if cost < 0.0 || salvage < 0.0 || life <= 0.0 || period <= 0.0 || month <= 0.0 || month > 12.0 {
         return Err(CalcErr::Num);
@@ -3446,7 +4415,6 @@ fn calc_db(cost: f64, salvage: f64, life: f64, period: f64, month: f64) -> Resul
     Ok(0.0)
 }
 
-/// DDB (이중체감법 감가상각): 장부가액이 잔존가(salvage) 아래로 내려가지 않는다.
 fn calc_ddb(cost: f64, salvage: f64, life: f64, period: f64, factor: f64) -> Result<f64, CalcErr> {
     if cost < 0.0 || salvage < 0.0 || life <= 0.0 || period <= 0.0 || period > life || factor <= 0.0
     {
@@ -3469,7 +4437,6 @@ fn calc_ddb(cost: f64, salvage: f64, life: f64, period: f64, factor: f64) -> Res
     Ok(dep)
 }
 
-/// IRR: 초기값(기본 0.1) 뉴턴-랩슨법 + 실패 시 구간 탐색 이분법 보강, 허용오차 1e-7
 fn solve_irr(flows: &[f64], guess: f64) -> Result<f64, CalcErr> {
     let has_pos = flows.iter().any(|&v| v > 0.0);
     let has_neg = flows.iter().any(|&v| v < 0.0);
@@ -3492,7 +4459,6 @@ fn solve_irr(flows: &[f64], guess: f64) -> Result<f64, CalcErr> {
         (f, df)
     };
 
-    // 1단계: 뉴턴법
     let mut r = guess.max(-0.99);
     for _ in 0..100 {
         let (f, df) = npv_at(r);
@@ -3509,7 +4475,6 @@ fn solve_irr(flows: &[f64], guess: f64) -> Result<f64, CalcErr> {
         r = next_r.clamp(-0.9999, 100.0);
     }
 
-    // 2단계: 이분법(Bisection) 보강
     let mut prev_r = -0.95;
     let (mut prev_f, _) = npv_at(prev_r);
     let mut step = 0.05;
@@ -3587,7 +4552,14 @@ fn calc_fv(rate: f64, nper: f64, pmt: f64, pv: f64, p_type: i32) -> f64 {
     -(pv * pvif + pmt * (1.0 + rate * t) * (pvif - 1.0) / rate)
 }
 
-fn calc_ipmt(rate: f64, per: f64, nper: f64, pv: f64, fv: f64, p_type: i32) -> Result<f64, CalcErr> {
+fn calc_ipmt(
+    rate: f64,
+    per: f64,
+    nper: f64,
+    pv: f64,
+    fv: f64,
+    p_type: i32,
+) -> Result<f64, CalcErr> {
     if per < 1.0 || per > nper + 1e-9 {
         return Err(CalcErr::Num);
     }
@@ -3605,7 +4577,6 @@ fn calc_ipmt(rate: f64, per: f64, nper: f64, pv: f64, fv: f64, p_type: i32) -> R
     }
 }
 
-/// PERCENTILE.INC / QUARTILE.INC (포함 방식 선형 보간)
 fn percentile_inc(nums: &mut [f64], k: f64) -> Result<f64, CalcErr> {
     if nums.is_empty() || !(0.0..=1.0).contains(&k) {
         return Err(CalcErr::Num);
@@ -3648,7 +4619,7 @@ fn linear_regression(xs: &[f64], ys: &[f64]) -> Result<(f64, f64, f64), CalcErr>
 }
 
 // ============================================================================
-// 8. golden_values.json 검증기 (시트별 일치 수 / 전체 수 + 최대 20개 오차 리포트)
+// 6. golden_values 비교기
 // ============================================================================
 
 #[derive(Debug, Clone)]
@@ -3656,17 +4627,14 @@ pub struct SheetComparisonReport {
     pub sheet_name: String,
     pub matched: usize,
     pub total: usize,
-    pub diffs: Vec<(String, String, String)>, // (주소, 기대, 실제) 최대 20개
+    pub diffs: Vec<(String, String, String)>,
 }
 
-/// 워크북 계산 결과를 기대값 맵(`시트명 -> (셀주소 -> 기대값)`)과 비교한다.
-/// 숫자는 상대오차 `1e-9` (0 근처는 절대오차 `1e-9`) 기준, 문자열은 완전 일치로 판정한다.
 pub fn compare_with_golden(
     wb: &Workbook,
     calc_res: &WorkbookCalcResult,
     golden: &HashMap<String, HashMap<String, Value>>,
 ) -> (usize, usize, Vec<SheetComparisonReport>) {
-    // 맞춰 가는 순서: 03 -> 05 -> 06 -> 02 -> 04 -> 01 -> 00
     let priority = ["03", "05", "06", "02", "04", "01", "00"];
     let mut sheet_indices: Vec<usize> = (0..wb.sheets.len()).collect();
     sheet_indices.sort_by_key(|&idx| {
@@ -3796,7 +4764,7 @@ fn format_debug_val(v: &Value) -> String {
 }
 
 // ============================================================================
-// 9. P1-c 단위 시험 (64개 함수 전체 및 특수 함정 검증)
+// 7. P1b 단위 시험 (신규 확장된 함수 검증)
 // ============================================================================
 
 #[cfg(test)]
@@ -4095,6 +5063,211 @@ mod tests {
         );
     }
 
+    // ---- 제미나이 P1b 추가 시험 ----
+    fn make_test_wb(cells: &[(&str, Value)], formulas: &[(&str, &str)]) -> Workbook {
+        let mut pool = StringPool::default();
+        let mut row_map: HashMap<u32, Vec<Cell>> = HashMap::new();
+        let mut formula_map: HashMap<u64, FormulaEntry> = HashMap::new();
+        let mut max_r = 1u32;
+        let mut max_c = 1u32;
+
+        for (addr, val) in cells {
+            let (r, c) = parse_cell_ref_1based(addr).unwrap();
+            max_r = max_r.max(r);
+            max_c = max_c.max(c);
+            let (kind, payload) = match val {
+                Value::Num(n) => (CellKind::Num as u8, CellPayload { num: *n }),
+                Value::Str(s) => (
+                    CellKind::Str as u8,
+                    CellPayload {
+                        str_span: pool.intern(s),
+                    },
+                ),
+                Value::Bool(b) => (
+                    CellKind::Bool as u8,
+                    CellPayload {
+                        boolean: if *b { 1 } else { 0 },
+                    },
+                ),
+                _ => (CellKind::Blank as u8, CellPayload { raw: 0 }),
+            };
+            row_map.entry(r).or_default().push(Cell {
+                col: c,
+                kind,
+                flags: 0,
+                style_idx: 0,
+                payload,
+            });
+        }
+
+        for (addr, f_str) in formulas {
+            let (r, c) = parse_cell_ref_1based(addr).unwrap();
+            max_r = max_r.max(r);
+            max_c = max_c.max(c);
+            let span = pool.intern(f_str);
+            formula_map.insert(
+                crate::cell_key(r, c),
+                FormulaEntry {
+                    kind: FormulaKind::Normal,
+                    text: span,
+                    ref_range: None,
+                    shared_index: None,
+                },
+            );
+            let list = row_map.entry(r).or_default();
+            if !list.iter().any(|cell| cell.col == c) {
+                list.push(Cell {
+                    col: c,
+                    kind: CellKind::Blank as u8,
+                    flags: CELL_FLAG_HAS_FORMULA,
+                    style_idx: 0,
+                    payload: CellPayload { raw: 0 },
+                });
+            }
+        }
+
+        let mut rows = Rows::default();
+        let mut sorted_r: Vec<u32> = row_map.keys().copied().collect();
+        sorted_r.sort_unstable();
+        for r in sorted_r {
+            let mut cs = row_map.remove(&r).unwrap();
+            cs.sort_by_key(|c| c.col);
+            rows.push_row(r, &cs);
+        }
+
+        let sheet = Sheet {
+            name: "P1b_Test".to_string(),
+            sheet_id: 1,
+            state: SheetState::Visible,
+            max_row: max_r,
+            max_col: max_c,
+            cell_count: rows.cells.len() as u32,
+            col_widths_pt: vec![50.0; max_c as usize],
+            row_heights_pt: vec![15.0; max_r as usize],
+            default_col_width_pt: 50.0,
+            default_row_height_pt: 15.0,
+            data: rows,
+            formulas: formula_map,
+            merges: Vec::new(),
+            freeze: None,
+            show_grid_lines: true,
+            auto_filter: None,
+            validations: Vec::new(),
+            comments: Vec::new(),
+        };
+
+        Workbook {
+            path: String::new(),
+            date1904: false,
+            full_calc_on_load: true,
+            defined_names: Vec::new(),
+            styles: StyleSheet::default_with_theme(Vec::new()),
+            pool,
+            sheets: vec![sheet],
+        }
+    }
+
+    fn eval_formula(f: &str) -> Value {
+        let wb = make_test_wb(&[], &[("A1", f)]);
+        let res = evaluate_workbook(&wb);
+        res.values
+            .get(&CellAddr {
+                sheet: 0,
+                row: 1,
+                col: 1,
+            })
+            .cloned()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_new_math_functions() {
+        assert!(values_match_golden(&Value::Num(24.0), &eval_formula("PRODUCT(2, 3, 4)")));
+        assert!(values_match_golden(&Value::Num(3.2), &eval_formula("ROUNDUP(3.14159, 1)")));
+        assert!(values_match_golden(&Value::Num(3.1), &eval_formula("ROUNDDOWN(3.14159, 1)")));
+        assert!(values_match_golden(&Value::Num(3.0), &eval_formula("TRUNC(3.9)")));
+        assert!(values_match_golden(&Value::Num(-4.0), &eval_formula("INT(-3.2)")));
+        assert!(values_match_golden(&Value::Num(1.0), &eval_formula("MOD(-3, 2)"))); // 엑셀 식 MOD(-3,2)=1
+        assert!(values_match_golden(&Value::Num(1.0), &eval_formula("SIGN(42)")));
+        assert!(values_match_golden(&Value::Num(8.0), &eval_formula("POWER(2, 3)")));
+        assert!(values_match_golden(&Value::Num(5.0), &eval_formula("SQRT(25)")));
+        assert!(values_match_golden(&Value::Num(5.0), &eval_formula("CEILING(4.2, 1)")));
+        assert!(values_match_golden(&Value::Num(4.0), &eval_formula("FLOOR(4.8, 1)")));
+        assert!(values_match_golden(&Value::Num(10.0), &eval_formula("MROUND(11, 5)")));
+        assert!(values_match_golden(&Value::Num(1.0), &eval_formula("LN(EXP(1))")));
+        assert!(values_match_golden(&Value::Num(3.0), &eval_formula("LOG(1000, 10)")));
+        assert!(values_match_golden(&Value::Num(2.0), &eval_formula("LOG10(100)")));
+    }
+
+    #[test]
+    fn test_new_logic_and_info() {
+        assert_eq!(eval_formula("IFS(1=2, \"A\", 2=2, \"B\")"), Value::Str("B".into()));
+        assert_eq!(eval_formula("SWITCH(2, 1, \"one\", 2, \"two\", \"def\")"), Value::Str("two".into()));
+        assert_eq!(eval_formula("NOT(TRUE)"), Value::Bool(false));
+        assert_eq!(eval_formula("XOR(TRUE, FALSE, TRUE)"), Value::Bool(false));
+        assert_eq!(eval_formula("XOR(TRUE, FALSE, FALSE)"), Value::Bool(true));
+        assert_eq!(eval_formula("IFNA(NA(), 123)"), Value::Num(123.0));
+        assert_eq!(eval_formula("ISBLANK(B1)"), Value::Bool(true));
+        assert_eq!(eval_formula("ISERR(1/0)"), Value::Bool(true));
+        assert_eq!(eval_formula("ISERR(NA())"), Value::Bool(false));
+        assert_eq!(eval_formula("ISERROR(NA())"), Value::Bool(true));
+        assert_eq!(eval_formula("ERROR.TYPE(1/0)"), Value::Num(2.0));
+    }
+
+    #[test]
+    fn test_new_lookup_and_reference() {
+        let wb = make_test_wb(
+            &[
+                ("A1", Value::Num(10.0)), ("B1", Value::Num(20.0)), ("C1", Value::Num(30.0)),
+                ("A2", Value::Num(100.0)), ("B2", Value::Num(200.0)), ("C2", Value::Num(300.0)),
+            ],
+            &[
+                ("D1", "HLOOKUP(20, A1:C2, 2, FALSE)"),
+                ("D2", "LOOKUP(25, A1:C1, A2:C2)"),
+                ("D3", "ROWS(A1:C2)"),
+                ("D4", "COLUMNS(A1:C2)"),
+                ("D5", "ROW(B2)"),
+                ("D6", "COLUMN(B2)"),
+            ],
+        );
+        let res = evaluate_workbook(&wb);
+        assert_eq!(res.values[&CellAddr { sheet: 0, row: 1, col: 4 }], Value::Num(200.0));
+        assert_eq!(res.values[&CellAddr { sheet: 0, row: 2, col: 4 }], Value::Num(200.0)); // LOOKUP 근사
+        assert_eq!(res.values[&CellAddr { sheet: 0, row: 3, col: 4 }], Value::Num(2.0));
+        assert_eq!(res.values[&CellAddr { sheet: 0, row: 4, col: 4 }], Value::Num(3.0));
+        assert_eq!(res.values[&CellAddr { sheet: 0, row: 5, col: 4 }], Value::Num(2.0));
+        assert_eq!(res.values[&CellAddr { sheet: 0, row: 6, col: 4 }], Value::Num(2.0));
+    }
+
+    #[test]
+    fn test_new_text_functions() {
+        assert_eq!(eval_formula("CONCATENATE(\"A\", \"B\", \"C\")"), Value::Str("ABC".into()));
+        assert_eq!(eval_formula("CONCAT(\"A\", \"B\", \"C\")"), Value::Str("ABC".into()));
+        assert_eq!(eval_formula("TEXTJOIN(\"-\", TRUE, \"A\", \"\", \"B\")"), Value::Str("A-B".into()));
+        assert_eq!(eval_formula("UPPER(\"hello\")"), Value::Str("HELLO".into()));
+        assert_eq!(eval_formula("LOWER(\"WORLD\")"), Value::Str("world".into()));
+        assert_eq!(eval_formula("REPLACE(\"abcdef\", 3, 2, \"XX\")"), Value::Str("abXXef".into()));
+        assert_eq!(eval_formula("SEARCH(\"B*D\", \"aBcDe\")"), Value::Num(2.0));
+        assert_eq!(eval_formula("VALUE(\"1,234.5\")"), Value::Num(1234.5));
+        assert_eq!(eval_formula("EXACT(\"case\", \"CASE\")"), Value::Bool(false));
+        assert_eq!(eval_formula("CHAR(65)"), Value::Str("A".into()));
+        assert_eq!(eval_formula("CODE(\"A\")"), Value::Num(65.0));
+    }
+
+    #[test]
+    fn test_new_date_and_time_functions() {
+        assert_eq!(eval_formula("DATE(2026, 11, 12)"), Value::Num(46338.0));
+        assert_eq!(eval_formula("YEAR(46338)"), Value::Num(2026.0));
+        assert_eq!(eval_formula("MONTH(46338)"), Value::Num(11.0));
+        assert_eq!(eval_formula("DAY(46338)"), Value::Num(12.0));
+        assert!(values_match_golden(&Value::Num(0.5), &eval_formula("TIME(12, 0, 0)")));
+        assert_eq!(eval_formula("DAYS(46340, 46338)"), Value::Num(2.0));
+        assert_eq!(eval_formula("DATEVALUE(\"2026-11-12\")"), Value::Num(46338.0));
+        // WORKDAY 검증 (2026-11-06 금요일 + 1영업일 = 2026-11-09 월요일)
+        // 2026-11-06 = 46332, 2026-11-09 = 46335
+        assert_eq!(eval_formula("WORKDAY(46332, 1)"), Value::Num(46335.0));
+    }
+
     // ---- Claude 검수 추가 (2026-11-11) ----
     #[test]
     fn review_round_is_half_away_not_ceiling() {
@@ -4164,6 +5337,21 @@ mod tests {
         assert_eq!(n("STDEV.S(1)"), Value::Err(CalcErr::Div0));
         assert_eq!(n("ROUND(1234.5678,-2)"), Value::Num(1200.0));
         assert_eq!(n("EDATE(DATE(2025,1,31),1)"), n("DATE(2025,2,28)"));
+        // P1b 검수
+        // ROWS(A:A) 는 엑셀이면 1048576 이지만, 열 전체 참조를 쓰는 영역까지로 자르므로 사용 행 수가 나온다(알려진 차이).
+        assert_eq!(n("ROUNDUP(0.1+0.2,1)"), Value::Num(0.3));
+        assert_eq!(n("ROUNDDOWN(1.005*1000,0)"), Value::Num(1005.0));
+        assert_eq!(n("CEILING(4.3,0.1)"), Value::Num(4.3));
+        assert_eq!(n("CEILING.MATH(-4.2)"), Value::Num(-4.0));
+        assert_eq!(n("FLOOR.MATH(-4.8)"), Value::Num(-5.0));
+        assert_eq!(n("FIXED(1234.567,-1)"), Value::Str("1,230".into()));
+        assert_eq!(n("VALUE(\"50%\")"), Value::Num(0.5));
+        assert_eq!(n("WORKDAY.INTL(46332,1,7)"), Value::Num(46334.0));
+        assert_eq!(n("NETWORKDAYS.INTL(46332,46345,11)"), Value::Num(12.0));
+        assert_eq!(n("NETWORKDAYS(46332,46345,{46335,46336})"), Value::Num(8.0));
+        assert_eq!(n("DATEVALUE(\"2025-2-29\")"), Value::Err(CalcErr::Value));
+        assert!(matches!(n("TODAY()"), Value::Num(d) if d > 46000.0 && d.fract() == 0.0));
+        assert!(matches!(n("RAND()"), Value::Num(r) if (0.0..1.0).contains(&r)));
     }
 
     #[test]
@@ -4176,10 +5364,23 @@ mod tests {
             "IRR({1,2,3})", "IRR({})", "DB(0,0,0,0)", "DATEDIF(5,1,\"Y\")", "TEXT(1,\"[\")",
             "LOG10(-1)", "1/0", "0^-1", "(-8)^(1/3)", "WEEKDAY(-1)", "EOMONTH(-1,-99999)",
             "Sheet9!A1", "없는이름", "SUM(((((((((((1)))))))))))", "1 2", "A1 B1", "(A1,B1)",
+            // P1b: 긴 반복·큰 수로 멈추거나 죽지 않을 것
+            "NETWORKDAYS(1,1E15)", "NETWORKDAYS(1,2958465)", "WORKDAY(1,1E15)", "WORKDAY(1,2900000)",
+            "WORKDAY.INTL(1,100,\"1111110\")", "NETWORKDAYS.INTL(1,10,\"abc\")", "WORKDAY(-1,1)",
+            "DATEVALUE(\"99999-1-1\")", "DATEVALUE(\"--\")", "VALUE(\"%\")", "VALUE(\"1e999\")",
+            "FIXED(1E300,-300)", "FIXED(1,1E9)", "ROUNDUP(1E308,2)", "ROUNDDOWN(-1E-300,300)",
+            "CEILING(1,1E-300)", "CEILING.MATH(1E300,1E-300)", "MROUND(1E300,1E-300)", "CHAR(0)", "CHAR(1E20)",
+            "CODE(\"\")", "REPLACE(\"a\",1E10,1,\"b\")", "SEARCH(\"\",\"\")", "TEXTJOIN(\",\",TRUE,A:A)",
+            "RANDBETWEEN(1E308,-1E308)", "RANDBETWEEN(-1E308,1E308)", "SWITCH()", "IFS()", "LOOKUP(1,{})",
+            "HLOOKUP(1,A1:B2,99)", "TIME(1E20,0,0)", "SUM(A:XFD)", "SUMPRODUCT(A:XFD,A:XFD)",
+            "COUNTIF(1:1048576,1)", "INDEX(A:XFD,1,1)", "MATCH(1,1:1,0)", "ROWS(A:A)", "SUM(ZZZZZZZZ:ZZZZZZZZ)", "SUM(0:0)", "SUM(9999999:9999999)", "WEEKNUM(1,99)", "ERROR.TYPE(1)", "LOG(1,1)", "LOG(-1)",
         ];
+        let t0 = std::time::Instant::now();
         for f in junk {
+            if std::env::var("JUNK_TRACE").is_ok() { eprintln!("JUNK {}", f); }
             let _ = ev1(f, &[]);
         }
+        assert!(t0.elapsed().as_secs() < 20, "쓰레기 입력 계산이 너무 오래 걸림: {:?}", t0.elapsed());
         let deep = format!("{}1{}", "(".repeat(20000), ")".repeat(20000));
         assert!(matches!(ev1(&deep, &[]), Value::Err(_)));
         let long = "1+".repeat(200_000) + "1";
