@@ -867,7 +867,7 @@ fn format_numeric(mut raw_n: f64, section: &NumFmtSection, suppress_sign: bool) 
 }
 
 /// 엑셀 정밀도: 유효숫자 15자리로 맞춘다. 이진 부동소수점 찌꺼기를 먼저 턴다.
-fn round_sig15(dec: Decimal) -> Decimal {
+pub(crate) fn round_sig15(dec: Decimal) -> Decimal {
     let abs = dec.abs();
     if abs.is_zero() {
         return dec;

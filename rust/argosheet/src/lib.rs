@@ -1,3 +1,4 @@
+pub mod calc;
 pub mod numfmt;
 pub mod package;
 pub mod parse;
