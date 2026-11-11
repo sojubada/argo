@@ -90,6 +90,22 @@ final class ArgoFocusCanvas: UIControl {
     var onPress: ((UIPress.PressType) -> Bool)?
     /// 가운데 선택 버튼.
     var onSelect: (() -> Void)?
+    /// 버튼을 뗐을 때(방향키 길게 누르기 반복을 멈추는 데 쓴다). 없으면 아무것도 안 한다.
+    var onRelease: ((UIPress.PressType) -> Void)?
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let onRelease = onRelease {
+            for press in presses { onRelease(press.type) }
+        }
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let onRelease = onRelease {
+            for press in presses { onRelease(press.type) }
+        }
+        super.pressesCancelled(presses, with: event)
+    }
 
     /// 포커스를 받아야 입력이 온다.
     ///

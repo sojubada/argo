@@ -10,6 +10,9 @@ name = "argoconv"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+# 엑셀 셀 뷰어. 같은 정적 라이브러리(libargoconv.a)에 넣는다 — Rust 정적 라이브러리
+# 두 개를 한 앱에 링크하면 표준 라이브러리 기호가 겹쳐 링크가 깨진다.
+argosheet = { path = "../argosheet" }
 # 벤더링한 사본을 쓴다. 슬라이드 제목이 사라지던 문제를 고쳤다.
 minipdf = { path = "../vendor/minipdf" }
 # 한글 문서: hwp·hwpx 를 읽어 쪽마다 SVG 로 그린다.

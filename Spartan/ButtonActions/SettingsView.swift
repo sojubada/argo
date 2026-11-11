@@ -30,6 +30,7 @@ struct SettingsView: View {
     // 화면 언어
     @State private var languagePre = ArgoLocale.current
     @State private var glassPre = UserDefaults.settings.object(forKey: "argoGlass") as? Bool ?? true
+    @State private var excelCellViewerPre = UserDefaults.settings.object(forKey: "excelCellViewer") as? Bool ?? true
     @State private var showLanguageRestart = false
     // 문서 읽기 다크 모드. PDF·변환 문서 뷰어의 Night 단추와 같은 키를 쓴다 — 양쪽이 늘 같다.
     @State private var docDarkPre = UserDefaults.settings.bool(forKey: "pdfSimple.isNightMode")
@@ -151,6 +152,17 @@ struct SettingsView: View {
 				HStack {
 					Image(systemName: glassPre ? "drop.fill" : "drop")
 					Text(L("유리 효과") + ": " + (glassPre ? L("켜짐") : L("꺼짐")))
+				}
+			}
+
+			// 엑셀 셀 뷰어: xlsx 를 셀 단위로 연다. 끄면 예전처럼 PDF 로 바꿔 연다.
+			Button(action: {
+				excelCellViewerPre.toggle()
+				UserDefaults.settings.set(excelCellViewerPre, forKey: "excelCellViewer")
+			}) {
+				HStack {
+					Image(systemName: excelCellViewerPre ? "tablecells.fill" : "tablecells")
+					Text(L("엑셀 셀 뷰어") + ": " + (excelCellViewerPre ? L("켜짐") : L("꺼짐 (PDF 로 열기)")))
 				}
 			}
 			Text(" ")

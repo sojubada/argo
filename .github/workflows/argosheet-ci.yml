@@ -26,6 +26,8 @@ jobs:
         run: cargo test --all-targets
       - name: Build argosheet_dump example
         run: cargo build --release --example argosheet_dump
+      - name: C ABI end-to-end (open, every tile, cell info)
+        run: cargo run --release --example argosheet_tiles -- tests/corpus/p1b_corpus.xlsx
       - name: P1b corpus vs LibreOffice/Excel golden (fails under 99%)
         run: |
           ./target/release/examples/argosheet_dump tests/corpus/p1b_corpus.xlsx \

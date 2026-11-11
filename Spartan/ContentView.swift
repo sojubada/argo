@@ -1677,6 +1677,21 @@ struct ContentView: View {
             return
         }
 
+        // 엑셀은 셀 단위 뷰어로 연다(설정에서 끌 수 있다). 못 열면 아래 PDF 변환으로 간다.
+        if ArgoSheetViewerController.shouldHandle(path) {
+            let vc = ArgoSheetViewerController(path: path)
+            vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+            vc.onOpenFailed = { [weak vc] _ in
+                vc?.dismiss(animated: false) { presentOfficeConverted(path) }
+            }
+            presentReader(vc)
+            return
+        }
+        presentOfficeConverted(path)
+    }
+
+    /// 변환기로 PDF 를 만들어 PDF 뷰어로 연다.
+    private func presentOfficeConverted(_ path: String) {
         // 변환이 도는 동안 또 부르지 않는다.
         //
         // 큰 pptx 는 여섯 초가 넘게 걸리는데 그동안 화면이 멈춘 것처럼

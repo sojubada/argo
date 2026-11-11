@@ -1,19 +1,23 @@
 pub mod calc;
+pub mod draw;
 pub mod numfmt;
 pub mod package;
 pub mod parse;
 pub mod style;
 
+use crate::calc::{evaluate_workbook, CellAddr, WorkbookCalcResult};
+use crate::draw::{
+    build_tile_drawlist, format_cell_display, ASDrawCmd, ASRect, DrawList, FormatCache,
+    SheetRenderCache,
+};
+use crate::numfmt::builtin_format_code;
+use crate::parse::format_cell_address;
 use crate::style::StyleSheet;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
-
-// ============================================================================
-// 1. 16바이트 고정 CSR 셀 모델 및 단일 연속 문자열 풀 (P0 + P1-a)
-// ============================================================================
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +47,6 @@ pub const CELL_FLAG_FORMULA_SHARED: u8 = 1 << 1;
 pub const CELL_FLAG_FORMULA_ARRAY: u8  = 1 << 2;
 pub const CELL_FLAG_HAS_COMMENT: u8    = 1 << 3;
 
-/// 문자열 버퍼 내 위치 (오프셋 u32, 바이트 길이 u32 -> 총 8바이트)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StrSpan {
@@ -51,9 +54,6 @@ pub struct StrSpan {
     pub len: u32,
 }
 
-/// 셀 값 8바이트 공용체 (union)
-/// 왜: 셀마다 String이나 Box를 두면 힙 단편화와 수백 바이트 오버헤드가 발생하므로
-/// 숫자는 f64 즉시 저장, 문자열/오류는 단일 버퍼의 (offset, len) 8바이트로 고정한다.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union CellPayload {
@@ -63,15 +63,13 @@ pub union CellPayload {
     pub raw: u64,
 }
 
-/// 정확히 16바이트 고정 크기의 CSR 셀 구조체
-/// col(4) + kind(1) + flags(1) + style_idx(2) + payload(8) = 16 bytes
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Cell {
-    pub col: u32,          // 1-based 열 번호
-    pub kind: u8,          // CellKind
-    pub flags: u8,         // CELL_FLAG_*
-    pub style_idx: u16,    // cellXfs 서식 번호
+    pub col: u32,
+    pub kind: u8,
+    pub flags: u8,
+    pub style_idx: u16,
     pub payload: CellPayload,
 }
 
@@ -87,7 +85,6 @@ impl Cell {
     }
 }
 
-/// 모든 문자열(공유 문자열, 인라인 문자열, 수식 원문, 메모)을 하나의 연속 버퍼에 저장하는 풀
 #[derive(Debug, Default, Clone)]
 pub struct StringPool {
     buf: String,
@@ -114,12 +111,11 @@ impl StringPool {
     }
 }
 
-/// 행 단위 압축 희소 행렬 (CSR)
 #[derive(Default, Clone)]
 pub struct Rows {
-    pub row_ids: Vec<u32>,   // 1-based 행 번호 (오름차순)
-    pub row_start: Vec<u32>, // row_ids[i]의 시작 인덱스 -> cells[row_start[i]..row_start[i+1]]
-    pub cells: Vec<Cell>,    // 각 행 내부에서 col(1-based) 오름차순
+    pub row_ids: Vec<u32>,
+    pub row_start: Vec<u32>,
+    pub cells: Vec<Cell>,
 }
 
 impl Rows {
@@ -173,18 +169,18 @@ pub struct FormulaEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellRange {
-    pub start_row: u32, // 1-based
-    pub start_col: u32, // 1-based
-    pub end_row: u32,   // 1-based
-    pub end_col: u32,   // 1-based
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreezePane {
     pub freeze_rows: u32,
     pub freeze_cols: u32,
-    pub top_left_row: u32, // 1-based
-    pub top_left_col: u32, // 1-based
+    pub top_left_row: u32,
+    pub top_left_col: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,8 +194,8 @@ pub struct DataValidationEntry {
 
 #[derive(Debug, Clone)]
 pub struct CommentEntry {
-    pub row: u32, // 1-based
-    pub col: u32, // 1-based
+    pub row: u32,
+    pub col: u32,
     pub author: Option<StrSpan>,
     pub text: StrSpan,
 }
@@ -223,11 +219,11 @@ pub struct Sheet {
     pub name: String,
     pub sheet_id: u32,
     pub state: SheetState,
-    pub max_row: u32,               // 1-based 최대 행
-    pub max_col: u32,               // 1-based 최대 열
+    pub max_row: u32,
+    pub max_col: u32,
     pub cell_count: u32,
-    pub col_widths_pt: Vec<f32>,    // 1..=max_col 열 너비 (엑셀 pt)
-    pub row_heights_pt: Vec<f32>,   // 1..=max_row 행 높이 (엑셀 pt)
+    pub col_widths_pt: Vec<f32>,
+    pub row_heights_pt: Vec<f32>,
     pub default_col_width_pt: f32,
     pub default_row_height_pt: f32,
     pub data: Rows,
@@ -293,11 +289,22 @@ pub struct Workbook {
 }
 
 // ============================================================================
-// 2. C ABI 진입점 5종 (모두 catch_unwind 보호)
+// C ABI 구조체 및 진입점 (모두 catch_unwind 보호, 읽기 전용 불변 캐시 내장)
 // ============================================================================
 
 pub struct ASBook {
     pub wb: Workbook,
+    pub calc_res: WorkbookCalcResult,
+    pub fmt_cache: FormatCache,
+    pub render_caches: Vec<SheetRenderCache>,
+}
+
+// 왜: ASBook은 open 이후 절대 변경되지 않는 불변 구조체이므로 다중 백그라운드 타일 큐에서 안전하게 공유된다.
+unsafe impl Sync for ASBook {}
+unsafe impl Send for ASBook {}
+
+pub struct ASDrawList {
+    pub inner: DrawList,
 }
 
 #[repr(C)]
@@ -322,6 +329,32 @@ pub struct ASSheetInfo {
     pub total_height_pt: f32,
 }
 
+#[repr(C)]
+pub struct ASCellInfo {
+    pub row: u32,
+    pub col: u32,
+    pub merge_start_row: u32,
+    pub merge_start_col: u32,
+    pub merge_end_row: u32,
+    pub merge_end_col: u32,
+    pub kind: u8,
+    pub flags: u8,
+    pub num_value: f64,
+    pub address: [c_char; 32],
+    pub display_text: [c_char; 512],
+    pub formula: [c_char; 512],
+    pub format_code: [c_char; 128],
+    pub comment_text: [c_char; 512],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ASHit {
+    pub sheet: u32,
+    pub row: u32,
+    pub col: u32,
+}
+
 thread_local! {
     static LAST_NOTE: RefCell<CString> = RefCell::new(CString::new("").unwrap());
 }
@@ -338,7 +371,11 @@ pub fn set_last_note(msg: &str) {
 fn write_c_string_buf(dst: &mut [c_char], src: &str) {
     dst.fill(0);
     let bytes = src.as_bytes();
-    let copy_len = bytes.len().min(dst.len().saturating_sub(1));
+    let mut copy_len = bytes.len().min(dst.len().saturating_sub(1));
+    // 한글(3바이트) 한가운데서 자르면 Swift 쪽에서 깨진 글자(�)가 된다. 글자 경계까지 물린다.
+    while copy_len > 0 && !src.is_char_boundary(copy_len) {
+        copy_len -= 1;
+    }
     for (i, &b) in bytes[..copy_len].iter().enumerate() {
         dst[i] = b as c_char;
     }
@@ -347,6 +384,12 @@ fn write_c_string_buf(dst: &mut [c_char], src: &str) {
 #[no_mangle]
 pub extern "C" fn as_last_note() -> *const c_char {
     LAST_NOTE.with(|cell| cell.borrow().as_ptr())
+}
+
+/// 기기 시간대(초, GMT 기준). TODAY()/NOW() 가 쓴다. as_open 전에 부른다.
+#[no_mangle]
+pub extern "C" fn as_set_timezone_offset(seconds_from_gmt: i32) {
+    calc::set_timezone_offset_seconds(seconds_from_gmt as i64);
 }
 
 #[no_mangle]
@@ -365,7 +408,17 @@ pub extern "C" fn as_open(path: *const c_char) -> *mut ASBook {
         };
 
         match parse::open_xlsx_workbook(path_str) {
-            Ok(wb) => Box::into_raw(Box::new(ASBook { wb })),
+            Ok(wb) => {
+                let calc_res = evaluate_workbook(&wb);
+                let fmt_cache = FormatCache::build(&wb);
+                let render_caches = wb.sheets.iter().map(SheetRenderCache::build).collect();
+                Box::into_raw(Box::new(ASBook {
+                    wb,
+                    calc_res,
+                    fmt_cache,
+                    render_caches,
+                }))
+            }
             Err(e) => {
                 set_last_note(&e);
                 ptr::null_mut()
@@ -373,13 +426,10 @@ pub extern "C" fn as_open(path: *const c_char) -> *mut ASBook {
         }
     }));
 
-    match res {
-        Ok(ptr) => ptr,
-        Err(_) => {
-            set_last_note("as_open: 내부 패닉이 포착되었습니다");
-            ptr::null_mut()
-        }
-    }
+    res.unwrap_or_else(|_| {
+        set_last_note("as_open: 내부 패닉 포착");
+        ptr::null_mut()
+    })
 }
 
 #[no_mangle]
@@ -397,32 +447,22 @@ pub extern "C" fn as_close(book: *mut ASBook) {
 pub extern "C" fn as_sheet_count(book: *const ASBook) -> u32 {
     let res = catch_unwind(AssertUnwindSafe(|| {
         if book.is_null() {
-            set_last_note("as_sheet_count: book 포인터가 NULL입니다");
             return 0;
         }
         let b = unsafe { &*book };
         b.wb.sheets.len() as u32
     }));
-    res.unwrap_or_else(|_| {
-        set_last_note("as_sheet_count: 내부 패닉이 포착되었습니다");
-        0
-    })
+    res.unwrap_or(0)
 }
 
 #[no_mangle]
-pub extern "C" fn as_sheet_info(
-    book: *const ASBook,
-    index: u32,
-    out: *mut ASSheetInfo,
-) -> bool {
+pub extern "C" fn as_sheet_info(book: *const ASBook, index: u32, out: *mut ASSheetInfo) -> bool {
     let res = catch_unwind(AssertUnwindSafe(|| {
         if book.is_null() || out.is_null() {
-            set_last_note("as_sheet_info: NULL 포인터 인자입니다");
             return false;
         }
         let b = unsafe { &*book };
         let Some(s) = b.wb.sheets.get(index as usize) else {
-            set_last_note("as_sheet_info: 시트 인덱스가 범위를 벗어났습니다");
             return false;
         };
 
@@ -457,17 +497,468 @@ pub extern "C" fn as_sheet_info(
         info.total_height_pt = s.total_height_pt();
         true
     }));
-
-    res.unwrap_or_else(|_| {
-        set_last_note("as_sheet_info: 내부 패닉이 포착되었습니다");
-        false
-    })
+    res.unwrap_or(false)
 }
 
-// ============================================================================
-// 3. 단위 시험 (#[test] 필수 검증)
-// ============================================================================
+#[no_mangle]
+pub extern "C" fn as_sheet_axes(
+    book: *const ASBook,
+    sheet: u32,
+    col_widths: *mut *const f32,
+    num_cols: *mut u32,
+    row_heights: *mut *const f32,
+    num_rows: *mut u32,
+) -> bool {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null()
+            || col_widths.is_null()
+            || num_cols.is_null()
+            || row_heights.is_null()
+            || num_rows.is_null()
+        {
+            return false;
+        }
+        let b = unsafe { &*book };
+        let Some(s) = b.wb.sheets.get(sheet as usize) else {
+            return false;
+        };
+        unsafe {
+            *col_widths = s.col_widths_pt.as_ptr();
+            *num_cols = s.col_widths_pt.len() as u32;
+            *row_heights = s.row_heights_pt.as_ptr();
+            *num_rows = s.row_heights_pt.len() as u32;
+        }
+        true
+    }));
+    res.unwrap_or(false)
+}
 
+#[no_mangle]
+pub extern "C" fn as_tile(
+    book: *const ASBook,
+    sheet: u32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    zoom: f32,
+) -> *mut ASDrawList {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() {
+            return ptr::null_mut();
+        }
+        let b = unsafe { &*book };
+        let s_idx = sheet as usize;
+        let Some(rc) = b.render_caches.get(s_idx) else {
+            return ptr::null_mut();
+        };
+        let tile_rect = ASRect { x, y, w, h };
+        let inner = build_tile_drawlist(&b.wb, &b.calc_res, &b.fmt_cache, rc, s_idx, tile_rect, zoom);
+        Box::into_raw(Box::new(ASDrawList { inner }))
+    }));
+    res.unwrap_or(ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn as_drawlist_free(list: *mut ASDrawList) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if !list.is_null() {
+            unsafe {
+                drop(Box::from_raw(list));
+            }
+        }
+    }));
+}
+
+#[no_mangle]
+pub extern "C" fn as_drawlist_count(list: *const ASDrawList) -> u32 {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if list.is_null() {
+            return 0;
+        }
+        let l = unsafe { &*list };
+        l.inner.commands.len() as u32
+    }));
+    res.unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn as_drawlist_commands(list: *const ASDrawList) -> *const ASDrawCmd {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if list.is_null() {
+            return ptr::null();
+        }
+        let l = unsafe { &*list };
+        l.inner.commands.as_ptr()
+    }));
+    res.unwrap_or(ptr::null())
+}
+
+#[no_mangle]
+pub extern "C" fn as_drawlist_strings(list: *const ASDrawList, out_len: *mut u32) -> *const c_char {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if list.is_null() {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return ptr::null();
+        }
+        let l = unsafe { &*list };
+        if !out_len.is_null() {
+            unsafe { *out_len = l.inner.string_buf.len() as u32 };
+        }
+        l.inner.string_buf.as_ptr() as *const c_char
+    }));
+    res.unwrap_or(ptr::null())
+}
+
+#[no_mangle]
+pub extern "C" fn as_cell_info(
+    book: *const ASBook,
+    sheet: u32,
+    row: u32,
+    col: u32,
+    out: *mut ASCellInfo,
+) -> bool {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() || out.is_null() {
+            return false;
+        }
+        let b = unsafe { &*book };
+        let s_idx = sheet as usize;
+        let Some(s) = b.wb.sheets.get(s_idx) else {
+            return false;
+        };
+        let Some(rc) = b.render_caches.get(s_idx) else {
+            return false;
+        };
+
+        let info = unsafe { &mut *out };
+
+        // 병합 영역에 속한 경우 마스터 좌표와 병합 범위를 함께 반환
+        let (target_r, target_c, mr) = if let Some(m_range) = rc.merge_at(row, col) {
+            (m_range.start_row, m_range.start_col, m_range)
+        } else {
+            (
+                row,
+                col,
+                CellRange {
+                    start_row: row,
+                    start_col: col,
+                    end_row: row,
+                    end_col: col,
+                },
+            )
+        };
+
+        info.row = row;
+        info.col = col;
+        info.merge_start_row = mr.start_row;
+        info.merge_start_col = mr.start_col;
+        info.merge_end_row = mr.end_row;
+        info.merge_end_col = mr.end_col;
+
+        let addr_str = if mr.start_row == mr.end_row && mr.start_col == mr.end_col {
+            format_cell_address(row, col)
+        } else {
+            format!(
+                "{}:{}",
+                format_cell_address(mr.start_row, mr.start_col),
+                format_cell_address(mr.end_row, mr.end_col)
+            )
+        };
+        write_c_string_buf(&mut info.address, &addr_str);
+
+        let cell = s.data.get_cell(target_r, target_c);
+        let style_idx = cell.map(|c| c.style_idx as usize).unwrap_or(0);
+        let xf = b.wb.styles.cell_xfs.get(style_idx).cloned().unwrap_or_default();
+        let fmt_code = b
+            .wb
+            .styles
+            .num_fmts
+            .get(&xf.num_fmt_id)
+            .cloned()
+            .unwrap_or_else(|| builtin_format_code(xf.num_fmt_id).to_string());
+        write_c_string_buf(&mut info.format_code, &fmt_code);
+
+        let formula = s.formula_str(&b.wb.pool, target_r, target_c);
+        write_c_string_buf(&mut info.formula, formula);
+
+        let comment = s
+            .comments
+            .iter()
+            .find(|cm| cm.row == target_r && cm.col == target_c)
+            .map(|cm| b.wb.pool.get(cm.text))
+            .unwrap_or("");
+        write_c_string_buf(&mut info.comment_text, comment);
+
+        if let Some(c_data) = cell {
+            let (disp, resolved_kind) = format_cell_display(
+                &b.wb,
+                &b.calc_res,
+                &b.fmt_cache,
+                s,
+                s_idx,
+                target_r,
+                target_c,
+                c_data,
+                &xf,
+            );
+            info.kind = resolved_kind as u8;
+            info.flags = c_data.flags;
+            info.num_value = if resolved_kind == CellKind::Num {
+                if (c_data.flags & CELL_FLAG_HAS_FORMULA) != 0 {
+                    b.calc_res
+                        .values
+                        .get(&CellAddr {
+                            sheet: s_idx,
+                            row: target_r,
+                            col: target_c,
+                        })
+                        .and_then(|v| v.coerce_num().ok())
+                        .unwrap_or(0.0)
+                } else {
+                    unsafe { c_data.payload.num }
+                }
+            } else {
+                0.0
+            };
+            write_c_string_buf(&mut info.display_text, &disp);
+        } else {
+            info.kind = CellKind::Blank as u8;
+            info.flags = 0;
+            info.num_value = 0.0;
+            write_c_string_buf(&mut info.display_text, "");
+        }
+        true
+    }));
+    res.unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn as_find(
+    book: *const ASBook,
+    text: *const c_char,
+    hits: *mut ASHit,
+    max_hits: u32,
+) -> u32 {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() || text.is_null() || hits.is_null() || max_hits == 0 {
+            return 0;
+        }
+        let query = match unsafe { CStr::from_ptr(text) }.to_str() {
+            Ok(s) if !s.trim().is_empty() => s.to_lowercase(),
+            _ => return 0,
+        };
+        let b = unsafe { &*book };
+        let mut count = 0u32;
+        let out_slice = unsafe { std::slice::from_raw_parts_mut(hits, max_hits as usize) };
+
+        for (s_idx, s) in b.wb.sheets.iter().enumerate() {
+            for (r_pos, &r) in s.data.row_ids.iter().enumerate() {
+                let start = s.data.row_start[r_pos] as usize;
+                let end = s.data.row_start[r_pos + 1] as usize;
+                for cell in &s.data.cells[start..end] {
+                    let xf = b
+                        .wb
+                        .styles
+                        .cell_xfs
+                        .get(cell.style_idx as usize)
+                        .cloned()
+                        .unwrap_or_default();
+                    let (disp, _) = format_cell_display(
+                        &b.wb,
+                        &b.calc_res,
+                        &b.fmt_cache,
+                        s,
+                        s_idx,
+                        r,
+                        cell.col,
+                        cell,
+                        &xf,
+                    );
+                    if disp.to_lowercase().contains(&query) {
+                        out_slice[count as usize] = ASHit {
+                            sheet: s_idx as u32,
+                            row: r,
+                            col: cell.col,
+                        };
+                        count += 1;
+                        if count >= max_hits {
+                            return count;
+                        }
+                    }
+                }
+            }
+        }
+        count
+    }));
+    res.unwrap_or(0)
+}
+
+#[cfg(test)]
+mod p2_tests {
+    use super::*;
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    #[test]
+    fn test_p2_c_abi_axes_tile_cell_info_and_find() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let opts = SimpleFileOptions::default();
+
+            zip.start_file("_rels/.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/workbook.xml", opts).unwrap();
+            zip.write_all(r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="01_시트" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#.as_bytes()).unwrap();
+
+            zip.start_file("xl/worksheets/sheet1.xml", opts).unwrap();
+            zip.write_all(r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols><col min="1" max="19" width="15" customWidth="1"/></cols>
+  <sheetData>
+    <row r="1" ht="28"><c r="A1" t="inlineStr"><is><t>표준품셈 제목</t></is></c></row>
+    <row r="60" ht="18"><c r="S60"><f>100+250</f><v/></c></row>
+  </sheetData>
+  <mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells>
+</worksheet>"#.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+
+        // 1. as_sheet_axes 검증 (60행 x 19열)
+        let mut c_ptr: *const f32 = ptr::null();
+        let mut r_ptr: *const f32 = ptr::null();
+        let mut n_cols = 0u32;
+        let mut n_rows = 0u32;
+        assert!(as_sheet_axes(book, 0, &mut c_ptr, &mut n_cols, &mut r_ptr, &mut n_rows));
+        assert_eq!(n_cols, 19);
+        assert_eq!(n_rows, 60);
+
+        // 2. as_tile 그리기 목록 검증
+        let dl = as_tile(book, 0, 0.0, 0.0, 256.0, 256.0, 2.0);
+        assert!(!dl.is_null());
+        assert!(as_drawlist_count(dl) > 2);
+        as_drawlist_free(dl);
+
+        // 3. as_cell_info 병합 자식(B1) 조회 시 마스터(A1:B1) 값 반환 검증
+        let mut c_info: ASCellInfo = unsafe { std::mem::zeroed() };
+        assert!(as_cell_info(book, 0, 1, 2, &mut c_info));
+        assert_eq!(c_info.merge_start_col, 1);
+        assert_eq!(c_info.merge_end_col, 2);
+        let disp = unsafe { CStr::from_ptr(c_info.display_text.as_ptr()) }.to_str().unwrap();
+        assert_eq!(disp, "표준품셈 제목");
+
+        // 4. S60 수식 계산 결과(350) 및 as_find 검증
+        assert!(as_cell_info(book, 0, 60, 19, &mut c_info));
+        let s60_disp = unsafe { CStr::from_ptr(c_info.display_text.as_ptr()) }.to_str().unwrap();
+        assert_eq!(s60_disp, "350");
+
+        let query = CString::new("350").unwrap();
+        let mut hits = [ASHit { sheet: 0, row: 0, col: 0 }; 4];
+        let hit_cnt = as_find(book, query.as_ptr(), hits.as_mut_ptr(), 4);
+        assert_eq!(hit_cnt, 1);
+        assert_eq!((hits[0].row, hits[0].col), (60, 19));
+
+        as_close(book);
+    }
+}
+
+/// 검수 추가: 앱을 죽일 수 있는 입력으로 C ABI 를 두드린다.
+#[cfg(test)]
+mod p2_review_tests {
+    use super::*;
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    fn xlsx_with_sheet(sheet_xml: &str) -> tempfile::NamedTempFile {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let o = SimpleFileOptions::default();
+            zip.start_file("_rels/.rels", o).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#).unwrap();
+            zip.start_file("xl/_rels/workbook.xml.rels", o).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#).unwrap();
+            zip.start_file("xl/workbook.xml", o).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#).unwrap();
+            zip.start_file("xl/worksheets/sheet1.xml", o).unwrap();
+            zip.write_all(sheet_xml.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+        tmp
+    }
+
+    #[test]
+    fn huge_merge_and_far_cell_do_not_explode() {
+        let tmp = xlsx_with_sheet(r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1" t="inlineStr"><is><t>가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하</t></is></c></row>
+<row r="1048576"><c r="XFD1048576"><v>1</v></c></row></sheetData>
+<mergeCells count="2"><mergeCell ref="A1:XFD1048576"/><mergeCell ref="C3:B2"/></mergeCells></worksheet>"#);
+        let t0 = std::time::Instant::now();
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null(), "열기 실패: {:?}", unsafe { CStr::from_ptr(as_last_note()) });
+        for (x, y) in [(0.0f32, 0.0f32), (1e9, 1e9), (-50.0, -50.0), (f32::NAN, f32::INFINITY)] {
+            let dl = as_tile(book, 0, x, y, 256.0, 256.0, 2.0);
+            as_drawlist_free(dl);
+        }
+        let mut info: ASCellInfo = unsafe { std::mem::zeroed() };
+        for (r, c) in [(0u32, 0u32), (1, 1), (5000, 9000), (u32::MAX, u32::MAX)] {
+            let _ = as_cell_info(book, 0, r, c, &mut info);
+        }
+        // 병합 안쪽 아무 칸이나 마스터(A1)로 간다
+        assert!(as_cell_info(book, 0, 777, 777, &mut info));
+        assert_eq!((info.merge_start_row, info.merge_start_col), (1, 1));
+        // 긴 한글은 512 바이트에서 글자 경계로 잘린다(깨진 UTF-8 없음)
+        let disp = unsafe { CStr::from_ptr(info.display_text.as_ptr()) };
+        assert!(disp.to_str().is_ok(), "잘린 UTF-8");
+        let mut hits = [ASHit::default(); 3];
+        let q = CString::new("가나").unwrap();
+        assert!(as_find(book, q.as_ptr(), hits.as_mut_ptr(), 3) >= 1);
+        assert_eq!(as_sheet_info(book, 99, ptr::null_mut()), false);
+        assert!(as_tile(book, 99, 0.0, 0.0, 1.0, 1.0, 1.0).is_null());
+        as_close(book);
+        assert!(t0.elapsed().as_secs() < 10, "너무 느림: {:?}", t0.elapsed());
+    }
+
+    #[test]
+    fn null_and_garbage_pointers_are_refused() {
+        assert!(as_open(ptr::null()).is_null());
+        let bad = CString::new("/없는/파일.xlsx").unwrap();
+        assert!(as_open(bad.as_ptr()).is_null());
+        assert_eq!(as_sheet_count(ptr::null()), 0);
+        assert!(as_tile(ptr::null(), 0, 0.0, 0.0, 1.0, 1.0, 1.0).is_null());
+        as_drawlist_free(ptr::null_mut());
+        as_close(ptr::null_mut());
+        assert_eq!(as_drawlist_count(ptr::null()), 0);
+        let mut n = 7u32;
+        assert!(as_drawlist_strings(ptr::null(), &mut n).is_null());
+        assert_eq!(n, 0);
+    }
+}
+
+// ---- P0·P1-a 시험 (P2 납품에서 지워져 복원) ----
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,3 +1190,37 @@ mod tests {
     }
 }
 
+
+/// C 헤더(argosheet.h)와 Rust 구조체 배치가 같은지 — 값은 gcc 로 헤더를 컴파일해 잰 것.
+/// 헤더나 구조체를 바꾸면 이 시험이 깨진다. 둘을 같이 고칠 것.
+#[cfg(test)]
+mod abi_layout {
+    #[test]
+    fn c_header_layout_matches() {
+        use crate::draw::*;
+        use crate::*;
+        use std::mem::{offset_of, size_of};
+        assert_eq!(size_of::<ASSheetInfo>(), 324);
+        assert_eq!(size_of::<ASCellInfo>(), 1736);
+        assert_eq!(size_of::<ASDrawCmd>(), 64);
+        assert_eq!(size_of::<ASHit>(), 12);
+        assert_eq!(offset_of!(ASSheetInfo, state), 260);
+        assert_eq!(offset_of!(ASSheetInfo, row_count), 264);
+        assert_eq!(offset_of!(ASSheetInfo, is_frozen), 292);
+        assert_eq!(offset_of!(ASSheetInfo, show_grid_lines), 312);
+        assert_eq!(offset_of!(ASSheetInfo, total_height_pt), 320);
+        assert_eq!(offset_of!(ASCellInfo, kind), 24);
+        assert_eq!(offset_of!(ASCellInfo, num_value), 32);
+        assert_eq!(offset_of!(ASCellInfo, address), 40);
+        assert_eq!(offset_of!(ASCellInfo, display_text), 72);
+        assert_eq!(offset_of!(ASCellInfo, comment_text), 1224);
+        assert_eq!(offset_of!(ASDrawCmd, rect), 4);
+        assert_eq!(offset_of!(ASDrawCmd, clip_rect), 20);
+        assert_eq!(offset_of!(ASDrawCmd, color1), 36);
+        assert_eq!(offset_of!(ASDrawCmd, stroke_width), 44);
+        assert_eq!(offset_of!(ASDrawCmd, text_offset), 48);
+        assert_eq!(offset_of!(ASDrawCmd, font_size_pt), 56);
+        assert_eq!(offset_of!(ASDrawCmd, font_bold), 60);
+        assert_eq!(offset_of!(ASDrawCmd, _pad), 63);
+    }
+}

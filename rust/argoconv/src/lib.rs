@@ -4,6 +4,8 @@
 //! tvOS 의 std 는 Tier 3 라 파일 메타데이터 쪽이 아직 비어 있고,
 //! 그 빈 곳을 아예 지나가지 않기 위해서다. 읽고 쓰는 일은 Swift 가 한다.
 
+// 엑셀 셀 뷰어의 C 함수(as_*)를 이 정적 라이브러리에 함께 싣는다.
+pub use argosheet;
 pub mod fonts;
 pub mod hwp;
 pub mod slides;

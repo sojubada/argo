@@ -456,6 +456,15 @@ rust/vendor/minipdf/src/xlsx.rs 안의 다음 함수는 이미 실제 문서로 
 
 ## P2 — 셀 화면 (Swift, 릴리즈 1)
 
+> **코드 완료(2026-11-12, AM), 기기 확인 전.** Rust 는 고쳐 받았고, Swift 는 컴파일되지
+> 않는 상태로 와서 새로 썼다(`Spartan/FileOpeners/Readers/ArgoSheetViewer.swift`).
+> P3 부터 제미나이에게 줄 때 덧붙일 것:
+> - "Swift 는 저장소의 ArgoSheetViewer.swift 를 고친다. 새 파일·새 클래스를 만들지 않는다.
+>   ArgoFocusCanvas 를 다시 선언하지 않는다."
+> - "Rust 는 draw.rs 의 build_tile_drawlist 만 고친다. lib.rs 를 통째로 다시 쓰지 않는다.
+>   C 헤더를 바꾸면 lib.rs 의 abi_layout 시험도 같이 고친다."
+> - "한글이 든 바이트 문자열은 br\"…\" 가 아니라 r\"…\".as_bytes()."
+
 ```
 [할 일]
 1. C ABI 를 늘린다: as_sheet_axes(열 너비·행 높이 배열), as_tile(그리기 목록),

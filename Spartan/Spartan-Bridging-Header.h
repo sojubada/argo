@@ -16,3 +16,6 @@
 
 // 오피스 문서를 기기 안에서 PDF 로 바꾸는 Rust 라이브러리.
 #import "argoconv.h"
+
+// 엑셀 셀 뷰어 (argoconv 정적 라이브러리 안에 같이 들어간다 — 따로 링크하지 않는다).
+#import "argosheet.h"

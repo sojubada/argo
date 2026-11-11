@@ -1,0 +1,838 @@
+//
+//  ArgoSheetViewer.swift
+//  엑셀(.xlsx) 셀 단위 뷰어 — Rust argosheet 가 "무엇을 어디에" 그릴지 넘기고,
+//  여기서는 그 목록을 순서대로 CoreGraphics 로 그린다. 보기 전용.
+//
+//  처음 안은 제미나이(P2)가 썼고, 검수에서 다음을 고쳐 다시 짰다.
+//  - 컴파일 오류(`private varlastMoveTime`), ArgoFocusCanvas 중복 선언(기존 것을 쓴다)
+//  - 책 포인터를 타일 작업이 쓰는 도중 as_close 로 풀어 버리는 문제(해제 후 사용)
+//    → ArgoSheetBook 이 참조 횟수로 붙들고, 마지막 참조가 사라질 때만 닫는다.
+//  - 타일을 시트 256pt × 확대율 × 화면 배율로 잡아 한 장이 4MB, 96장×4구역이면
+//    1.5GB → 화면 256pt 고정(한 장 ≈1MB), 캐시도 구역 크기에 맞춰 줄였다.
+//  - text_offset + text_len 더하기 넘침(Swift 는 넘치면 앱이 죽는다)
+//  - 축 배열이 비었을 때 배열 범위 밖 접근
+//  - 메인 스레드에서 파일 열기 → 백그라운드에서 열고, 실패하면 PDF 경로로 돌아간다.
+//
+
+import UIKit
+import CoreText
+
+// MARK: - 책 손잡이
+
+/// Rust 쪽 ASBook 을 붙드는 상자.
+///
+/// 타일은 백그라운드 큐에서 그려지므로, 뷰어를 닫는 순간에도 그리는 중일 수 있다.
+/// 포인터를 뷰컨트롤러가 직접 닫으면 그리던 쪽이 풀린 메모리를 읽어 앱이 죽는다.
+/// 타일 작업이 이 상자를 강하게 잡고 있으므로, 마지막 작업이 끝난 뒤에야 닫힌다.
+final class ArgoSheetBook {
+    let ptr: OpaquePointer
+
+    private init(ptr: OpaquePointer) { self.ptr = ptr }
+
+    /// 파일을 연다. 실패하면 (nil, 이유). 무거우니 메인 스레드에서 부르지 않는다.
+    static func open(path: String) -> (ArgoSheetBook?, String) {
+        as_set_timezone_offset(Int32(TimeZone.current.secondsFromGMT()))
+        let p: OpaquePointer? = path.withCString { as_open($0) }
+        guard let p = p else {
+            // as_last_note 는 스레드마다 따로라서 연 스레드에서 바로 읽는다.
+            let note = as_last_note().map { String(cString: $0) } ?? ""
+            return (nil, note)
+        }
+        return (ArgoSheetBook(ptr: p), "")
+    }
+
+    deinit { as_close(ptr) }
+
+    var sheetCount: Int { Int(as_sheet_count(ptr)) }
+
+    func sheetInfo(_ index: Int) -> ASSheetInfo? {
+        var info = ASSheetInfo()
+        return as_sheet_info(ptr, UInt32(index), &info) ? info : nil
+    }
+
+    func cellInfo(sheet: Int, row: Int, col: Int) -> ASCellInfo? {
+        var info = ASCellInfo()
+        return as_cell_info(ptr, UInt32(sheet), UInt32(row), UInt32(col), &info) ? info : nil
+    }
+}
+
+/// C 고정 길이 글자 배열(튜플)을 String 으로. 0 이 없으면 배열 끝까지.
+func argoSheetString<T>(_ tuple: T) -> String {
+    withUnsafeBytes(of: tuple) { raw -> String in
+        let bytes = raw.bindMemory(to: UInt8.self)
+        let n = bytes.firstIndex(of: 0) ?? bytes.count
+        return String(decoding: bytes.prefix(n), as: UTF8.self)
+    }
+}
+
+// MARK: - 타일 뷰
+
+/// 시트의 한 구역(틀 고정 모서리·위·왼쪽·본문)을 타일로 그린다.
+///
+/// 타일 한 장은 화면 256pt 정사각. 그 안에 들어가는 시트 영역은 256/확대율 pt.
+/// 백그라운드 큐 두 개에서 CGContext 로 그린 뒤 CALayer.contents 에 넣는다.
+final class ArgoSheetTileView: UIView {
+    private let book: ArgoSheetBook
+    private let sheetIndex: UInt32
+    /// 이 구역이 맡는 시트 좌표의 시작점(시트 pt).
+    private(set) var sheetOriginPt: CGPoint
+    private(set) var zoom: CGFloat
+    private var generation: UInt64 = 0
+
+    static let tileScreenPt: CGFloat = 256
+    /// 이 구역에 둘 타일 수 상한. 보이는 칸 수 + 여유. (한 장 ≈ 1MB @2x)
+    private var maxCachedTiles = 48
+
+    private struct TileKey: Hashable {
+        let tx: Int
+        let ty: Int
+        let gen: UInt64
+    }
+
+    private var tileLayers: [TileKey: CALayer] = [:]
+    private var inFlight: Set<TileKey> = []
+    private var lru: [TileKey] = []
+
+    private static let renderQueues: [DispatchQueue] = [
+        DispatchQueue(label: "argo.sheet.tile0", qos: .userInitiated),
+        DispatchQueue(label: "argo.sheet.tile1", qos: .userInitiated),
+    ]
+
+    init(book: ArgoSheetBook, sheetIndex: UInt32, sheetOriginPt: CGPoint, zoom: CGFloat) {
+        self.book = book
+        self.sheetIndex = sheetIndex
+        self.sheetOriginPt = sheetOriginPt
+        self.zoom = zoom
+        super.init(frame: .zero)
+        backgroundColor = .white
+        clipsToBounds = true
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// 확대율이나 시작점이 바뀌면 있던 타일을 모두 버린다.
+    func reset(zoom: CGFloat, sheetOriginPt: CGPoint) {
+        self.zoom = zoom
+        self.sheetOriginPt = sheetOriginPt
+        generation &+= 1
+        for (_, l) in tileLayers { l.removeFromSuperlayer() }
+        tileLayers.removeAll()
+        inFlight.removeAll()
+        lru.removeAll()
+    }
+
+    /// visible: 이 뷰 좌표(화면 pt)에서 지금 보이는 사각형.
+    func updateVisible(_ visible: CGRect) {
+        let v = visible.intersection(bounds)
+        guard !v.isNull, v.width > 0, v.height > 0 else { return }
+        let T = Self.tileScreenPt
+        let minTx = max(0, Int(floor(v.minX / T)))
+        let maxTx = max(minTx, Int(floor((v.maxX - 0.01) / T)))
+        let minTy = max(0, Int(floor(v.minY / T)))
+        let maxTy = max(minTy, Int(floor((v.maxY - 0.01) / T)))
+        // 보이는 장수의 두 배 + 8 까지는 들고 있는다(되돌아갈 때 다시 안 그리게).
+        maxCachedTiles = max(24, (maxTx - minTx + 1) * (maxTy - minTy + 1) * 2 + 8)
+
+        var active = Set<TileKey>()
+        for ty in minTy...maxTy {
+            for tx in minTx...maxTx {
+                let key = TileKey(tx: tx, ty: ty, gen: generation)
+                active.insert(key)
+                if tileLayers[key] != nil {
+                    touch(key)
+                } else if !inFlight.contains(key) {
+                    render(key)
+                }
+            }
+        }
+        evict(keeping: active)
+    }
+
+    private func touch(_ key: TileKey) {
+        if let i = lru.firstIndex(of: key) { lru.remove(at: i) }
+        lru.append(key)
+    }
+
+    private func evict(keeping active: Set<TileKey>) {
+        var i = 0
+        while tileLayers.count > maxCachedTiles && i < lru.count {
+            let k = lru[i]
+            if active.contains(k) { i += 1; continue }
+            lru.remove(at: i)
+            tileLayers.removeValue(forKey: k)?.removeFromSuperlayer()
+        }
+    }
+
+    private func render(_ key: TileKey) {
+        inFlight.insert(key)
+        let book = self.book            // 강하게 잡는다 — 그리는 동안 닫히지 않게
+        let sheet = sheetIndex
+        let z = zoom
+        let T = Self.tileScreenPt
+        let sheetTile = T / z
+        let sx = sheetOriginPt.x + CGFloat(key.tx) * sheetTile
+        let sy = sheetOriginPt.y + CGFloat(key.ty) * sheetTile
+        let scale = UIScreen.main.scale
+        let q = Self.renderQueues[abs(key.tx &+ key.ty) % 2]
+        q.async { [weak self] in
+            let image = Self.drawTile(book: book, sheet: sheet,
+                                      sheetRect: CGRect(x: sx, y: sy, width: sheetTile, height: sheetTile),
+                                      zoom: z, screenScale: scale)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.inFlight.remove(key)
+                guard self.generation == key.gen, let image = image else { return }
+                let layer = CALayer()
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.frame = CGRect(x: CGFloat(key.tx) * T, y: CGFloat(key.ty) * T, width: T, height: T)
+                layer.contentsScale = scale
+                layer.contents = image
+                self.layer.addSublayer(layer)
+                CATransaction.commit()
+                self.tileLayers[key] = layer
+                self.lru.append(key)
+                self.evict(keeping: [key])
+            }
+        }
+    }
+
+    // MARK: 그리기 (백그라운드)
+
+    private static func drawTile(book: ArgoSheetBook, sheet: UInt32, sheetRect: CGRect,
+                                 zoom: CGFloat, screenScale: CGFloat) -> CGImage? {
+        guard let dl = as_tile(book.ptr, sheet, Float(sheetRect.minX), Float(sheetRect.minY),
+                               Float(sheetRect.width), Float(sheetRect.height), Float(zoom)) else {
+            return nil
+        }
+        defer { as_drawlist_free(dl) }
+
+        let px = Int(ceil(tileScreenPt * screenScale))
+        guard px > 0, let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8,
+                                          bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return nil
+        }
+        ctx.setFillColor(UIColor.white.cgColor)
+        ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+
+        // CG 의 좌하단 원점을 좌상단으로 뒤집고, 시트 pt 를 그대로 쓰게 맞춘다.
+        ctx.translateBy(x: 0, y: CGFloat(px))
+        ctx.scaleBy(x: screenScale * zoom, y: -screenScale * zoom)
+        ctx.translateBy(x: -sheetRect.minX, y: -sheetRect.minY)
+
+        let count = Int(as_drawlist_count(dl))
+        guard count > 0, let cmdPtr = as_drawlist_commands(dl) else { return ctx.makeImage() }
+        var strLen: UInt32 = 0
+        let strPtr = as_drawlist_strings(dl, &strLen)
+
+        for cmd in UnsafeBufferPointer(start: cmdPtr, count: count) {
+            switch cmd.cmd_type {
+            case 0: // Fill
+                ctx.setFillColor(cgColor(cmd.color1))
+                ctx.fill(cgRect(cmd.rect))
+            case 1, 2: // Gradient · Pattern — P3 에서 제대로. 지금은 앞색을 옅게.
+                ctx.setFillColor(cgColor(cmd.color1, alpha: 0.35))
+                ctx.fill(cgRect(cmd.rect))
+            case 3: // Line (rect = x1,y1,x2,y2)
+                ctx.saveGState()
+                ctx.setStrokeColor(cgColor(cmd.color1))
+                ctx.setLineWidth(CGFloat(max(cmd.stroke_width, 0.25)))
+                if cmd.sub_type == 2 { ctx.setLineDash(phase: 0, lengths: [1.5, 1.5]) }
+                if cmd.sub_type == 3 { ctx.setLineDash(phase: 0, lengths: [3, 2]) }
+                ctx.move(to: CGPoint(x: CGFloat(cmd.rect.x), y: CGFloat(cmd.rect.y)))
+                ctx.addLine(to: CGPoint(x: CGFloat(cmd.rect.w), y: CGFloat(cmd.rect.h)))
+                ctx.strokePath()
+                ctx.restoreGState()
+            case 4: // Text
+                // 오프셋+길이를 Int 로 더한다(UInt32 끼리 더하면 넘칠 때 앱이 죽는다).
+                let off = Int(cmd.text_offset), len = Int(cmd.text_len)
+                guard let base = strPtr, len > 0, off >= 0, off + len <= Int(strLen) else { continue }
+                let raw = UnsafeRawPointer(base).advanced(by: off)
+                let text = String(decoding: UnsafeRawBufferPointer(start: raw, count: len), as: UTF8.self)
+                drawText(ctx, text, cmd)
+            case 5: // Marker (메모 삼각형)
+                let r = cgRect(cmd.rect)
+                ctx.setFillColor(cgColor(cmd.color1))
+                ctx.move(to: CGPoint(x: r.minX, y: r.minY))
+                ctx.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+                ctx.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+                ctx.closePath()
+                ctx.fillPath()
+            default:
+                break
+            }
+        }
+        return ctx.makeImage()
+    }
+
+    private static func cgRect(_ r: ASRect) -> CGRect {
+        CGRect(x: CGFloat(r.x), y: CGFloat(r.y), width: CGFloat(r.w), height: CGFloat(r.h))
+    }
+
+    private static func cgColor(_ c: ASColor, alpha: CGFloat? = nil) -> CGColor {
+        CGColor(srgbRed: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255, blue: CGFloat(c.b) / 255,
+                alpha: alpha ?? CGFloat(c.a) / 255)
+    }
+
+    /// 글꼴은 CoreText 로만 만든다(UIFont 를 백그라운드에서 만들지 않는다).
+    private static func drawText(_ ctx: CGContext, _ text: String, _ cmd: ASDrawCmd) {
+        let box = cgRect(cmd.rect)
+        guard box.width > 0, box.height > 0, !text.isEmpty else { return }
+        ctx.saveGState()
+        ctx.clip(to: cgRect(cmd.clip_rect))
+
+        let size = max(CGFloat(cmd.font_size_pt), 6)
+        var font = CTFontCreateUIFontForLanguage(.system, size, nil)
+            ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
+        var traits: CTFontSymbolicTraits = []
+        if cmd.font_bold { traits.insert(.traitBold) }
+        if cmd.font_italic { traits.insert(.traitItalic) }
+        if !traits.isEmpty, let f = CTFontCreateCopyWithSymbolicTraits(font, size, nil, traits, traits) {
+            font = f
+        }
+        let attrs: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): cgColor(cmd.color1),
+        ]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+
+        let x: CGFloat
+        switch cmd.align_horiz {
+        case 1: x = box.minX + (box.width - width) / 2
+        case 2: x = box.maxX - width
+        default: x = box.minX
+        }
+        let baseline: CGFloat
+        switch cmd.align_vert {
+        case 0: baseline = box.minY + ascent
+        case 1: baseline = box.minY + (box.height - ascent - descent) / 2 + ascent
+        default: baseline = box.maxY - descent - 1
+        }
+        // 바깥 변환이 y 를 뒤집었으므로 글자만 다시 뒤집어 바로 세운다.
+        ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+        ctx.textPosition = CGPoint(x: x, y: baseline)
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+    }
+}
+
+// MARK: - 뷰컨트롤러
+
+/// 전체 화면 엑셀 뷰어. 위: 주소·값·수식 막대 / 가운데: 틀 고정 4구역 / 아래: 시트·확대율.
+///
+/// 입력은 화면 전체 ArgoFocusCanvas 하나가 받는다(PDF 뷰어·사진 앨범과 같다).
+/// ←→↑↓ 셀 이동(누르고 있으면 반복·가속), 선택 = 셀 정보·확대/축소,
+/// 재생/일시정지 = 다음 시트, 메뉴 = 닫기.
+@available(tvOS 13.0, *)
+final class ArgoSheetViewerController: UIViewController {
+
+    /// 이 뷰어가 맡을 파일인지. 설정에서 끄면 예전 PDF 변환으로 간다.
+    static func shouldHandle(_ path: String) -> Bool {
+        let on = UserDefaults.settings.object(forKey: "excelCellViewer") as? Bool ?? true
+        let ext = (path as NSString).pathExtension.lowercased()
+        return on && (ext == "xlsx" || ext == "xlsm")
+    }
+
+    var onClose: (() -> Void)?
+    /// 열지 못했을 때. 받는 쪽이 PDF 경로로 다시 연다.
+    var onOpenFailed: ((String) -> Void)?
+
+    private let path: String
+    private var book: ArgoSheetBook?
+    /// 화면이 다 뜨기 전에 실패하면 dismiss 가 무시되어 뷰어가 남는다. 다 뜬 뒤에 알린다.
+    private var appeared = false
+    private var pendingFailure: String?
+    private var visibleSheets: [Int] = []
+    private var sheetIndex = 0
+    private var info = ASSheetInfo()
+
+    private let zoomLevels: [CGFloat] = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
+    private var zoom: CGFloat = 1.5
+
+    private var colOffsets: [CGFloat] = [0]   // 시트 pt 누적, 길이 = 열 수 + 1
+    private var rowOffsets: [CGFloat] = [0]
+    private var freezeCols = 0, freezeRows = 0
+
+    private var cursorRow = 1, cursorCol = 1
+    private var cursorInfo: ASCellInfo?
+
+    // 화면
+    private let topBar = UIView()
+    private let addrLabel = UILabel()
+    private let valueLabel = UILabel()
+    private let formulaLabel = UILabel()
+    private let bottomBar = UIView()
+    private let sheetLabel = UILabel()
+    private let zoomLabel = UILabel()
+    private let statusLabel = UILabel()
+    private let spinner = UIActivityIndicatorView(style: .large)
+
+    private let grid = UIView()
+    private let cornerHost = UIView(), topHost = UIView(), leftHost = UIView(), bodyHost = UIView()
+    private var cornerTiles, topTiles, leftTiles, bodyTiles: ArgoSheetTileView?
+    private let dividerH = UIView(), dividerV = UIView()
+    private var bodyOffset = CGPoint.zero    // 본문 스크롤 위치(화면 pt)
+    private let cursorLayer = CALayer()
+    private let canvas = ArgoFocusCanvas()
+
+    // 누르고 있기 반복
+    private var repeatTimer: Timer?
+    private var repeatDir: (Int, Int) = (0, 0)
+    private var repeatCount = 0
+
+    init(path: String) {
+        self.path = path
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .fullScreen
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { repeatTimer?.invalidate() }
+
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [canvas] }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor(red: 0.11, green: 0.12, blue: 0.15, alpha: 1)
+        buildBars()
+        buildGrid()
+
+        canvas.backgroundColor = .clear
+        canvas.onSelect = { [weak self] in self?.showCellSheet() }
+        canvas.onPress = { [weak self] type in self?.handlePress(type) ?? false }
+        canvas.onRelease = { [weak self] _ in self?.stopRepeat() }
+        view.addSubview(canvas)
+
+        openBook()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        appeared = true
+        if let note = pendingFailure {
+            pendingFailure = nil
+            onOpenFailed?(note)
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        canvas.frame = view.bounds
+        layoutAll()
+    }
+
+    // MARK: 열기
+
+    private func openBook() {
+        spinner.startAnimating()
+        statusLabel.text = L("여는 중…")
+        let path = self.path
+        let t0 = CACurrentMediaTime()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let (book, note) = ArgoSheetBook.open(path: path)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.spinner.stopAnimating()
+                guard let book = book, book.sheetCount > 0 else {
+                    ArgoDiag.log("sheet", "열기 실패 → PDF 로: \(note)")
+                    if self.appeared { self.onOpenFailed?(note) } else { self.pendingFailure = note }
+                    return
+                }
+                ArgoDiag.log("sheet", String(format: "열기 %.2f초, 시트 %d개", CACurrentMediaTime() - t0, book.sheetCount))
+                self.book = book
+                self.visibleSheets = (0..<book.sheetCount).filter { (book.sheetInfo($0)?.state ?? 1) == 0 }
+                if self.visibleSheets.isEmpty { self.visibleSheets = [0] }
+                self.statusLabel.text = nil
+                self.loadSheet(self.visibleSheets[0])
+            }
+        }
+    }
+
+    // MARK: 화면 짜기
+
+    private func buildBars() {
+        let barColor = UIColor(red: 0.15, green: 0.17, blue: 0.21, alpha: 1)
+        topBar.backgroundColor = barColor
+        bottomBar.backgroundColor = barColor
+        view.addSubview(topBar)
+        view.addSubview(bottomBar)
+
+        addrLabel.font = .monospacedSystemFont(ofSize: 24, weight: .bold)
+        addrLabel.textColor = .white
+        addrLabel.textAlignment = .center
+        addrLabel.backgroundColor = UIColor(red: 0.06, green: 0.49, blue: 0.25, alpha: 1)
+        addrLabel.layer.cornerRadius = 6
+        addrLabel.clipsToBounds = true
+        valueLabel.font = .systemFont(ofSize: 24, weight: .semibold)
+        valueLabel.textColor = .white
+        formulaLabel.font = .monospacedSystemFont(ofSize: 22, weight: .regular)
+        formulaLabel.textColor = UIColor(white: 0.78, alpha: 1)
+        [addrLabel, valueLabel, formulaLabel].forEach { topBar.addSubview($0) }
+
+        sheetLabel.font = .systemFont(ofSize: 22, weight: .medium)
+        sheetLabel.textColor = .white
+        zoomLabel.font = .monospacedSystemFont(ofSize: 20, weight: .bold)
+        zoomLabel.textColor = .systemYellow
+        zoomLabel.textAlignment = .right
+        [sheetLabel, zoomLabel].forEach { bottomBar.addSubview($0) }
+
+        statusLabel.font = .systemFont(ofSize: 28, weight: .medium)
+        statusLabel.textColor = .white
+        statusLabel.textAlignment = .center
+        statusLabel.numberOfLines = 0
+        spinner.color = .white
+        view.addSubview(statusLabel)
+        view.addSubview(spinner)
+    }
+
+    private func buildGrid() {
+        grid.clipsToBounds = true
+        grid.backgroundColor = .white
+        view.addSubview(grid)
+        for h in [cornerHost, topHost, leftHost, bodyHost] {
+            h.clipsToBounds = true
+            h.backgroundColor = .white
+            h.isUserInteractionEnabled = false
+            grid.addSubview(h)
+        }
+        for d in [dividerH, dividerV] {
+            d.backgroundColor = UIColor(white: 0.45, alpha: 1)
+            grid.addSubview(d)
+        }
+        cursorLayer.borderColor = UIColor(red: 0.06, green: 0.62, blue: 0.30, alpha: 1).cgColor
+        cursorLayer.borderWidth = 4
+        cursorLayer.zPosition = 500
+    }
+
+    private let topBarH: CGFloat = 76
+    private let bottomBarH: CGFloat = 60
+
+    private func layoutAll() {
+        let W = view.bounds.width, H = view.bounds.height
+        guard W > 0, H > 0 else { return }
+        let side: CGFloat = 60
+        topBar.frame = CGRect(x: 0, y: 0, width: W, height: topBarH)
+        addrLabel.frame = CGRect(x: side, y: 14, width: 170, height: 48)
+        valueLabel.frame = CGRect(x: side + 190, y: 14, width: W * 0.38, height: 48)
+        let fx = valueLabel.frame.maxX + 20
+        formulaLabel.frame = CGRect(x: fx, y: 14, width: max(0, W - fx - side), height: 48)
+        bottomBar.frame = CGRect(x: 0, y: H - bottomBarH, width: W, height: bottomBarH)
+        sheetLabel.frame = CGRect(x: side, y: 9, width: W - side * 2 - 300, height: 42)
+        zoomLabel.frame = CGRect(x: W - side - 280, y: 9, width: 280, height: 42)
+        statusLabel.frame = CGRect(x: side, y: H / 2 + 40, width: W - side * 2, height: 120)
+        spinner.center = CGPoint(x: W / 2, y: H / 2)
+
+        grid.frame = CGRect(x: 0, y: topBarH, width: W, height: H - topBarH - bottomBarH)
+        layoutQuadrants()
+    }
+
+    /// 틀 고정 경계(화면 pt). 화면의 45% 를 넘지 않게 자른다.
+    private var freezeSize: CGSize {
+        let fw = colOffsets[min(freezeCols, colOffsets.count - 1)] * zoom
+        let fh = rowOffsets[min(freezeRows, rowOffsets.count - 1)] * zoom
+        return CGSize(width: min(fw, grid.bounds.width * 0.45), height: min(fh, grid.bounds.height * 0.45))
+    }
+
+    private var freezePt: CGPoint {
+        CGPoint(x: colOffsets[min(freezeCols, colOffsets.count - 1)],
+                y: rowOffsets[min(freezeRows, rowOffsets.count - 1)])
+    }
+
+    private func layoutQuadrants() {
+        let G = grid.bounds
+        guard G.width > 0, G.height > 0, book != nil else { return }
+        let f = freezeSize
+        cornerHost.frame = CGRect(x: 0, y: 0, width: f.width, height: f.height)
+        topHost.frame = CGRect(x: f.width, y: 0, width: G.width - f.width, height: f.height)
+        leftHost.frame = CGRect(x: 0, y: f.height, width: f.width, height: G.height - f.height)
+        bodyHost.frame = CGRect(x: f.width, y: f.height, width: G.width - f.width, height: G.height - f.height)
+        dividerH.isHidden = f.height <= 0
+        dividerV.isHidden = f.width <= 0
+        dividerH.frame = CGRect(x: 0, y: f.height - 1, width: G.width, height: 2)
+        dividerV.frame = CGRect(x: f.width - 1, y: 0, width: 2, height: G.height)
+
+        let totalW = (colOffsets.last ?? 0) * zoom, totalH = (rowOffsets.last ?? 0) * zoom
+        let fp = freezePt
+        let bodyW = max(0, totalW - fp.x * zoom), bodyH = max(0, totalH - fp.y * zoom)
+        // 본문이 화면보다 작으면 스크롤하지 않는다.
+        bodyOffset.x = max(0, min(bodyOffset.x, bodyW - bodyHost.bounds.width))
+        bodyOffset.y = max(0, min(bodyOffset.y, bodyH - bodyHost.bounds.height))
+
+        cornerTiles?.frame = CGRect(x: 0, y: 0, width: fp.x * zoom, height: fp.y * zoom)
+        topTiles?.frame = CGRect(x: -bodyOffset.x, y: 0, width: bodyW, height: fp.y * zoom)
+        leftTiles?.frame = CGRect(x: 0, y: -bodyOffset.y, width: fp.x * zoom, height: bodyH)
+        bodyTiles?.frame = CGRect(x: -bodyOffset.x, y: -bodyOffset.y, width: bodyW, height: bodyH)
+        refreshTiles()
+        placeCursor()
+    }
+
+    private func refreshTiles() {
+        for (host, tiles) in [(cornerHost, cornerTiles), (topHost, topTiles), (leftHost, leftTiles), (bodyHost, bodyTiles)] {
+            guard let tiles = tiles, host.bounds.width > 0, host.bounds.height > 0 else { continue }
+            // host 에서 보이는 영역을 tiles 좌표로
+            tiles.updateVisible(host.convert(host.bounds, to: tiles))
+        }
+    }
+
+    // MARK: 시트
+
+    private func loadSheet(_ index: Int) {
+        guard let book = book, let si = book.sheetInfo(index) else { return }
+        sheetIndex = index
+        info = si
+        stopRepeat()
+
+        var cPtr: UnsafePointer<Float>?, rPtr: UnsafePointer<Float>?
+        var nc: UInt32 = 0, nr: UInt32 = 0
+        colOffsets = [0]
+        rowOffsets = [0]
+        if as_sheet_axes(book.ptr, UInt32(index), &cPtr, &nc, &rPtr, &nr), let c = cPtr, let r = rPtr {
+            var a: CGFloat = 0
+            colOffsets.reserveCapacity(Int(nc) + 1)
+            for i in 0..<Int(nc) { a += CGFloat(max(0, c[i])); colOffsets.append(a) }
+            a = 0
+            rowOffsets.reserveCapacity(Int(nr) + 1)
+            for i in 0..<Int(nr) { a += CGFloat(max(0, r[i])); rowOffsets.append(a) }
+        }
+        freezeCols = si.is_frozen ? Int(si.freeze_cols) : 0
+        freezeRows = si.is_frozen ? Int(si.freeze_rows) : 0
+        bodyOffset = .zero
+
+        [cornerTiles, topTiles, leftTiles, bodyTiles].forEach { $0?.removeFromSuperview() }
+        let fp = freezePt
+        let s = UInt32(index)
+        cornerTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: .zero, zoom: zoom)
+        topTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: CGPoint(x: fp.x, y: 0), zoom: zoom)
+        leftTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: CGPoint(x: 0, y: fp.y), zoom: zoom)
+        bodyTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: fp, zoom: zoom)
+        cornerHost.addSubview(cornerTiles!)
+        topHost.addSubview(topTiles!)
+        leftHost.addSubview(leftTiles!)
+        bodyHost.addSubview(bodyTiles!)
+
+        // 틀 고정이 있으면 고정 영역 바로 다음 칸에서 시작한다.
+        cursorRow = max(1, Int(si.is_frozen ? si.top_left_row : 1))
+        cursorCol = max(1, Int(si.is_frozen ? si.top_left_col : 1))
+        updateBottomBar()
+        layoutQuadrants()
+        syncCursor(ensureVisible: true)
+    }
+
+    private func updateBottomBar() {
+        guard let book = book else { return }
+        let names = visibleSheets.map { i -> String in
+            let n = book.sheetInfo(i).map { argoSheetString($0.name) } ?? "?"
+            return i == sheetIndex ? "[\(n)]" : n
+        }
+        sheetLabel.text = names.joined(separator: "  ·  ")
+        zoomLabel.text = L("확대") + " \(Int((zoom * 100).rounded()))%"
+    }
+
+    // MARK: 커서
+
+    private var rowCount: Int { rowOffsets.count - 1 }
+    private var colCount: Int { colOffsets.count - 1 }
+
+    private func handlePress(_ type: UIPress.PressType) -> Bool {
+        switch type {
+        case .upArrow:    startMove(-1, 0); return true
+        case .downArrow:  startMove(1, 0); return true
+        case .leftArrow:  startMove(0, -1); return true
+        case .rightArrow: startMove(0, 1); return true
+        case .playPause:  nextSheet(); return true
+        case .menu:       close(); return true
+        default:          return false
+        }
+    }
+
+    private func startMove(_ dr: Int, _ dc: Int) {
+        guard book != nil else { return }
+        moveCursor(dr, dc)
+        repeatTimer?.invalidate()
+        repeatDir = (dr, dc)
+        repeatCount = 0
+        // 0.4초 누르고 있으면 반복, 오래 누를수록 빨라진다.
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+            self?.repeatTick()
+        }
+    }
+
+    private func repeatTick() {
+        repeatCount += 1
+        let step = repeatCount > 30 ? 5 : (repeatCount > 12 ? 2 : 1)
+        moveCursor(repeatDir.0 * step, repeatDir.1 * step)
+        let interval = repeatCount > 12 ? 0.05 : 0.09
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            self?.repeatTick()
+        }
+    }
+
+    private func stopRepeat() {
+        repeatTimer?.invalidate()
+        repeatTimer = nil
+    }
+
+    private func moveCursor(_ dr: Int, _ dc: Int) {
+        guard rowCount > 0, colCount > 0 else { return }
+        var r = cursorRow, c = cursorCol
+        // 병합 칸이면 병합의 바깥 경계에서 출발한다.
+        if let ci = cursorInfo {
+            if dr > 0 { r = Int(ci.merge_end_row) } else if dr < 0 { r = Int(ci.merge_start_row) }
+            if dc > 0 { c = Int(ci.merge_end_col) } else if dc < 0 { c = Int(ci.merge_start_col) }
+        }
+        r = min(max(1, r + dr), rowCount)
+        c = min(max(1, c + dc), colCount)
+        // 숨은 행·열(높이·너비 0)은 건너뛴다. 끝까지 숨었으면 제자리.
+        let rs = dr >= 0 ? 1 : -1, cs = dc >= 0 ? 1 : -1
+        var guardN = 0
+        while rowOffsets[r] - rowOffsets[r - 1] <= 0, guardN < rowCount {
+            let n = r + rs
+            if n < 1 || n > rowCount { break }
+            r = n; guardN += 1
+        }
+        guardN = 0
+        while colOffsets[c] - colOffsets[c - 1] <= 0, guardN < colCount {
+            let n = c + cs
+            if n < 1 || n > colCount { break }
+            c = n; guardN += 1
+        }
+        cursorRow = r
+        cursorCol = c
+        syncCursor(ensureVisible: true)
+    }
+
+    private func syncCursor(ensureVisible: Bool) {
+        guard let book = book, let ci = book.cellInfo(sheet: sheetIndex, row: cursorRow, col: cursorCol) else { return }
+        cursorInfo = ci
+        cursorRow = Int(ci.merge_start_row)
+        cursorCol = Int(ci.merge_start_col)
+
+        addrLabel.text = argoSheetString(ci.address)
+        let v = argoSheetString(ci.display_text)
+        valueLabel.text = v.isEmpty ? L("(빈 칸)") : v
+        let f = argoSheetString(ci.formula)
+        formulaLabel.text = f.isEmpty ? "" : "=" + f
+
+        if ensureVisible { scrollToCursor() }
+        placeCursor()
+    }
+
+    /// 커서 칸의 시트 pt 사각형.
+    private func cursorSheetRect() -> CGRect? {
+        guard let ci = cursorInfo, rowCount > 0, colCount > 0 else { return nil }
+        let sr = min(max(1, Int(ci.merge_start_row)), rowCount)
+        let sc = min(max(1, Int(ci.merge_start_col)), colCount)
+        let er = min(max(sr, Int(ci.merge_end_row)), rowCount)
+        let ec = min(max(sc, Int(ci.merge_end_col)), colCount)
+        return CGRect(x: colOffsets[sc - 1], y: rowOffsets[sr - 1],
+                      width: colOffsets[ec] - colOffsets[sc - 1], height: rowOffsets[er] - rowOffsets[sr - 1])
+    }
+
+    private func scrollToCursor() {
+        guard let r = cursorSheetRect() else { return }
+        let fp = freezePt
+        let inFrozenCol = cursorCol <= freezeCols, inFrozenRow = cursorRow <= freezeRows
+        let vw = bodyHost.bounds.width, vh = bodyHost.bounds.height
+        var o = bodyOffset
+        if !inFrozenCol, vw > 0 {
+            let minX = (r.minX - fp.x) * zoom, maxX = (r.maxX - fp.x) * zoom
+            if minX < o.x { o.x = max(0, minX - 24) } else if maxX > o.x + vw { o.x = maxX - vw + 24 }
+        }
+        if !inFrozenRow, vh > 0 {
+            let minY = (r.minY - fp.y) * zoom, maxY = (r.maxY - fp.y) * zoom
+            if minY < o.y { o.y = max(0, minY - 24) } else if maxY > o.y + vh { o.y = maxY - vh + 24 }
+        }
+        if o != bodyOffset {
+            bodyOffset = o
+            layoutQuadrants()
+        }
+    }
+
+    private func placeCursor() {
+        guard let r = cursorSheetRect() else { cursorLayer.removeFromSuperlayer(); return }
+        let fp = freezePt
+        let inFrozenCol = cursorCol <= freezeCols, inFrozenRow = cursorRow <= freezeRows
+        let host: ArgoSheetTileView?
+        let origin: CGPoint
+        switch (inFrozenRow, inFrozenCol) {
+        case (true, true):  host = cornerTiles; origin = .zero
+        case (true, false): host = topTiles; origin = CGPoint(x: fp.x, y: 0)
+        case (false, true): host = leftTiles; origin = CGPoint(x: 0, y: fp.y)
+        default:            host = bodyTiles; origin = fp
+        }
+        guard let h = host else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if cursorLayer.superlayer !== h.layer {
+            cursorLayer.removeFromSuperlayer()
+            h.layer.addSublayer(cursorLayer)
+        }
+        cursorLayer.frame = CGRect(x: (r.minX - origin.x) * zoom, y: (r.minY - origin.y) * zoom,
+                                   width: r.width * zoom, height: r.height * zoom).insetBy(dx: -2, dy: -2)
+        CATransaction.commit()
+    }
+
+    // MARK: 버튼
+
+    private func nextSheet() {
+        guard visibleSheets.count > 1, let i = visibleSheets.firstIndex(of: sheetIndex) else { return }
+        loadSheet(visibleSheets[(i + 1) % visibleSheets.count])
+    }
+
+    private func setZoom(_ z: CGFloat) {
+        guard z != zoom, book != nil else { return }
+        zoom = z
+        let fp = freezePt
+        cornerTiles?.reset(zoom: z, sheetOriginPt: .zero)
+        topTiles?.reset(zoom: z, sheetOriginPt: CGPoint(x: fp.x, y: 0))
+        leftTiles?.reset(zoom: z, sheetOriginPt: CGPoint(x: 0, y: fp.y))
+        bodyTiles?.reset(zoom: z, sheetOriginPt: fp)
+        updateBottomBar()
+        layoutQuadrants()
+        syncCursor(ensureVisible: true)
+    }
+
+    /// 선택 버튼: 셀 정보와 확대·축소.
+    private func showCellSheet() {
+        stopRepeat()
+        guard book != nil else { return }
+        var msg = ""
+        if let ci = cursorInfo {
+            let v = argoSheetString(ci.display_text)
+            let f = argoSheetString(ci.formula)
+            let fmt = argoSheetString(ci.format_code)
+            let memo = argoSheetString(ci.comment_text)
+            msg = L("값") + ": " + (v.isEmpty ? L("(빈 칸)") : v)
+            if !f.isEmpty { msg += "\n" + L("수식") + ": =" + f }
+            if !fmt.isEmpty && fmt != "General" { msg += "\n" + L("서식") + ": " + fmt }
+            if !memo.isEmpty { msg += "\n\n" + L("메모") + "\n" + memo }
+        }
+        let title = cursorInfo.map { argoSheetString($0.address) } ?? ""
+        let a = UIAlertController(title: title, message: msg, preferredStyle: .alert)
+        if let i = zoomLevels.firstIndex(of: zoom) {
+            if i + 1 < zoomLevels.count {
+                let z = zoomLevels[i + 1]
+                a.addAction(UIAlertAction(title: L("확대") + " \(Int(z * 100))%", style: .default) { [weak self] _ in self?.setZoom(z) })
+            }
+            if i > 0 {
+                let z = zoomLevels[i - 1]
+                a.addAction(UIAlertAction(title: L("축소") + " \(Int(z * 100))%", style: .default) { [weak self] _ in self?.setZoom(z) })
+            }
+        }
+        if visibleSheets.count > 1 {
+            a.addAction(UIAlertAction(title: L("다음 시트"), style: .default) { [weak self] _ in self?.nextSheet() })
+        }
+        a.addAction(UIAlertAction(title: L("닫기"), style: .cancel))
+        present(a, animated: true)
+    }
+
+    private func close() {
+        stopRepeat()
+        if let onClose = onClose { onClose() } else { dismiss(animated: true) }
+    }
+}
