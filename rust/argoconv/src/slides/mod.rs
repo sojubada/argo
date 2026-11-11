@@ -331,3 +331,9 @@ fn tree_of<'a, 'i>(n: Option<roxmltree::Node<'a, 'i>>) -> Option<roxmltree::Node
 fn bg_of<'a, 'i>(n: Option<roxmltree::Node<'a, 'i>>) -> Option<roxmltree::Node<'a, 'i>> {
     n.and_then(|n| path_child(n, &["cSld", "bg"]))
 }
+
+/// 시험용: EMF 한 장을 SVG 로. 우리 변환기만 쓴다(예전 변환기로 넘기지 않는다).
+#[doc(hidden)]
+pub fn debug_emf_to_svg(bytes: &[u8]) -> Option<Vec<u8>> {
+    emfbitmap::convert(bytes)
+}

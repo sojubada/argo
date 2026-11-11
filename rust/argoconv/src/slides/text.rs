@@ -937,6 +937,11 @@ fn layout_all(env: &mut TextEnv<'_>, paras: &[Para], width: f64, wrap: bool, red
     out
 }
 
+/// 줄 끝에 매달 수 있는 글자(닫는 부호). 여는 괄호·따옴표는 넣지 않는다.
+fn hangable(c: char) -> bool {
+    matches!(c, ',' | '.' | '!' | '?' | ':' | ';' | '、' | '。' | '，' | '．' | '·' | '〉' | '》' | '」' | '』' | ')' | ']' | '}')
+}
+
 fn break_lines(p: &Para, width: f64, wrap: bool) -> Vec<LineOut> {
     let mar_l = p.style.mar_l.unwrap_or(0.0);
     let indent = p.style.indent.unwrap_or(0.0);
@@ -978,7 +983,9 @@ fn break_lines(p: &Para, width: f64, wrap: bool) -> Vec<LineOut> {
                 break;
             }
             let adv = if gl.tab { tab_stop(&p.style, x0 + x) - (x0 + x) } else { gl.adv };
-            let trailing_space = gl.ch == ' ';
+            // 줄 끝 문장부호는 칸 밖으로 매단다(파워포인트·한글의 기본 규칙).
+            // 쉼표 하나 때문에 낱말이 통째로 다음 줄로 내려가면 쪽 수까지 달라진다.
+            let trailing_space = gl.ch == ' ' || hangable(gl.ch);
             if wrap && i >= overflow_ok_until && x + adv > avail + 0.01 && !trailing_space && i > start
                 && !matches!(last_break, Some(b) if b > start)
             {

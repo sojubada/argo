@@ -26,10 +26,20 @@ struct Brush {
     null: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
+struct Font {
+    /// 논리 단위 글자 높이(음수면 글자 크기, 양수면 칸 높이). 절댓값을 쓴다.
+    height: f32,
+    weight: u32,
+    italic: bool,
+    face: String,
+}
+
+#[derive(Clone)]
 enum Obj {
     Pen(Pen),
     Brush(Brush),
+    Font(Font),
     Other,
 }
 
@@ -41,16 +51,31 @@ struct Dc {
     pen: Pen,
     brush: Brush,
     winding: bool,
+    /// 창(논리) 원점·크기와 뷰포트(장치) 원점·크기. 글자마다 원점을 옮기는 EMF 가 많다.
+    win_org: (f32, f32),
+    win_ext: (f32, f32),
+    vp_org: (f32, f32),
+    vp_ext: (f32, f32),
+    font: Option<Font>,
+    text_color: u32,
+    text_align: u32,
 }
 
 impl Dc {
     fn map(&self, x: f32, y: f32) -> (f32, f32) {
         let m = &self.world;
-        (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+        let (wx, wy) = (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]);
+        // 논리 좌표 → 장치 좌표(창·뷰포트). 둘 다 안 쓰면 그대로다.
+        let sx = if self.win_ext.0 != 0.0 { self.vp_ext.0 / self.win_ext.0 } else { 1.0 };
+        let sy = if self.win_ext.1 != 0.0 { self.vp_ext.1 / self.win_ext.1 } else { 1.0 };
+        ((wx - self.win_org.0) * sx + self.vp_org.0, (wy - self.win_org.1) * sy + self.vp_org.1)
     }
     fn scale(&self) -> f32 {
         let m = &self.world;
-        (m[0] * m[3] - m[1] * m[2]).abs().sqrt().max(1e-6)
+        let w = (m[0] * m[3] - m[1] * m[2]).abs().sqrt();
+        let sx = if self.win_ext.0 != 0.0 { (self.vp_ext.0 / self.win_ext.0).abs() } else { 1.0 };
+        let sy = if self.win_ext.1 != 0.0 { (self.vp_ext.1 / self.win_ext.1).abs() } else { 1.0 };
+        (w * (sx * sy).sqrt()).max(1e-6)
     }
 }
 
@@ -70,6 +95,16 @@ fn f32_at(b: &[u8], o: usize) -> Option<f32> {
 }
 
 /// COLORREF(0x00BBGGRR) → "#RRGGBB"
+/// XML 1.0 이 허용하는 글자인가. 제어문자가 하나라도 들어가면 SVG 를 통째로 못 읽는다.
+fn xml_ok(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\r' | ' '..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..)
+}
+
+/// 속성에 넣을 수 없는 글자를 뺀다(글꼴 이름용).
+fn xml_attr(v: &str) -> String {
+    v.chars().filter(|c| xml_ok(*c) && *c != '"' && *c != '<' && *c != '>' && *c != '&').collect()
+}
+
 fn css(c: u32) -> String {
     format!("#{:02X}{:02X}{:02X}", c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF)
 }
@@ -185,6 +220,57 @@ impl Out {
         self.push(dc, &node);
     }
 
+    /// 글자 한 줄. 글자 사이 간격(dx)이 있으면 글자마다 x 를 적어 GDI 와 같은 자리에 놓는다.
+    fn text(&mut self, dc: &Dc, origin: (f32, f32), chars: &[char], dx: &[f32]) {
+        let Some(font) = dc.font.clone() else { return };
+        let size = font.height.abs() * dc.scale();
+        if size < 0.3 || chars.is_empty() {
+            return;
+        }
+        let (ox, oy) = origin;
+        let mut xs = String::new();
+        if dx.len() >= chars.len() {
+            let mut at = 0.0f32;
+            for (i, d) in dx.iter().take(chars.len()).enumerate() {
+                if i > 0 {
+                    xs.push(' ');
+                }
+                let _ = write!(xs, "{:.2}", ox + at);
+                at += d * dc.scale();
+            }
+        } else {
+            let _ = write!(xs, "{ox:.2}");
+        }
+        // 글자 맞춤: 가운데(6)·오른쪽(2). 기준선(24)이 아니면 y 는 글자 위쪽이다.
+        let anchor = match dc.text_align & 6 {
+            2 => " text-anchor=\"end\"",
+            6 => " text-anchor=\"middle\"",
+            _ => "",
+        };
+        let y = if dc.text_align & 24 == 24 { oy } else { oy + size * 0.88 };
+        let weight = if font.weight >= 600 { " font-weight=\"bold\"" } else { "" };
+        let italic = if font.italic { " font-style=\"italic\"" } else { "" };
+        let body: String = chars
+            .iter()
+            .filter(|c| xml_ok(**c))
+            .map(|c| match c {
+                '&' => "&amp;".to_string(),
+                '<' => "&lt;".to_string(),
+                '>' => "&gt;".to_string(),
+                c => c.to_string(),
+            })
+            .collect();
+        if body.trim().is_empty() {
+            return;
+        }
+        let node = format!(
+            "<text x=\"{xs}\" y=\"{y:.2}\" font-family=\"{}\" font-size=\"{size:.2}\" fill=\"{}\"{anchor}{weight}{italic} xml:space=\"preserve\">{body}</text>",
+            xml_attr(&font.face),
+            css(dc.text_color)
+        );
+        self.push(dc, &node);
+    }
+
     fn image(&mut self, dc: &Dc, dest: (f32, f32, f32, f32), png: &[u8]) {
         let (x, y, w, h) = dest;
         let (x0, y0) = dc.map(x, y);
@@ -280,6 +366,13 @@ pub(crate) fn convert(bytes: &[u8]) -> Option<Vec<u8>> {
         pen: Pen { color: 0, width: 0.0, null: false },
         brush: Brush { color: 0x00FF_FFFF, null: false },
         winding: false,
+        win_org: (0.0, 0.0),
+        win_ext: (1.0, 1.0),
+        vp_org: (0.0, 0.0),
+        vp_ext: (1.0, 1.0),
+        font: None,
+        text_color: 0,
+        text_align: 0,
     };
     let mut stack: Vec<Dc> = Vec::new();
     let mut objects: HashMap<u32, Obj> = HashMap::new();
@@ -302,7 +395,31 @@ pub(crate) fn convert(bytes: &[u8]) -> Option<Vec<u8>> {
         match kind {
             14 => break, // EOF
             // 그리기와 상관없는 상태들
-            18 | 20 | 21 | 22 | 24 | 25 | 26 | 28 | 58 | 70 | 98 | 115 | 13 | 16 | 82 => {}
+            18 | 20 | 21 | 25 | 26 | 28 | 58 | 70 | 98 | 115 | 13 | 16 => {}
+            22 => dc.text_align = u32_at(r, 8)?,
+            24 => dc.text_color = u32_at(r, 8)?,
+            9 => dc.win_ext = (i32_at(r, 8)? as f32, i32_at(r, 12)? as f32),
+            10 => dc.win_org = (i32_at(r, 8)? as f32, i32_at(r, 12)? as f32),
+            11 => dc.vp_ext = (i32_at(r, 8)? as f32, i32_at(r, 12)? as f32),
+            12 => dc.vp_org = (i32_at(r, 8)? as f32, i32_at(r, 12)? as f32),
+            82 => {
+                // EXTCREATEFONTINDIRECTW: ih, LogFontW(높이·기울기·굵기·이름)
+                let ih = u32_at(r, 8)?;
+                let face: String = (0..32)
+                    .filter_map(|k| i16_at(r, 40 + k * 2).map(|v| v as u16))
+                    .take_while(|v| *v != 0)
+                    .filter_map(|v| char::from_u32(v as u32))
+                    .collect();
+                objects.insert(
+                    ih,
+                    Obj::Font(Font {
+                        height: i32_at(r, 12)? as f32,
+                        weight: u32_at(r, 28)?,
+                        italic: r.get(32).copied().unwrap_or(0) != 0,
+                        face,
+                    }),
+                );
+            }
             19 => dc.winding = u32_at(r, 8)? == 2, // SETPOLYFILLMODE
             17 => {
                 // SETMAPMODE: MM_TEXT 만 다룬다
@@ -395,10 +512,11 @@ pub(crate) fn convert(bytes: &[u8]) -> Option<Vec<u8>> {
             }
             37 => {
                 let h = u32_at(r, 8)?;
-                let obj = if h & 0x8000_0000 != 0 { stock(h & 0x7FFF_FFFF) } else { objects.get(&h).copied() };
+                let obj = if h & 0x8000_0000 != 0 { stock(h & 0x7FFF_FFFF) } else { objects.get(&h).cloned() };
                 match obj {
                     Some(Obj::Pen(p)) => dc.pen = p,
                     Some(Obj::Brush(b)) => dc.brush = b,
+                    Some(Obj::Font(f)) => dc.font = Some(f),
                     _ => {}
                 }
             }
@@ -501,12 +619,40 @@ pub(crate) fn convert(bytes: &[u8]) -> Option<Vec<u8>> {
                     out.image(&dc, (xd as f32, yd as f32, cx as f32, cy as f32), &png);
                 }
             }
-            // 그 밖의 그리기(글자·경로·곡선·맵 모드…)는 예전 변환기에 맡긴다
+            83 | 84 => {
+                // EXTTEXTOUTA / EXTTEXTOUTW: bounds(16), 그리기 방식, 배율 2개, EmrText
+                let at = 36;
+                let (rx, ry) = (i32_at(r, at)? as f32, i32_at(r, at + 4)? as f32);
+                let n = u32_at(r, at + 8)? as usize;
+                let off_str = u32_at(r, at + 12)? as usize;
+                let off_dx = u32_at(r, at + 36)? as usize;
+                if n == 0 || n > 8192 {
+                    off += size;
+                    continue;
+                }
+                let chars: Vec<char> = if kind == 84 {
+                    (0..n)
+                        .filter_map(|k| i16_at(r, off_str + k * 2).map(|v| v as u16))
+                        .filter_map(|v| char::from_u32(v as u32))
+                        .collect()
+                } else {
+                    (0..n).filter_map(|k| r.get(off_str + k).map(|b| *b as char)).collect()
+                };
+                let dx: Vec<f32> = if off_dx >= 36 && off_dx + n * 4 <= r.len() {
+                    (0..n).filter_map(|k| i32_at(r, off_dx + k * 4).map(|v| v as f32)).collect()
+                } else {
+                    Vec::new()
+                };
+                let origin = dc.map(rx, ry);
+                out.text(&dc, origin, &chars, &dx);
+            }
+            // 그 밖의 그리기(경로·곡선·맵 모드…)는 예전 변환기에 맡긴다
             _ => return None,
         }
         off += size;
     }
-    if out.bitmaps == 0 {
+    // 그린 것이 하나도 없으면 예전 변환기에 맡긴다.
+    if out.body.is_empty() {
         return None;
     }
     let svg = format!(

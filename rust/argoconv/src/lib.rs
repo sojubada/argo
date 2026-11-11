@@ -6,7 +6,7 @@
 
 pub mod fonts;
 pub mod hwp;
-mod slides;
+pub mod slides;
 
 use std::panic;
 use std::sync::Mutex;
