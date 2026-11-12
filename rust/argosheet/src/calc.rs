@@ -834,6 +834,7 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
                     });
                     deps.sort_by_key(|a| (a.sheet, a.row, a.col));
                     deps.dedup();
+                    deps.shrink_to_fit();
                     deps_map.insert(addr, deps);
                     ast_map.insert(addr, expr);
                 }
@@ -897,6 +898,7 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
         values: &mut values,
         visiting: HashSet::new(),
         circular_warnings: &mut circular_warnings,
+        range_cache: RangeCache::default(),
     };
 
     for addr in order {
@@ -989,6 +991,7 @@ pub fn eval_standalone_expr(
             values: &mut state.values,
             visiting: HashSet::new(),
             circular_warnings: &mut warnings,
+            range_cache: RangeCache::default(),
         };
         ev.eval_scalar(caller, expr)
     };
@@ -1018,6 +1021,35 @@ fn contains_dynamic_ref_func(expr: &Expr) -> bool {
     }
 }
 
+/// 범위 안의 **수식 칸만** 의존성으로 넣는다(값 칸은 어차피 걸러 낸다).
+/// 예전에는 범위 칸을 전부 넣고 나중에 걸렀는데, `SUMIFS(D:D,B:B,..)` 400개 × 2만 행이면
+/// 걸러도 Vec 용량이 남아 377MB 를 먹었다. 범위가 수식 수보다 크면 수식 목록 쪽을 훑는다.
+fn push_range_formula_deps(wb: &Workbook, rr: &RefRange, out: &mut Vec<CellAddr>) {
+    let Some(sheet) = wb.sheets.get(rr.sheet_idx) else { return };
+    if sheet.formulas.is_empty() {
+        return;
+    }
+    let cells = (rr.end_row.saturating_sub(rr.start_row) as u64 + 1)
+        * (rr.end_col.saturating_sub(rr.start_col) as u64 + 1);
+    if cells <= sheet.formulas.len() as u64 {
+        for r in rr.start_row..=rr.end_row {
+            for c in rr.start_col..=rr.end_col {
+                if sheet.formulas.contains_key(&crate::cell_key(r, c)) {
+                    out.push(CellAddr { sheet: rr.sheet_idx, row: r, col: c });
+                }
+            }
+        }
+    } else {
+        for &key in sheet.formulas.keys() {
+            let r = (key >> 32) as u32;
+            let c = (key & 0xFFFF_FFFF) as u32;
+            if r >= rr.start_row && r <= rr.end_row && c >= rr.start_col && c <= rr.end_col {
+                out.push(CellAddr { sheet: rr.sheet_idx, row: r, col: c });
+            }
+        }
+    }
+}
+
 fn collect_static_dependencies(
     wb: &Workbook,
     cur_sheet: usize,
@@ -1032,15 +1064,7 @@ fn collect_static_dependencies(
             right,
         } => {
             if let Some(rr) = resolve_static_range_pair(wb, cur_sheet, left, right) {
-                for r in rr.start_row..=rr.end_row {
-                    for c in rr.start_col..=rr.end_col {
-                        out.push(CellAddr {
-                            sheet: rr.sheet_idx,
-                            row: r,
-                            col: c,
-                        });
-                    }
-                }
+                push_range_formula_deps(wb, &rr, out);
                 return;
             }
             collect_static_dependencies(wb, cur_sheet, left, defined_ast, out);
@@ -1048,15 +1072,7 @@ fn collect_static_dependencies(
         }
         Expr::RefOrName { sheet, name } => {
             if let Some(rr) = resolve_ref_token(wb, cur_sheet, sheet.as_deref(), name) {
-                for r in rr.start_row..=rr.end_row {
-                    for c in rr.start_col..=rr.end_col {
-                        out.push(CellAddr {
-                            sheet: rr.sheet_idx,
-                            row: r,
-                            col: c,
-                        });
-                    }
-                }
+                push_range_formula_deps(wb, &rr, out);
             } else if let Some((dn_sheet, dn_expr)) = defined_ast.get(&name.to_ascii_uppercase()) {
                 collect_static_dependencies(
                     wb,
@@ -1204,9 +1220,158 @@ struct Evaluator<'a> {
     values: &'a mut HashMap<CellAddr, Value>,
     visiting: HashSet<CellAddr>,
     circular_warnings: &'a mut Vec<CellAddr>,
+    range_cache: RangeCache,
+}
+
+/// SUMIFS·COUNTIFS 가 같은 범위를 수식마다 다시 펼치지 않도록 펼친 값을 들고 있는다.
+/// 큰 범위(1,024칸 이상)는 조건 후보를 빨리 고르는 색인도 만든다.
+/// 색인은 "후보"만 준다 — 최종 판정은 언제나 CriteriaMatcher 로 다시 한다(엑셀과 결과가 같도록).
+#[derive(Default)]
+struct RangeCache {
+    flats: HashMap<RefRange, std::rc::Rc<Vec<Value>>>,
+    indexes: HashMap<RefRange, std::rc::Rc<ColCriteriaIndex>>,
+    cached_cells: usize,
+}
+
+/// 캐시에 들고 있을 칸 수 상한(메모리 보호). 넘으면 캐시 없이 매번 펼친다.
+const RANGE_CACHE_MAX_CELLS: usize = 4_000_000;
+const RANGE_INDEX_MIN_LEN: usize = 1024;
+
+/// 조건 후보 색인. 같음(숫자·글자) 묶음과 숫자 정렬 목록.
+pub struct ColCriteriaIndex {
+    len: usize,
+    eq_buckets: HashMap<String, Vec<u32>>,
+    sorted_nums: Vec<(f64, u32)>,
+}
+
+impl ColCriteriaIndex {
+    fn num_key(n: f64) -> String {
+        // 15자리로 맞춘 키 — 같은 값이면 같은 키(후보만 고르므로 약간 넓어도 된다)
+        format!("N:{:.14e}", n)
+    }
+
+    pub fn build(values: &[Value]) -> Self {
+        let mut eq_buckets: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut sorted_nums: Vec<(f64, u32)> = Vec::new();
+        for (idx, v) in values.iter().enumerate() {
+            let off = idx as u32;
+            match v {
+                Value::Str(s) if s.is_empty() => {}
+                Value::Num(n) if n.is_finite() => {
+                    eq_buckets.entry(Self::num_key(*n)).or_default().push(off);
+                    sorted_nums.push((*n, off));
+                }
+                Value::Str(s) => {
+                    if let Ok(n) = s.trim().parse::<f64>() {
+                        if n.is_finite() {
+                            eq_buckets.entry(Self::num_key(n)).or_default().push(off);
+                            sorted_nums.push((n, off));
+                        }
+                    }
+                    eq_buckets.entry(format!("S:{}", s.to_lowercase())).or_default().push(off);
+                }
+                _ => {}
+            }
+        }
+        sorted_nums.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+        Self { len: values.len(), eq_buckets, sorted_nums }
+    }
+
+    /// 조건에 맞을 수 있는 오프셋들(상위 집합). 자신 없으면 None → 전체를 훑는다.
+    pub fn candidates(&self, crit: &Value) -> Option<Vec<u32>> {
+        let num_eq = |n: f64| -> Vec<u32> {
+            self.eq_buckets.get(&Self::num_key(n)).cloned().unwrap_or_default()
+        };
+        match crit {
+            Value::Num(n) if n.is_finite() => Some(num_eq(*n)),
+            Value::Str(s) => {
+                if s.is_empty() || s.contains('*') || s.contains('?') || s.contains('~') || s.starts_with("<>") {
+                    return None;
+                }
+                let range_q = |op: &str, rest: &str| -> Option<Vec<u32>> {
+                    let target = rest.trim().parse::<f64>().ok()?;
+                    if !target.is_finite() {
+                        return None;
+                    }
+                    // 경계는 넉넉히(±1e-9 상대) 잡고 정확한 판정은 matcher 에 맡긴다.
+                    let eps = target.abs().max(1.0) * 1e-9;
+                    let v = &self.sorted_nums;
+                    let out: Vec<u32> = match op {
+                        ">" | ">=" => v[v.partition_point(|&(x, _)| x < target - eps)..].iter().map(|&(_, o)| o).collect(),
+                        _ => v[..v.partition_point(|&(x, _)| x <= target + eps)].iter().map(|&(_, o)| o).collect(),
+                    };
+                    Some(out)
+                };
+                for op in [">=", "<=", ">", "<"] {
+                    if let Some(rest) = s.strip_prefix(op) {
+                        return range_q(op, rest);
+                    }
+                }
+                let clean = s.strip_prefix('=').unwrap_or(s.as_str());
+                if clean.is_empty() {
+                    return None; // "=" 은 빈 칸 판정이 미묘하다 — 전체를 훑는다
+                }
+                if let Ok(n) = clean.trim().parse::<f64>() {
+                    if n.is_finite() {
+                        let mut out = num_eq(n);
+                        out.extend(self.eq_buckets.get(&format!("S:{}", clean.to_lowercase())).cloned().unwrap_or_default());
+                        out.sort_unstable();
+                        out.dedup();
+                        return Some(out);
+                    }
+                }
+                Some(self.eq_buckets.get(&format!("S:{}", clean.to_lowercase())).cloned().unwrap_or_default())
+            }
+            _ => None, // 논리값·빈 칸·오류 조건은 전체를 훑는다
+        }
+    }
 }
 
 impl<'a> Evaluator<'a> {
+    /// 범위 인수를 펼친다. 같은 범위는 한 번만 펼쳐 캐시에서 준다.
+    fn cached_range_flat(
+        &mut self,
+        caller: CellAddr,
+        expr: &Expr,
+    ) -> Result<(Option<RefRange>, std::rc::Rc<Vec<Value>>), CalcErr> {
+        let v = self.eval_expr(caller, expr);
+        if let Value::Err(e) = v {
+            return Err(e);
+        }
+        if let Value::Ref(rr) = v {
+            if let Some(f) = self.range_cache.flats.get(&rr) {
+                return Ok((Some(rr), f.clone()));
+            }
+            let flat = std::rc::Rc::new(self.flatten_value(Value::Ref(rr)));
+            if self.range_cache.cached_cells + flat.len() <= RANGE_CACHE_MAX_CELLS {
+                self.range_cache.cached_cells += flat.len();
+                self.range_cache.flats.insert(rr, flat.clone());
+            }
+            return Ok((Some(rr), flat));
+        }
+        Ok((None, std::rc::Rc::new(self.flatten_value(v))))
+    }
+
+    /// 큰 범위의 조건 후보(상위 집합). 색인을 만들 수 없거나 조건이 애매하면 None.
+    fn criteria_candidates(&mut self, rr: Option<RefRange>, flat: &[Value], crit: &Value) -> Option<Vec<u32>> {
+        let rr = rr?;
+        if flat.len() < RANGE_INDEX_MIN_LEN || !self.range_cache.flats.contains_key(&rr) {
+            return None;
+        }
+        let idx = match self.range_cache.indexes.get(&rr) {
+            Some(i) => i.clone(),
+            None => {
+                let i = std::rc::Rc::new(ColCriteriaIndex::build(flat));
+                self.range_cache.indexes.insert(rr, i.clone());
+                i
+            }
+        };
+        if idx.len != flat.len() {
+            return None;
+        }
+        idx.candidates(crit)
+    }
+
     fn ensure_evaluated(&mut self, addr: CellAddr) -> Value {
         if let Some(v) = self.values.get(&addr) {
             return v.clone();
@@ -2301,9 +2466,16 @@ impl<'a> Evaluator<'a> {
                 let pair_cnt = args.len() / 2;
                 let mut cols_data = Vec::with_capacity(pair_cnt);
                 let mut matchers = Vec::with_capacity(pair_cnt);
+                let mut best: Option<Vec<u32>> = None;
                 for p in 0..pair_cnt {
-                    cols_data.push(self.eval_range_flat(caller, &args[p * 2])?);
+                    let (rr, flat) = self.cached_range_flat(caller, &args[p * 2])?;
                     let crit = self.eval_scalar(caller, &args[p * 2 + 1]);
+                    if let Some(c) = self.criteria_candidates(rr, &flat, &crit) {
+                        if best.as_ref().map(|b| c.len() < b.len()).unwrap_or(true) {
+                            best = Some(c);
+                        }
+                    }
+                    cols_data.push(flat);
                     matchers.push(CriteriaMatcher::parse(&crit));
                 }
                 let len = cols_data[0].len();
@@ -2312,25 +2484,31 @@ impl<'a> Evaluator<'a> {
                         return Err(CalcErr::Value);
                     }
                 }
-                let mut count = 0usize;
-                for i in 0..len {
-                    if (0..pair_cnt).all(|p| matchers[p].matches(&cols_data[p][i])) {
-                        count += 1;
-                    }
-                }
+                let ok = |i: usize| (0..pair_cnt).all(|p| matchers[p].matches(&cols_data[p][i]));
+                let count = match best {
+                    Some(cands) => cands.iter().filter(|&&i| (i as usize) < len && ok(i as usize)).count(),
+                    None => (0..len).filter(|&i| ok(i)).count(),
+                };
                 Ok(Value::Num(count as f64))
             }
             "SUMIFS" => {
                 if args.len() < 3 || (args.len() - 1) % 2 != 0 {
                     return Err(CalcErr::Value);
                 }
-                let sum_vals = self.eval_range_flat(caller, &args[0])?;
+                let (_, sum_vals) = self.cached_range_flat(caller, &args[0])?;
                 let pair_cnt = (args.len() - 1) / 2;
                 let mut cols_data = Vec::with_capacity(pair_cnt);
                 let mut matchers = Vec::with_capacity(pair_cnt);
+                let mut best: Option<Vec<u32>> = None;
                 for p in 0..pair_cnt {
-                    cols_data.push(self.eval_range_flat(caller, &args[1 + p * 2])?);
+                    let (rr, flat) = self.cached_range_flat(caller, &args[1 + p * 2])?;
                     let crit = self.eval_scalar(caller, &args[2 + p * 2]);
+                    if let Some(c) = self.criteria_candidates(rr, &flat, &crit) {
+                        if best.as_ref().map(|b| c.len() < b.len()).unwrap_or(true) {
+                            best = Some(c);
+                        }
+                    }
+                    cols_data.push(flat);
                     matchers.push(CriteriaMatcher::parse(&crit));
                 }
                 let len = sum_vals.len();
@@ -2339,11 +2517,28 @@ impl<'a> Evaluator<'a> {
                         return Err(CalcErr::Value);
                     }
                 }
+                let ok = |i: usize| (0..pair_cnt).all(|p| matchers[p].matches(&cols_data[p][i]));
+                // 더하는 순서를 원래(행 순서)와 같게 해서 부동소수 결과가 바뀌지 않게 한다.
                 let mut total = 0.0;
-                for i in 0..len {
-                    if (0..pair_cnt).all(|p| matchers[p].matches(&cols_data[p][i])) {
-                        if let Value::Num(n) = sum_vals[i] {
-                            total += n;
+                match best {
+                    Some(mut cands) => {
+                        cands.sort_unstable();
+                        for i in cands {
+                            let i = i as usize;
+                            if i < len && ok(i) {
+                                if let Value::Num(n) = sum_vals[i] {
+                                    total += n;
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        for i in 0..len {
+                            if ok(i) {
+                                if let Value::Num(n) = sum_vals[i] {
+                                    total += n;
+                                }
+                            }
                         }
                     }
                 }
@@ -4954,6 +5149,7 @@ mod tests {
             links: HashMap::new(),
             cf_blocks: Vec::new(),
             tables: Vec::new(),
+            raw_drawings: Vec::new(),
         };
 
         Workbook {
@@ -4965,6 +5161,29 @@ mod tests {
             pool,
             sheets: vec![sheet],
         }
+    }
+
+    #[test]
+    fn review_range_deps_only_formula_cells_both_paths() {
+        // 범위 안 수식 칸이 먼저 계산돼야 한다 — 범위가 작을 때(칸을 훑음)와 클 때(수식 목록을 훑음) 둘 다.
+        let addrs: Vec<String> = (1..=3000u32).map(|r| format!("B{}", r)).collect();
+        let vref: Vec<(&str, Value)> = addrs.iter().map(|a| (a.as_str(), Value::Num(1.0))).collect();
+        let wb = make_single_sheet_wb(
+            &vref,
+            &[
+                // 큰 범위(3001칸 > 수식 5개) → 수식 목록 경로
+                ("A1", "SUM(B:B)+SUM(C1:C3001)"),
+                ("C3001", "C2+100"),
+                ("C2", "10"),
+                // 작은 범위(2칸 < 수식 5개) → 칸 경로
+                ("D1", "SUM(E1:E2)"),
+                ("E2", "C2*2"),
+            ],
+        );
+        let res = evaluate_workbook(&wb);
+        let get = |r: u32, c: u32| res.values.get(&CellAddr { sheet: 0, row: r, col: c }).cloned();
+        assert_eq!(get(1, 1), Some(Value::Num(3000.0 + 10.0 + 110.0)));
+        assert_eq!(get(1, 4), Some(Value::Num(20.0)));
     }
 
     fn eval_one(formula: &str) -> Value {
@@ -5248,6 +5467,7 @@ mod tests {
             links: HashMap::new(),
             cf_blocks: Vec::new(),
             tables: Vec::new(),
+            raw_drawings: Vec::new(),
         };
 
         Workbook {
@@ -5488,5 +5708,48 @@ mod tests {
         let refs: Vec<(&str, &str)> = fs.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
         let wb = make_single_sheet_wb(&[], &refs);
         let _ = evaluate_workbook(&wb);
+    }
+
+    #[test]
+    fn review_criteria_index_is_superset_of_matcher() {
+        // 섞인 값 3,000칸 × 조건 40종: 색인 후보가 matcher 일치를 빠짐없이 품어야 한다.
+        let mut seed: u64 = 0x2545F4914F6CDD1D;
+        let mut rnd = || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed };
+        let words = ["a", "B", "abc", "ABC", "", " 5", "5", "05", "1e1", "TRUE", "가", "-3", "x*y"];
+        let mut vals = Vec::new();
+        for _ in 0..3000 {
+            let k = rnd() % 6;
+            vals.push(match k {
+                0 => Value::Num(((rnd() % 41) as f64 - 20.0) / 2.0),
+                1 => Value::Num((rnd() % 7) as f64 + 0.1 + 0.2),
+                2 => Value::Str(words[(rnd() % words.len() as u64) as usize].to_string()),
+                3 => Value::Blank,
+                4 => Value::Bool(rnd() % 2 == 0),
+                _ => Value::Err(CalcErr::Na),
+            });
+        }
+        let idx = ColCriteriaIndex::build(&vals);
+        let crits: Vec<Value> = vec![
+            Value::Num(5.0), Value::Num(-3.0), Value::Num(0.30000000000000004), Value::Num(10.0),
+            Value::Str("5".into()), Value::Str("=5".into()), Value::Str(">5".into()), Value::Str(">=5".into()),
+            Value::Str("<-3".into()), Value::Str("<=0".into()), Value::Str(">=0.3".into()), Value::Str("<0.3".into()),
+            Value::Str("abc".into()), Value::Str("=ABC".into()), Value::Str("a".into()), Value::Str("가".into()),
+            Value::Str("TRUE".into()), Value::Str("1e1".into()), Value::Str("10".into()), Value::Str("05".into()),
+            Value::Str(" 5".into()), Value::Str(">abc".into()), Value::Str("<b".into()), Value::Str("x*y".into()),
+            Value::Str("=".into()), Value::Str("<>".into()), Value::Str("<>5".into()), Value::Str("a*".into()),
+            Value::Bool(true), Value::Blank, Value::Err(CalcErr::Na), Value::Str("#N/A".into()),
+            Value::Str(">-1E+300".into()), Value::Str("<1e999".into()), Value::Str("".into()), Value::Num(f64::NAN),
+            Value::Str(">=".into()), Value::Str(">x".into()), Value::Num(1e10), Value::Str("=0".into()),
+        ];
+        for crit in &crits {
+            let m = CriteriaMatcher::parse(crit);
+            let truth: Vec<u32> = (0..vals.len()).filter(|&i| m.matches(&vals[i])).map(|i| i as u32).collect();
+            if let Some(c) = idx.candidates(crit) {
+                let set: std::collections::HashSet<u32> = c.into_iter().collect();
+                for i in &truth {
+                    assert!(set.contains(i), "조건 {:?} 에서 {} 번째 값 {:?} 이 후보에서 빠짐", crit, i, vals[*i as usize]);
+                }
+            }
+        }
     }
 }

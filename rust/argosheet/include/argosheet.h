@@ -36,6 +36,7 @@ typedef struct ASSheetInfo {
     bool     show_grid_lines;
     float    total_width_pt;
     float    total_height_pt;
+    uint32_t overlay_count;   // P5: 차트·그림·도형 수 (배치 보존을 위해 맨 끝)
 } ASSheetInfo;
 
 typedef struct ASCellInfo {
@@ -172,6 +173,32 @@ typedef struct ASDrawCmd {
     uint8_t  text_flags;   // AS_TEXT_FLAG_*
 } ASDrawCmd;
 
+// ============================================================================
+// P5: 타일 위 별도 층에 올리는 차트·그림·도형
+// ============================================================================
+
+typedef enum ASOverlayKind {
+    AS_OVERLAY_CHART        = 0, // 벡터 그리기 목록(as_sheet_overlay_drawlist)
+    AS_OVERLAY_IMAGE_RASTER = 1, // PNG/JPEG/GIF/BMP 원본 바이트(as_sheet_overlay_bytes)
+    AS_OVERLAY_IMAGE_RGBA   = 2, // EMF 를 래스터화한 RGBA8888 (pixel_width × pixel_height × 4)
+    AS_OVERLAY_SHAPE        = 3, // 도형·글상자 (벡터 그리기 목록)
+} ASOverlayKind;
+
+typedef struct ASOverlayInfo {
+    uint8_t  kind;          // ASOverlayKind
+    ASRect   frame_pt;      // 시트 pt 좌표
+    uint32_t start_row;     // 1-based 시작 행 (틀 고정 구역 판정용)
+    uint32_t start_col;
+    uint32_t pixel_width;   // RGBA 일 때 가로 픽셀
+    uint32_t pixel_height;
+    float    crop_left;     // 0~1 (a:srcRect)
+    float    crop_top;
+    float    crop_right;
+    float    crop_bottom;
+    float    rotation_deg;
+    char     title[256];    // 차트 제목·도형 글
+} ASOverlayInfo;
+
 const char*      as_last_note(void);
 void             as_set_timezone_offset(int32_t seconds_from_gmt); // TODAY()/NOW() 용, as_open 전에
 ASBook*          as_open(const char* path);
@@ -186,6 +213,12 @@ const ASDrawCmd* as_drawlist_commands(const ASDrawList* list);
 const char*      as_drawlist_strings(const ASDrawList* list, uint32_t* out_len);
 bool             as_cell_info(const ASBook* book, uint32_t sheet, uint32_t row, uint32_t col, ASCellInfo* out);
 uint32_t         as_find(const ASBook* book, const char* text, ASHit* hits, uint32_t max_hits);
+
+// P5 오버레이 (모두 catch_unwind 보호)
+uint32_t         as_sheet_overlay_count(const ASBook* book, uint32_t sheet);
+bool             as_sheet_overlay_info(const ASBook* book, uint32_t sheet, uint32_t overlay_idx, ASOverlayInfo* out);
+ASDrawList*      as_sheet_overlay_drawlist(const ASBook* book, uint32_t sheet, uint32_t overlay_idx); // as_drawlist_free 로 해제
+const uint8_t*   as_sheet_overlay_bytes(const ASBook* book, uint32_t sheet, uint32_t overlay_idx, uint32_t* out_len); // 책이 살아 있는 동안 유효
 
 #ifdef __cplusplus
 }

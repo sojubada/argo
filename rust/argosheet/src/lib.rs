@@ -1,6 +1,7 @@
 pub mod calc;
 pub mod cf;
 pub mod draw;
+pub mod drawing;
 pub mod numfmt;
 pub mod package;
 pub mod parse;
@@ -12,6 +13,7 @@ use crate::draw::{
     build_tile_drawlist, format_cell_display, ASDrawCmd, ASRect, DrawList, FormatCache,
     SheetRenderCache,
 };
+use crate::drawing::{build_sheet_overlays, RawSheetDrawing, ResolvedOverlay};
 use crate::numfmt::builtin_format_code;
 use crate::parse::format_cell_address;
 use crate::style::StyleSheet;
@@ -248,6 +250,7 @@ pub struct Sheet {
     pub links: HashMap<u64, HyperlinkEntry>,
     pub cf_blocks: Vec<CfBlock>,
     pub tables: Vec<TableDef>,
+    pub raw_drawings: Vec<RawSheetDrawing>,
 }
 
 impl Sheet {
@@ -308,6 +311,7 @@ pub struct ASBook {
     pub fmt_cache: FormatCache,
     pub render_caches: Vec<SheetRenderCache>,
     pub cf_caches: Vec<SheetCfCache>,
+    pub overlays: Vec<Vec<ResolvedOverlay>>,
 }
 
 unsafe impl Sync for ASBook {}
@@ -337,6 +341,8 @@ pub struct ASSheetInfo {
     pub show_grid_lines: bool,
     pub total_width_pt: f32,
     pub total_height_pt: f32,
+    /// P5: 시트의 차트·그림·도형 수. 기존 필드 배치를 바꾸지 않으려고 맨 끝에 둔다.
+    pub overlay_count: u32,
 }
 
 #[repr(C)]
@@ -366,6 +372,22 @@ pub struct ASHit {
     pub sheet: u32,
     pub row: u32,
     pub col: u32,
+}
+
+#[repr(C)]
+pub struct ASOverlayInfo {
+    pub kind: u8,
+    pub frame_pt: ASRect,
+    pub start_row: u32,
+    pub start_col: u32,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub crop_left: f32,
+    pub crop_top: f32,
+    pub crop_right: f32,
+    pub crop_bottom: f32,
+    pub rotation_deg: f32,
+    pub title: [c_char; 256],
 }
 
 thread_local! {
@@ -424,21 +446,44 @@ pub extern "C" fn as_open(path: *const c_char) -> *mut ASBook {
             Ok(wb) => {
                 let calc_res = evaluate_workbook(&wb);
                 let fmt_cache = FormatCache::build(&wb);
-                let render_caches = wb.sheets.iter().map(SheetRenderCache::build).collect();
-                // 조건부 서식의 수식 규칙도 계산 엔진을 쓰므로 큰 스택 스레드에서 만든다.
-                // 실패하면(스레드 생성 실패·패닉) 조건부 서식 없이 연다.
-                let cf_caches: Vec<SheetCfCache> = calc::run_on_big_stack(|| {
-                    (0..wb.sheets.len())
-                        .map(|idx| build_sheet_cf_cache(&wb, &calc_res, idx))
-                        .collect()
-                })
-                .unwrap_or_else(|| (0..wb.sheets.len()).map(|_| SheetCfCache::default()).collect());
+                let render_caches: Vec<SheetRenderCache> =
+                    wb.sheets.iter().map(SheetRenderCache::build).collect();
+                // 조건부 서식의 수식 규칙과 차트(시트 값 읽기)는 계산 엔진·재귀를 쓰므로
+                // 큰 스택 스레드에서 만든다. 실패하면(스레드 생성 실패·패닉) 그 부분 없이 연다.
+                let (cf_caches, overlays): (Vec<SheetCfCache>, Vec<Vec<ResolvedOverlay>>) =
+                    calc::run_on_big_stack(|| {
+                        let cf: Vec<SheetCfCache> = (0..wb.sheets.len())
+                            .map(|idx| build_sheet_cf_cache(&wb, &calc_res, idx))
+                            .collect();
+                        let ov: Vec<Vec<ResolvedOverlay>> = (0..wb.sheets.len())
+                            .map(|idx| {
+                                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                                    build_sheet_overlays(
+                                        &wb,
+                                        &calc_res,
+                                        &render_caches[idx],
+                                        idx,
+                                        &wb.sheets[idx].raw_drawings,
+                                    )
+                                }))
+                                .unwrap_or_default()
+                            })
+                            .collect();
+                        (cf, ov)
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            (0..wb.sheets.len()).map(|_| SheetCfCache::default()).collect(),
+                            (0..wb.sheets.len()).map(|_| Vec::new()).collect(),
+                        )
+                    });
                 Box::into_raw(Box::new(ASBook {
                     wb,
                     calc_res,
                     fmt_cache,
                     render_caches,
                     cf_caches,
+                    overlays,
                 }))
             }
             Err(e) => {
@@ -484,7 +529,8 @@ pub extern "C" fn as_sheet_info(book: *const ASBook, index: u32, out: *mut ASShe
             return false;
         }
         let b = unsafe { &*book };
-        let Some(s) = b.wb.sheets.get(index as usize) else {
+        let s_idx = index as usize;
+        let Some(s) = b.wb.sheets.get(s_idx) else {
             return false;
         };
 
@@ -499,6 +545,11 @@ pub extern "C" fn as_sheet_info(book: *const ASBook, index: u32, out: *mut ASShe
         info.merge_count = s.merges.len() as u32;
         info.validation_count = s.validations.len() as u32;
         info.comment_count = s.comments.len() as u32;
+        info.overlay_count = b
+            .overlays
+            .get(s_idx)
+            .map(|v| v.len() as u32)
+            .unwrap_or(0);
 
         if let Some(f) = s.freeze {
             info.is_frozen = true;
@@ -828,6 +879,134 @@ pub extern "C" fn as_find(
     res.unwrap_or(0)
 }
 
+// ============================================================================
+// P5: 차트·그림·도형 오버레이 C ABI 4종 (모두 catch_unwind 보호)
+// ============================================================================
+
+#[no_mangle]
+pub extern "C" fn as_sheet_overlay_count(book: *const ASBook, sheet: u32) -> u32 {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() {
+            return 0;
+        }
+        let b = unsafe { &*book };
+        b.overlays
+            .get(sheet as usize)
+            .map(|v| v.len() as u32)
+            .unwrap_or(0)
+    }));
+    res.unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn as_sheet_overlay_info(
+    book: *const ASBook,
+    sheet: u32,
+    overlay_idx: u32,
+    out: *mut ASOverlayInfo,
+) -> bool {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() || out.is_null() {
+            return false;
+        }
+        let b = unsafe { &*book };
+        let Some(ov) = b
+            .overlays
+            .get(sheet as usize)
+            .and_then(|list| list.get(overlay_idx as usize))
+        else {
+            return false;
+        };
+
+        let info = unsafe { &mut *out };
+        info.kind = ov.kind;
+        info.frame_pt = ov.frame_pt;
+        info.start_row = ov.start_row;
+        info.start_col = ov.start_col;
+        info.pixel_width = ov.pixel_width;
+        info.pixel_height = ov.pixel_height;
+        info.crop_left = ov.crop.0;
+        info.crop_top = ov.crop.1;
+        info.crop_right = ov.crop.2;
+        info.crop_bottom = ov.crop.3;
+        info.rotation_deg = ov.rotation_deg;
+        write_c_string_buf(&mut info.title, &ov.title);
+        true
+    }));
+    res.unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn as_sheet_overlay_drawlist(
+    book: *const ASBook,
+    sheet: u32,
+    overlay_idx: u32,
+) -> *mut ASDrawList {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() {
+            return ptr::null_mut();
+        }
+        let b = unsafe { &*book };
+        let Some(ov) = b
+            .overlays
+            .get(sheet as usize)
+            .and_then(|list| list.get(overlay_idx as usize))
+        else {
+            return ptr::null_mut();
+        };
+        let Some(dl) = &ov.draw_list else {
+            return ptr::null_mut();
+        };
+        let cloned = DrawList {
+            commands: dl.commands.clone(),
+            string_buf: dl.string_buf.clone(),
+        };
+        Box::into_raw(Box::new(ASDrawList { inner: cloned }))
+    }));
+    res.unwrap_or(ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn as_sheet_overlay_bytes(
+    book: *const ASBook,
+    sheet: u32,
+    overlay_idx: u32,
+    out_len: *mut u32,
+) -> *const u8 {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return ptr::null();
+        }
+        let b = unsafe { &*book };
+        let Some(ov) = b
+            .overlays
+            .get(sheet as usize)
+            .and_then(|list| list.get(overlay_idx as usize))
+        else {
+            if !out_len.is_null() {
+                unsafe { *out_len = 0 };
+            }
+            return ptr::null();
+        };
+        if !out_len.is_null() {
+            unsafe { *out_len = ov.raw_bytes.len() as u32 };
+        }
+        if ov.raw_bytes.is_empty() {
+            ptr::null()
+        } else {
+            ov.raw_bytes.as_ptr()
+        }
+    }));
+    res.unwrap_or(ptr::null())
+}
+
+// ============================================================================
+// P5 통합 시험: 차트 시트 계산값 연동, 10만 셀 성능, 망가진 파일 75개 방어
+// ============================================================================
+
 #[cfg(test)]
 mod p2_tests {
     use super::*;
@@ -1035,6 +1214,70 @@ mod p2_review_tests {
         assert_eq!(icons, vec![0, 1, 2], "아래·옆·위 순서");
         as_drawlist_free(dl);
         as_close(book);
+    }
+
+    #[test]
+    fn overlays_survive_hostile_charts_images_and_zip_bombs() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let o = SimpleFileOptions::default();
+            let put = |zip: &mut ZipWriter<&mut std::fs::File>, name: &str, body: &[u8]| {
+                zip.start_file(name, o).unwrap();
+                zip.write_all(body).unwrap();
+            };
+            put(&mut zip, "_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#);
+            put(&mut zip, "xl/_rels/workbook.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#);
+            put(&mut zip, "xl/workbook.xml", br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#);
+            put(&mut zip, "xl/worksheets/_rels/sheet1.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="d1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>"#);
+            put(&mut zip, "xl/worksheets/sheet1.xml", br#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="1048576"><c r="XFD1048576"><v>2</v></c></row></sheetData><drawing r:id="d1"/></worksheet>"#);
+            put(&mut zip, "xl/drawings/_rels/drawing1.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="c1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/><Relationship Id="i1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/bomb.png"/><Relationship Id="i2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/bad.emf"/></Relationships>"#);
+            let anchor = |inner: &str| format!(r#"<xdr:twoCellAnchor><xdr:from><xdr:col>4294967295</xdr:col><xdr:colOff>-9223372036854775808</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>99999999</xdr:col><xdr:colOff>9223372036854775807</xdr:colOff><xdr:row>4000000000</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>{}</xdr:twoCellAnchor>"#, inner);
+            let drawing = format!(r#"<?xml version="1.0"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">{}{}{}</xdr:wsDr>"#,
+                anchor(r#"<xdr:graphicFrame><a:graphic><a:graphicData><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="c1"/></a:graphicData></a:graphic></xdr:graphicFrame>"#),
+                anchor(r#"<xdr:pic><xdr:blipFill><a:blip r:embed="i1"/><a:srcRect l="-99999999" r="99999999"/></xdr:blipFill></xdr:pic>"#),
+                anchor(r#"<xdr:pic><xdr:blipFill><a:blip r:embed="i2"/></xdr:blipFill><xdr:spPr><a:xfrm rot="2147483647"/></xdr:spPr></xdr:pic>"#));
+            put(&mut zip, "xl/drawings/drawing1.xml", drawing.as_bytes());
+            put(&mut zip, "xl/charts/chart1.xml", r#"<?xml version="1.0"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:lineChart><c:ser><c:cat><c:numRef><c:f>S!$A$1:$XFD$1048576</c:f></c:numRef></c:cat><c:val><c:numRef><c:f>S!$A$1:$XFD$1048576</c:f></c:numRef></c:val></c:ser></c:lineChart><c:barChart><c:ser><c:val><c:numRef><c:f>'없는 시트'!A1:B2,S!ZZZZ1</c:f></c:numRef></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#.as_bytes());
+            // 압축하면 작지만 풀면 70MB 인 그림(압축 폭탄)
+            zip.start_file("xl/media/bomb.png", SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+            let zeros = vec![0u8; 1 << 20];
+            for _ in 0..70 { zip.write_all(&zeros).unwrap(); }
+            // 경계값이 i32 끝인 EMF
+            let mut emf = vec![0u8; 108];
+            emf[0..4].copy_from_slice(&1u32.to_le_bytes());
+            emf[4..8].copy_from_slice(&108u32.to_le_bytes());
+            emf[8..12].copy_from_slice(&i32::MIN.to_le_bytes());
+            emf[16..20].copy_from_slice(&i32::MAX.to_le_bytes());
+            emf[40..44].copy_from_slice(&0x464D4520u32.to_le_bytes());
+            let mut rect = vec![0u8; 24];
+            rect[0..4].copy_from_slice(&43u32.to_le_bytes());
+            rect[4..8].copy_from_slice(&24u32.to_le_bytes());
+            rect[8..12].copy_from_slice(&i32::MIN.to_le_bytes());
+            rect[16..20].copy_from_slice(&i32::MAX.to_le_bytes());
+            emf.extend_from_slice(&rect);
+            put(&mut zip, "xl/media/bad.emf", &emf);
+            zip.finish().unwrap();
+        }
+        let t0 = std::time::Instant::now();
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null(), "열기 실패: {:?}", unsafe { CStr::from_ptr(as_last_note()) });
+        let n = as_sheet_overlay_count(book, 0);
+        for i in 0..n + 2 {
+            let mut oi: ASOverlayInfo = unsafe { std::mem::zeroed() };
+            let _ = as_sheet_overlay_info(book, 0, i, &mut oi);
+            assert!(oi.frame_pt.x.is_finite() && oi.frame_pt.w.is_finite());
+            let dl = as_sheet_overlay_drawlist(book, 0, i);
+            as_drawlist_free(dl);
+            let mut len = 0u32;
+            let _ = as_sheet_overlay_bytes(book, 0, i, &mut len);
+            assert!(len < 64 * 1024 * 1024, "압축 폭탄이 그대로 들어옴: {}", len);
+        }
+        assert_eq!(as_sheet_overlay_count(book, 9), 0);
+        assert!(as_sheet_overlay_drawlist(ptr::null(), 0, 0).is_null());
+        as_close(book);
+        assert!(t0.elapsed().as_secs() < 20, "오버레이 처리가 너무 오래 걸림: {:?}", t0.elapsed());
     }
 
     #[test]
@@ -1295,7 +1538,7 @@ mod abi_layout {
         use crate::draw::*;
         use crate::*;
         use std::mem::{offset_of, size_of};
-        assert_eq!(size_of::<ASSheetInfo>(), 324);
+        assert_eq!(size_of::<ASSheetInfo>(), 328);
         assert_eq!(size_of::<ASCellInfo>(), 2384);
         assert_eq!(size_of::<ASDrawCmd>(), 64);
         assert_eq!(size_of::<ASHit>(), 12);
@@ -1323,6 +1566,14 @@ mod abi_layout {
         assert_eq!(offset_of!(ASDrawCmd, rotation), 60);
         assert_eq!(offset_of!(ASDrawCmd, indent), 62);
         assert_eq!(offset_of!(ASDrawCmd, text_flags), 63);
+        assert_eq!(size_of::<ASOverlayInfo>(), 312);
+        assert_eq!(offset_of!(ASSheetInfo, overlay_count), 324);
+        assert_eq!(offset_of!(ASOverlayInfo, frame_pt), 4);
+        assert_eq!(offset_of!(ASOverlayInfo, start_row), 20);
+        assert_eq!(offset_of!(ASOverlayInfo, pixel_width), 28);
+        assert_eq!(offset_of!(ASOverlayInfo, crop_left), 36);
+        assert_eq!(offset_of!(ASOverlayInfo, rotation_deg), 52);
+        assert_eq!(offset_of!(ASOverlayInfo, title), 56);
     }
 }
 
@@ -1442,5 +1693,344 @@ mod p4_integration_tests {
 
         as_drawlist_free(dl);
         as_close(book);
+    }
+}
+
+// ---- 제미나이 P5 시험 ----
+#[cfg(test)]
+mod p5_tests {
+    use super::*;
+    use crate::draw::DrawCmdType;
+    use std::io::Write;
+    use std::time::Instant;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    #[test]
+    fn test_p5_chart_pulls_calculated_sheet_values_when_cache_is_empty() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let opts = SimpleFileOptions::default();
+
+            zip.start_file("_rels/.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/workbook.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="00_Overview" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#).unwrap();
+
+            zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdDrw1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/drawings/_rels/drawing1.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdChart1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/drawings/drawing1.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor>
+    <xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>5</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
+    <xdr:to><xdr:col>8</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>18</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+    <xdr:graphicFrame>
+      <a:graphic><a:graphicData><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rIdChart1"/></a:graphicData></a:graphic>
+    </xdr:graphicFrame>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>"#).unwrap();
+
+            // numCache가 전혀 없는 openpyxl 스타일 차트 XML
+            zip.start_file("xl/charts/chart1.xml", opts).unwrap();
+            zip.write_all(r#"<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:chart>
+    <c:title><c:tx><c:rich><a:p xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:r><a:t>사업부별 실적</a:t></a:r></a:p></c:rich></c:tx></c:title>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+        <c:grouping val="clustered"/>
+        <c:ser>
+          <c:idx val="0"/>
+          <c:cat><c:strRef><c:f>'00_Overview'!$A$2:$A$4</c:f></c:strRef></c:cat>
+          <c:val><c:numRef><c:f>'00_Overview'!$B$2:$B$4</c:f></c:numRef></c:val>
+        </c:ser>
+        <c:axId val="10"/><c:axId val="20"/>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+</c:chartSpace>"#.as_bytes()).unwrap();
+
+            // B2:B4는 <v/>가 비어 있는 수식 셀 (수식 엔진이 100, 200, 300으로 계산)
+            zip.start_file("xl/worksheets/sheet1.xml", opts).unwrap();
+            zip.write_all(r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>1분기</t></is></c><c r="B2"><f>50*2</f><v/></c></row>
+    <row r="3"><c r="A3" t="inlineStr"><is><t>2분기</t></is></c><c r="B3"><f>B2*2</f><v/></c></row>
+    <row r="4"><c r="A4" t="inlineStr"><is><t>3분기</t></is></c><c r="B4"><f>B2+B3</f><v/></c></row>
+  </sheetData>
+  <drawing r:id="rIdDrw1"/>
+</worksheet>"#.as_bytes()).unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+
+        assert_eq!(as_sheet_overlay_count(book, 0), 1);
+        let mut ov_info: ASOverlayInfo = unsafe { std::mem::zeroed() };
+        assert!(as_sheet_overlay_info(book, 0, 0, &mut ov_info));
+        assert_eq!(ov_info.kind, 0); // AS_OVERLAY_CHART
+        assert!(ov_info.frame_pt.w > 100.0 && ov_info.frame_pt.h > 80.0);
+
+        let dl = as_sheet_overlay_drawlist(book, 0, 0);
+        assert!(!dl.is_null());
+        let cmd_cnt = as_drawlist_count(dl) as usize;
+        let cmds = unsafe { std::slice::from_raw_parts(as_drawlist_commands(dl), cmd_cnt) };
+        // 배경 1개 + 막대 3개 이상 Fill 명령이 생성되어야 한다
+        let fill_count = cmds.iter().filter(|c| c.cmd_type == DrawCmdType::Fill as u8).count();
+        assert!(fill_count >= 4);
+
+        as_drawlist_free(dl);
+        as_close(book);
+    }
+
+    #[test]
+    fn test_p5_100k_cells_first_screen_under_1500ms() {
+        let start_time = Instant::now();
+        let mut pool = StringPool::default();
+        let mut rows = Rows::default();
+
+        // 10,000행 x 10열 = 100,000셀 시트 구성
+        for r in 1..=10_000u32 {
+            let mut row_cells = Vec::with_capacity(10);
+            for c in 1..=10u32 {
+                row_cells.push(Cell {
+                    col: c,
+                    kind: CellKind::Num as u8,
+                    flags: 0,
+                    style_idx: 0,
+                    payload: CellPayload {
+                        num: (r * 10 + c) as f64,
+                    },
+                });
+            }
+            rows.push_row(r, &row_cells);
+        }
+
+        let sheet = Sheet {
+            name: "100k_Sheet".to_string(),
+            sheet_id: 1,
+            state: SheetState::Visible,
+            max_row: 10_000,
+            max_col: 10,
+            cell_count: 100_000,
+            col_widths_pt: vec![64.0; 10],
+            row_heights_pt: vec![16.0; 10_000],
+            default_col_width_pt: 64.0,
+            default_row_height_pt: 16.0,
+            data: rows,
+            formulas: HashMap::new(),
+            merges: Vec::new(),
+            freeze: Some(FreezePane {
+                freeze_rows: 1,
+                freeze_cols: 1,
+                top_left_row: 2,
+                top_left_col: 2,
+            }),
+            show_grid_lines: true,
+            auto_filter: None,
+            validations: Vec::new(),
+            comments: Vec::new(),
+            links: Vec::new().into_iter().collect(),
+            cf_blocks: Vec::new(),
+            tables: Vec::new(),
+            raw_drawings: Vec::new(),
+        };
+
+        let wb = Workbook {
+            path: String::new(),
+            date1904: false,
+            full_calc_on_load: false,
+            defined_names: Vec::new(),
+            styles: StyleSheet::default_with_theme(Vec::new()),
+            pool,
+            sheets: vec![sheet],
+        };
+
+        let calc_res = evaluate_workbook(&wb);
+        let fmt_cache = FormatCache::build(&wb);
+        let rc = SheetRenderCache::build(&wb.sheets[0]);
+        let cfc = build_sheet_cf_cache(&wb, &calc_res, 0);
+
+        // 첫 화면 4K 타일 6장 렌더링
+        for ty in 0..2 {
+            for tx in 0..3 {
+                let dl = build_tile_drawlist(
+                    &wb,
+                    &calc_res,
+                    &fmt_cache,
+                    &rc,
+                    &cfc,
+                    0,
+                    ASRect {
+                        x: (tx as f32) * 256.0,
+                        y: (ty as f32) * 256.0,
+                        w: 256.0,
+                        h: 256.0,
+                    },
+                    2.0,
+                );
+                assert!(!dl.commands.is_empty());
+            }
+        }
+
+        let elapsed = start_time.elapsed();
+        assert!(
+            elapsed.as_millis() < 1500,
+            "10만 셀 첫 화면 생성 시간이 1.5초를 초과했습니다: {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_p5_75_corrupted_files_zero_crash_zero_hang() {
+        let base_valid = build_valid_seed_xlsx();
+        let mut corpus: Vec<Vec<u8>> = Vec::with_capacity(75);
+
+        // 1~20: 앞부분 삭제 변형 (5바이트 ~ 100바이트 간격 20종)
+        for i in 1..=20 {
+            let cut = (i * 12).min(base_valid.len());
+            corpus.push(base_valid[cut..].to_vec());
+        }
+
+        // 21~40: 끝부분 잘라내기 변형 (Central Directory 및 Deflate 스트림 절단 20종)
+        for i in 1..=20 {
+            let keep = base_valid.len().saturating_sub(i * 18);
+            corpus.push(base_valid[..keep].to_vec());
+        }
+
+        // 41~60: 중간 바이트 뒤집기 변형 (서로 다른 오프셋 구간 20종)
+        for i in 0..20 {
+            let mut mutated = base_valid.clone();
+            let start = (i * 37) % mutated.len().max(1);
+            let end = (start + 64).min(mutated.len());
+            for b in &mut mutated[start..end] {
+                *b ^= 0xAA;
+            }
+            corpus.push(mutated);
+        }
+
+        // 61~75: 구조적 XML 파손·폭탄·비정상 참조·잘못된 드로잉/차트/EMF ZIP 15종
+        let broken_xml_entries: [(&str, &[u8]); 15] = [
+            ("xl/workbook.xml", b""),
+            ("xl/workbook.xml", b"<workbook><sheets>"),
+            ("xl/worksheets/sheet1.xml", b"<worksheet><sheetData><row r=\"999999999\">"),
+            ("xl/worksheets/sheet1.xml", b"<worksheet><cols><col min=\"1\" max=\"99999999\" width=\"-50\"/></cols></worksheet>"),
+            ("xl/worksheets/sheet1.xml", b"<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><f>((((((1+2</f></c></row></sheetData></worksheet>"),
+            ("xl/worksheets/sheet1.xml", b"<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><f>A1</f></c></row></sheetData></worksheet>"),
+            ("xl/worksheets/sheet1.xml", b"<worksheet><conditionalFormatting sqref=\"INVALID\"><cfRule type=\"dataBar\"/></conditionalFormatting></worksheet>"),
+            ("xl/worksheets/sheet1.xml", b"<worksheet><mergeCells><mergeCell ref=\"Z99:A1\"/></mergeCells></worksheet>"),
+            ("xl/styles.xml", b"<styleSheet><cellXfs><xf numFmtId=\"99999\" fontId=\"9999\"/></cellXfs></styleSheet>"),
+            ("xl/sharedStrings.xml", b"<sst><si><t>\xFF\xFE\x00\x00</t></si></sst>"),
+            ("xl/drawings/drawing1.xml", b"<wsDr><twoCellAnchor><from><col>-99</col></from></twoCellAnchor>"),
+            ("xl/charts/chart1.xml", b"<chartSpace><chart><plotArea><barChart><ser><val><numRef><f>INVALID!REF</f></numRef></val></ser></barChart></plotArea></chart></chartSpace>"),
+            ("xl/tables/table1.xml", b"<table ref=\"BAD_RANGE\"><autoFilter/></table>"),
+            ("xl/comments1.xml", b"<comments><commentList><comment ref=\"$$$\"/></commentList>"),
+            ("_rels/.rels", b"<Relationships><Relationship Id=\"r1\" Target=\"../../../etc/passwd\"/></Relationships>"),
+        ];
+
+        for (entry, payload) in broken_xml_entries {
+            corpus.push(build_zip_with_single_override(entry, payload));
+        }
+
+        assert_eq!(corpus.len(), 75);
+
+        for (idx, bytes) in corpus.iter().enumerate() {
+            let mut tmp = tempfile::NamedTempFile::new().unwrap();
+            tmp.write_all(bytes).unwrap();
+            tmp.flush().unwrap();
+
+            let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+            let t0 = Instant::now();
+            let book = as_open(c_path.as_ptr());
+            if !book.is_null() {
+                let s_cnt = as_sheet_count(book);
+                for s in 0..s_cnt {
+                    let mut info: ASSheetInfo = unsafe { std::mem::zeroed() };
+                    let _ = as_sheet_info(book, s, &mut info);
+                    let dl = as_tile(book, s, 0.0, 0.0, 256.0, 256.0, 2.0);
+                    if !dl.is_null() {
+                        as_drawlist_free(dl);
+                    }
+                }
+                as_close(book);
+            }
+            assert!(
+                t0.elapsed().as_secs() < 5,
+                "망가진 파일 #{} 처리 시간이 5초를 초과했습니다",
+                idx
+            );
+        }
+    }
+
+    fn build_valid_seed_xlsx() -> Vec<u8> {
+        let mut cur = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cur);
+            let opts = SimpleFileOptions::default();
+            zip.start_file("_rels/.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#).unwrap();
+            zip.start_file("xl/_rels/workbook.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#).unwrap();
+            zip.start_file("xl/workbook.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S1" sheetId="1" r:id="rId1"/></sheets></workbook>"#).unwrap();
+            zip.start_file("xl/worksheets/sheet1.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>42</v></c></row></sheetData></worksheet>"#).unwrap();
+            zip.finish().unwrap();
+        }
+        cur.into_inner()
+    }
+
+    fn build_zip_with_single_override(override_name: &str, override_bytes: &[u8]) -> Vec<u8> {
+        let mut cur = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cur);
+            let opts = SimpleFileOptions::default();
+            let defaults: [(&str, &[u8]); 4] = [
+                ("_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#),
+                ("xl/_rels/workbook.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rIdDrw" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="drawings/drawing1.xml"/></Relationships>"#),
+                ("xl/workbook.xml", br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S1" sheetId="1" r:id="rId1"/></sheets></workbook>"#),
+                ("xl/worksheets/sheet1.xml", br#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#),
+            ];
+            for (name, content) in defaults {
+                if name != override_name {
+                    zip.start_file(name, opts).unwrap();
+                    zip.write_all(content).unwrap();
+                }
+            }
+            zip.start_file(override_name, opts).unwrap();
+            zip.write_all(override_bytes).unwrap();
+            let _ = zip.finish();
+        }
+        cur.into_inner()
     }
 }

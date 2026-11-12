@@ -17,6 +17,7 @@
 import UIKit
 import CoreText
 import CoreImage
+import ImageIO
 
 // MARK: - 책 손잡이
 
@@ -121,6 +122,7 @@ final class ArgoSheetTileView: UIView {
         tileLayers.removeAll()
         inFlight.removeAll()
         lru.removeAll()
+        rebuildOverlays()
     }
 
     /// visible: 이 뷰 좌표(화면 pt)에서 지금 보이는 사각형.
@@ -148,6 +150,7 @@ final class ArgoSheetTileView: UIView {
             }
         }
         evict(keeping: active)
+        updateOverlays(v)
     }
 
     private func touch(_ key: TileKey) {
@@ -199,6 +202,189 @@ final class ArgoSheetTileView: UIView {
         }
     }
 
+    // MARK: P5 오버레이(차트·그림·도형)
+    //
+    // 타일 위 별도 층(zPosition 400, 커서 500 아래)에 올린다. 시작 셀이 속한 틀 고정 구역 한 곳만
+    // 그린다(여러 구역에 겹쳐 그리면 스크롤할 때 둘로 갈라져 보인다). 보이는 곳 근처만 그리고,
+    // 멀어지면 버린다 — 그림 수백 장짜리 파일에서도 메모리가 늘지 않게.
+
+    enum Quadrant { case corner, top, left, body }
+    private var quadrant: Quadrant = .body
+    private var freezeRows: UInt32 = 0
+    private var freezeCols: UInt32 = 0
+
+    private struct OverlayItem {
+        let index: UInt32
+        let info: ASOverlayInfo
+        let frame: CGRect      // 이 뷰 좌표(화면 pt)
+    }
+    private struct OverlayKey: Hashable { let index: UInt32; let gen: UInt64 }
+    private var overlayItems: [OverlayItem] = []
+    private var overlayLayers: [UInt32: CALayer] = [:]
+    private var overlayInFlight: Set<OverlayKey> = []
+    private var overlayGen: UInt64 = 0
+    /// 한 시트에서 다룰 오버레이 상한(악성 파일 대비).
+    private static let maxOverlays = 500
+    /// 오버레이 한 장의 긴 변 픽셀 상한(2048² × 4 = 16MB).
+    private static let overlayMaxPx: CGFloat = 2048
+    private static let overlayQueue = DispatchQueue(label: "argo.sheet.overlay", qos: .userInitiated)
+
+    func configureOverlays(quadrant: Quadrant, freezeRows: Int, freezeCols: Int) {
+        self.quadrant = quadrant
+        self.freezeRows = UInt32(clamping: max(0, freezeRows))
+        self.freezeCols = UInt32(clamping: max(0, freezeCols))
+        rebuildOverlays()
+    }
+
+    private func ownsOverlay(row: UInt32, col: UInt32) -> Bool {
+        let fr = row <= freezeRows, fc = col <= freezeCols
+        switch quadrant {
+        case .corner: return fr && fc
+        case .top:    return fr && !fc
+        case .left:   return !fr && fc
+        case .body:   return !fr && !fc
+        }
+    }
+
+    private func rebuildOverlays() {
+        overlayGen &+= 1
+        for (_, l) in overlayLayers { l.removeFromSuperlayer() }
+        overlayLayers.removeAll()
+        overlayInFlight.removeAll()
+        overlayItems.removeAll()
+        let n = min(Int(as_sheet_overlay_count(book.ptr, sheetIndex)), Self.maxOverlays)
+        guard n > 0 else { return }
+        for i in 0..<n {
+            var oi = ASOverlayInfo()
+            guard as_sheet_overlay_info(book.ptr, sheetIndex, UInt32(i), &oi),
+                  ownsOverlay(row: oi.start_row, col: oi.start_col) else { continue }
+            let f = oi.frame_pt
+            guard f.x.isFinite, f.y.isFinite, f.w.isFinite, f.h.isFinite,
+                  f.w > 0.5, f.h > 0.5, f.w < 1e6, f.h < 1e6 else { continue }
+            let r = CGRect(x: (CGFloat(f.x) - sheetOriginPt.x) * zoom,
+                           y: (CGFloat(f.y) - sheetOriginPt.y) * zoom,
+                           width: CGFloat(f.w) * zoom, height: CGFloat(f.h) * zoom)
+            overlayItems.append(OverlayItem(index: UInt32(i), info: oi, frame: r))
+        }
+    }
+
+    private func updateOverlays(_ v: CGRect) {
+        guard !overlayItems.isEmpty else { return }
+        let near = v.insetBy(dx: -v.width, dy: -v.height)
+        let far = v.insetBy(dx: -3 * v.width, dy: -3 * v.height)
+        for item in overlayItems {
+            if item.frame.intersects(near) {
+                if overlayLayers[item.index] == nil,
+                   !overlayInFlight.contains(OverlayKey(index: item.index, gen: overlayGen)) {
+                    renderOverlay(item)
+                }
+            } else if !item.frame.intersects(far), let l = overlayLayers.removeValue(forKey: item.index) {
+                l.removeFromSuperlayer()
+            }
+        }
+    }
+
+    private func renderOverlay(_ item: OverlayItem) {
+        let key = OverlayKey(index: item.index, gen: overlayGen)
+        overlayInFlight.insert(key)
+        let book = self.book            // 강하게 잡는다 — 그리는 동안 닫히지 않게
+        let sheet = sheetIndex
+        let scale = UIScreen.main.scale
+        let info = item.info
+        let size = item.frame.size
+        Self.overlayQueue.async { [weak self] in
+            let image = Self.drawOverlay(book: book, sheet: sheet, index: item.index, info: info,
+                                         screenSize: size, screenScale: scale)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.overlayInFlight.remove(key)
+                guard self.overlayGen == key.gen, self.overlayLayers[item.index] == nil,
+                      let image = image else { return }
+                let layer = CALayer()
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.bounds = CGRect(origin: .zero, size: item.frame.size)
+                layer.position = CGPoint(x: item.frame.midX, y: item.frame.midY)
+                layer.contents = image
+                layer.contentsGravity = .resize
+                layer.contentsScale = scale
+                layer.zPosition = 400
+                if info.kind == 1 || info.kind == 2 {
+                    // a:srcRect 자르기. 음수(여백 늘리기)는 무시한다.
+                    func c(_ x: Float) -> CGFloat { x.isFinite ? CGFloat(min(max(x, 0), 1)) : 0 }
+                    let l = c(info.crop_left), t = c(info.crop_top)
+                    let w = max(0.01, 1 - l - c(info.crop_right)), h = max(0.01, 1 - t - c(info.crop_bottom))
+                    if l > 0 || t > 0 || w < 1 || h < 1 {
+                        layer.contentsRect = CGRect(x: l, y: t, width: w, height: h)
+                    }
+                }
+                let rot = CGFloat(info.rotation_deg)
+                if rot.isFinite, rot != 0 {
+                    layer.setAffineTransform(CGAffineTransform(rotationAngle: rot * .pi / 180))
+                }
+                self.layer.addSublayer(layer)
+                CATransaction.commit()
+                self.overlayLayers[item.index] = layer
+            }
+        }
+    }
+
+    /// 백그라운드. 차트·도형은 그리기 목록(틀 기준 0..w, 0..h pt), 그림은 원본 바이트, EMF 는 RGBA.
+    private static func drawOverlay(book: ArgoSheetBook, sheet: UInt32, index: UInt32, info: ASOverlayInfo,
+                                    screenSize: CGSize, screenScale: CGFloat) -> CGImage? {
+        switch info.kind {
+        case 0, 3:
+            guard let dl = as_sheet_overlay_drawlist(book.ptr, sheet, index) else { return nil }
+            defer { as_drawlist_free(dl) }
+            let fw = CGFloat(info.frame_pt.w), fh = CGFloat(info.frame_pt.h)
+            let w0 = screenSize.width * screenScale, h0 = screenSize.height * screenScale
+            guard fw > 0, fh > 0, w0 > 0, h0 > 0 else { return nil }
+            let k = min(1, overlayMaxPx / max(w0, h0))
+            let pw = max(1, Int(ceil(w0 * k))), ph = max(1, Int(ceil(h0 * k)))
+            guard let ctx = CGContext(data: nil, width: pw, height: ph, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.clear(CGRect(x: 0, y: 0, width: pw, height: ph))
+            ctx.translateBy(x: 0, y: CGFloat(ph))
+            ctx.scaleBy(x: CGFloat(pw) / fw, y: -CGFloat(ph) / fh)
+            drawCommands(ctx, dl)
+            return ctx.makeImage()
+        case 1:
+            var len: UInt32 = 0
+            guard let p = as_sheet_overlay_bytes(book.ptr, sheet, index, &len), len > 0 else { return nil }
+            let data = Data(bytes: p, count: Int(len))  // 복사해 둔다
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+                  CGImageSourceGetCount(src) > 0 else { return nil }
+            // 압축 폭탄 방지: 원본 픽셀 수가 지나치면 열지 않는다.
+            if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
+                let w = (props[kCGImagePropertyPixelWidth] as? Int) ?? 0
+                let h = (props[kCGImagePropertyPixelHeight] as? Int) ?? 0
+                if w <= 0 || h <= 0 || w > 30_000 || h > 30_000 || w * h > 100_000_000 { return nil }
+            }
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: Int(overlayMaxPx),
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+        case 2:
+            let w = Int(info.pixel_width), h = Int(info.pixel_height)
+            guard w > 0, h > 0, w <= 4096, h <= 4096 else { return nil }
+            var len: UInt32 = 0
+            guard let p = as_sheet_overlay_bytes(book.ptr, sheet, index, &len),
+                  Int(len) == w * h * 4 else { return nil }
+            let data = Data(bytes: p, count: Int(len))
+            guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+            return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                           space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                           provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        default:
+            return nil
+        }
+    }
+
     // MARK: 그리기 (백그라운드)
 
     private static func drawTile(book: ArgoSheetBook, sheet: UInt32, sheetRect: CGRect,
@@ -223,8 +409,14 @@ final class ArgoSheetTileView: UIView {
         ctx.scaleBy(x: screenScale * zoom, y: -screenScale * zoom)
         ctx.translateBy(x: -sheetRect.minX, y: -sheetRect.minY)
 
+        drawCommands(ctx, dl)
+        return ctx.makeImage()
+    }
+
+    /// 그리기 목록 하나를 그린다(타일·차트·도형 공용). ctx 는 이미 시트 pt 좌표로 맞춰져 있어야 한다.
+    static func drawCommands(_ ctx: CGContext, _ dl: OpaquePointer) {
         let count = Int(as_drawlist_count(dl))
-        guard count > 0, let cmdPtr = as_drawlist_commands(dl) else { return ctx.makeImage() }
+        guard count > 0, let cmdPtr = as_drawlist_commands(dl) else { return }
         var strLen: UInt32 = 0
         let strPtr = as_drawlist_strings(dl, &strLen)
 
@@ -294,7 +486,6 @@ final class ArgoSheetTileView: UIView {
                 break
             }
         }
-        return ctx.makeImage()
     }
 
     /// 아이콘 집합을 도형으로 그린다(그림 파일 없음). 화살표 계열은 단계에 따라 돌린다.
@@ -888,6 +1079,10 @@ final class ArgoSheetViewerController: UIViewController {
         topTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: CGPoint(x: fp.x, y: 0), zoom: zoom)
         leftTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: CGPoint(x: 0, y: fp.y), zoom: zoom)
         bodyTiles = ArgoSheetTileView(book: book, sheetIndex: s, sheetOriginPt: fp, zoom: zoom)
+        cornerTiles?.configureOverlays(quadrant: .corner, freezeRows: freezeRows, freezeCols: freezeCols)
+        topTiles?.configureOverlays(quadrant: .top, freezeRows: freezeRows, freezeCols: freezeCols)
+        leftTiles?.configureOverlays(quadrant: .left, freezeRows: freezeRows, freezeCols: freezeCols)
+        bodyTiles?.configureOverlays(quadrant: .body, freezeRows: freezeRows, freezeCols: freezeCols)
         cornerHost.addSubview(cornerTiles!)
         topHost.addSubview(topTiles!)
         leftHost.addSubview(leftTiles!)

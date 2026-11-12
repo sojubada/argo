@@ -2,6 +2,7 @@ use crate::cf::{
     CfBlock, CfRule, CfRuleKind, Cfvo, CfvoType, ColorScaleSpec, DataBarAxisPos, DataBarSpec,
     IconSetKind, IconSetSpec, TableDef,
 };
+use crate::drawing::{parse_sheet_drawings, RawSheetDrawing};
 use crate::package::{is_rel_type, read_part_relationships, resolve_part_target, Relationship};
 use crate::style::{
     default_column_width_chars, excel_column_width_to_points_with_mdw, parse_color_attrs,
@@ -336,8 +337,10 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
             Vec::new()
         };
 
-        // 시트에 연결된 모든 표(xl/tables/tableN.xml) 파싱
         let mut tables = Vec::new();
+        let mut drawing_paths = Vec::new();
+        let mut vml_paths = Vec::new();
+
         for rel in sheet_rels.values() {
             if is_rel_type(&rel.rel_type, "/table") {
                 let tbl_path = resolve_part_target(&sheet_path, &rel.target);
@@ -346,8 +349,15 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
                         tables.push(tbl);
                     }
                 }
+            } else if is_rel_type(&rel.rel_type, "/drawing") {
+                drawing_paths.push(resolve_part_target(&sheet_path, &rel.target));
+            } else if is_rel_type(&rel.rel_type, "/vmlDrawing") {
+                vml_paths.push(resolve_part_target(&sheet_path, &rel.target));
             }
         }
+
+        let raw_drawings =
+            parse_sheet_drawings(&mut archive, &drawing_paths, &vml_paths, &styles);
 
         let sheet = parse_worksheet_xml(
             &mut archive,
@@ -360,6 +370,7 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
             &sheet_rels,
             comments,
             tables,
+            raw_drawings,
             &mut pool,
         )?;
         sheets.push(sheet);
@@ -376,7 +387,6 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
     })
 }
 
-/// `xl/tables/tableN.xml`을 파싱하여 표 범위, 머리글/요약 행, 줄무늬, 필터 단추 여부를 읽는다.
 fn parse_table_xml<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     table_path: &str,
@@ -568,6 +578,10 @@ fn parse_workbook_xml<R: Read + Seek>(
             _ => {}
         }
         buf.clear();
+    }
+
+    if sheets.is_empty() {
+        return Err("workbook.xml에 유효한 시트가 없습니다".to_string());
     }
 
     Ok(WorkbookMeta {
@@ -801,7 +815,6 @@ fn parse_comments_xml<R: Read + Seek>(
     Ok(comments)
 }
 
-/// 조건부 서식(`<conditionalFormatting>` 및 `x14:conditionalFormatting`) 파싱용 임시 빌더
 #[derive(Default)]
 struct CfRuleBuilder {
     rule_type: String,
@@ -964,6 +977,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
     sheet_rels: &HashMap<String, Relationship>,
     comments: Vec<CommentEntry>,
     tables: Vec<TableDef>,
+    raw_drawings: Vec<RawSheetDrawing>,
     pool: &mut StringPool,
 ) -> Result<Sheet, String> {
     let file = archive
@@ -1027,7 +1041,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
     let mut in_dv_f2 = false;
     let mut dv_f_buf = String::new();
 
-    // 조건부 서식 상태 머신
     let mut cur_cf_block: Option<CfBlock> = None;
     let mut cur_cf_rule: Option<CfRuleBuilder> = None;
     let mut in_cf_formula = false;
@@ -1070,7 +1083,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
                                     if let Ok(v) =
                                         attr.unescape_value().unwrap_or_default().parse::<u32>()
                                     {
-                                        if v >= 1 {
+                                        if (1..=1_048_576).contains(&v) {
                                             r_1based = v;
                                         }
                                     }
@@ -1175,7 +1188,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                     b"hyperlink" => {
                         extract_hyperlink_tag(&e, sheet_rels, pool, &mut links);
                     }
-                    // P4: 조건부 서식 블록 (<conditionalFormatting> 및 <x14:conditionalFormatting>)
                     b"conditionalFormatting" => {
                         let mut ranges = Vec::new();
                         for attr in e.attributes().flatten() {
@@ -1217,7 +1229,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                         }
                     }
                     b"f" if cur_cf_rule.is_some() && !in_cell => {
-                        // x14:cfvo 내부의 <xm:f> 값
                         in_cfvo_f = true;
                         cfvo_f_buf.clear();
                     }
@@ -1295,7 +1306,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
                             }
                         }
                         next_col = c_col + 1;
-                        if c_style != 0 {
+                        if c_style != 0 && c_col <= 16384 && current_row <= 1_048_576 {
                             max_row_1based = max_row_1based.max(current_row);
                             max_col_1based = max_col_1based.max(c_col);
                             total_cells += 1;
@@ -1415,6 +1426,9 @@ fn parse_worksheet_xml<R: Read + Seek>(
                     b"is" => in_is = false,
                     b"c" => {
                         in_cell = false;
+                        if cell_col > 16384 || current_row > 1_048_576 {
+                            continue;
+                        }
                         let mut flags = 0u8;
 
                         if has_f_tag {
@@ -1607,6 +1621,25 @@ fn parse_worksheet_xml<R: Read + Seek>(
         buf.clear();
     }
 
+    // 드로잉/차트 앵커가 빈 셀 영역까지 걸쳐 있을 때 시트 최대 행·열을 확장하여 잘리지 않게 보장
+    for d in &raw_drawings {
+        match d.anchor {
+            // 앵커 값은 파일이 주는 대로라 40억 같은 값이 올 수 있다. 엑셀 한도로 자른다
+            // (그대로 쓰면 행 높이 배열이 수십 GB 가 되어 앱이 죽는다).
+            crate::drawing::CellAnchorSpec::TwoCell { from, to } => {
+                let r = to.row_0based.max(from.row_0based).saturating_add(2).min(1_048_576);
+                let c = to.col_0based.max(from.col_0based).saturating_add(2).min(16_384);
+                max_row_1based = max_row_1based.max(r);
+                max_col_1based = max_col_1based.max(c);
+            }
+            crate::drawing::CellAnchorSpec::OneCell { from, .. } => {
+                max_row_1based = max_row_1based.max(from.row_0based.saturating_add(10).min(1_048_576));
+                max_col_1based = max_col_1based.max(from.col_0based.saturating_add(6).min(16_384));
+            }
+            _ => {}
+        }
+    }
+
     for cm in &comments {
         if let Some(cell) = data.get_cell_mut(cm.row, cm.col) {
             cell.flags |= CELL_FLAG_HAS_COMMENT;
@@ -1660,6 +1693,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
         links,
         cf_blocks,
         tables,
+        raw_drawings,
     })
 }
 
