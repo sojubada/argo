@@ -41,10 +41,10 @@ typedef struct ASSheetInfo {
 typedef struct ASCellInfo {
     uint32_t row;
     uint32_t col;
-    uint32_t merge_start_row; // 병합 안 된 셀은 row와 동일
-    uint32_t merge_start_col; // 병합 안 된 셀은 col과 동일
-    uint32_t merge_end_row;   // 병합 안 된 셀은 row와 동일
-    uint32_t merge_end_col;   // 병합 안 된 셀은 col과 동일
+    uint32_t merge_start_row;
+    uint32_t merge_start_col;
+    uint32_t merge_end_row;
+    uint32_t merge_end_col;
     uint8_t  kind;
     uint8_t  flags;
     double   num_value;
@@ -53,6 +53,9 @@ typedef struct ASCellInfo {
     char     formula[512];
     char     format_code[128];
     char     comment_text[512];
+    char     comment_author[128];
+    char     link_target[512];
+    bool     link_is_internal;
 } ASCellInfo;
 
 typedef struct ASHit {
@@ -70,6 +73,52 @@ typedef enum ASDrawCmdType {
     AS_CMD_MARKER   = 5,
 } ASDrawCmdType;
 
+// 선 스타일 (13종 + 격자선 0)
+typedef enum ASLineStyle {
+    AS_LINE_GRID             = 0,
+    AS_LINE_HAIR             = 1,
+    AS_LINE_DOTTED           = 2,
+    AS_LINE_DASH_DOT_DOT     = 3,
+    AS_LINE_DASH_DOT         = 4,
+    AS_LINE_DASHED           = 5,
+    AS_LINE_THIN             = 6,
+    AS_LINE_MEDIUM_DASH_DOT_DOT = 7,
+    AS_LINE_SLANT_DASH_DOT   = 8,
+    AS_LINE_MEDIUM_DASH_DOT  = 9,
+    AS_LINE_MEDIUM_DASHED    = 10,
+    AS_LINE_MEDIUM           = 11,
+    AS_LINE_DOUBLE           = 12,
+    AS_LINE_THICK            = 13,
+} ASLineStyle;
+
+// 가로 정렬 (P3 전체 규격)
+typedef enum ASAlignHoriz {
+    AS_ALIGN_H_LEFT              = 0,
+    AS_ALIGN_H_CENTER            = 1,
+    AS_ALIGN_H_RIGHT             = 2,
+    AS_ALIGN_H_FILL              = 3,
+    AS_ALIGN_H_JUSTIFY           = 4,
+    AS_ALIGN_H_DISTRIBUTED       = 5,
+    AS_ALIGN_H_CENTER_CONTINUOUS = 6,
+} ASAlignHoriz;
+
+// 세로 정렬 (기본값은 BOTTOM = 2)
+typedef enum ASAlignVert {
+    AS_ALIGN_V_TOP         = 0,
+    AS_ALIGN_V_CENTER      = 1,
+    AS_ALIGN_V_BOTTOM      = 2,
+    AS_ALIGN_V_JUSTIFY     = 3,
+    AS_ALIGN_V_DISTRIBUTED = 4,
+} ASAlignVert;
+
+// 텍스트 속성 비트 플래그
+#define AS_TEXT_FLAG_BOLD          (1u << 0)
+#define AS_TEXT_FLAG_ITALIC        (1u << 1)
+#define AS_TEXT_FLAG_UNDERLINE     (1u << 2)
+#define AS_TEXT_FLAG_STRIKE        (1u << 3)
+#define AS_TEXT_FLAG_WRAP          (1u << 4)
+#define AS_TEXT_FLAG_SHRINK_TO_FIT (1u << 5)
+
 typedef struct ASRect {
     float x;
     float y;
@@ -86,32 +135,28 @@ typedef struct ASColor {
 
 typedef struct ASDrawCmd {
     uint8_t  cmd_type;     // ASDrawCmdType
-    uint8_t  sub_type;     // Pattern 번호, Marker 종류(0=메모, 1=필터), Line 스타일 등
-    uint8_t  align_horiz;  // 0=left, 1=center, 2=right
-    uint8_t  align_vert;   // 0=top, 1=center, 2=bottom
-    ASRect   rect;         // Line일 때는 (x=x1, y=y1, w=x2, h=y2) 시트 pt 좌표
-    ASRect   clip_rect;    // Text 클리핑 사각형 (시트 pt)
+    uint8_t  sub_type;     // ASLineStyle / Pattern ID / Marker ID(0=comment, 1=filter)
+    uint8_t  align_horiz;  // ASAlignHoriz
+    uint8_t  align_vert;   // ASAlignVert
+    ASRect   rect;         // Line일 때: (x=x1, y=y1, w=x2, h=y2), Text일 때: 여백/넘침 적용된 텍스트 박스
+    ASRect   clip_rect;    // Text 클리핑 사각형 (넘친 빈 칸까지 확장된 영역)
     ASColor  color1;
     ASColor  color2;
-    float    stroke_width; // pt 단위 두께
-    uint32_t text_offset;  // UTF-8 바이트 오프셋
-    uint32_t text_len;     // UTF-8 바이트 길이
-    float    font_size_pt; // 엑셀 pt 크기
-    bool     font_bold;
-    bool     font_italic;
-    bool     wrap_text;
-    uint8_t  _pad;
+    float    stroke_width;
+    uint32_t text_offset;
+    uint32_t text_len;
+    float    font_size_pt;
+    int16_t  rotation;     // 0, 1..=180, 255(세로쓰기)
+    uint8_t  indent;       // 들여쓰기 단계
+    uint8_t  text_flags;   // AS_TEXT_FLAG_*
 } ASDrawCmd;
 
-// P0 ~ P1 진입점
-const char* as_last_note(void);
-void        as_set_timezone_offset(int32_t seconds_from_gmt); // TODAY()/NOW() 용, as_open 전에
-ASBook*     as_open(const char* path);
-void        as_close(ASBook* book);
-uint32_t    as_sheet_count(const ASBook* book);
-bool        as_sheet_info(const ASBook* book, uint32_t index, ASSheetInfo* out);
-
-// P2 확장 진입점
+const char*      as_last_note(void);
+void             as_set_timezone_offset(int32_t seconds_from_gmt); // TODAY()/NOW() 용, as_open 전에
+ASBook*          as_open(const char* path);
+void             as_close(ASBook* book);
+uint32_t         as_sheet_count(const ASBook* book);
+bool             as_sheet_info(const ASBook* book, uint32_t index, ASSheetInfo* out);
 bool             as_sheet_axes(const ASBook* book, uint32_t sheet, const float** col_widths, uint32_t* num_cols, const float** row_heights, uint32_t* num_rows);
 ASDrawList*      as_tile(const ASBook* book, uint32_t sheet, float x, float y, float w, float h, float zoom);
 void             as_drawlist_free(ASDrawList* list);

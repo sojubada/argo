@@ -16,6 +16,7 @@
 
 import UIKit
 import CoreText
+import CoreImage
 
 // MARK: - 책 손잡이
 
@@ -232,19 +233,15 @@ final class ArgoSheetTileView: UIView {
             case 0: // Fill
                 ctx.setFillColor(cgColor(cmd.color1))
                 ctx.fill(cgRect(cmd.rect))
-            case 1, 2: // Gradient · Pattern — P3 에서 제대로. 지금은 앞색을 옅게.
-                ctx.setFillColor(cgColor(cmd.color1, alpha: 0.35))
+            case 1: // Gradient (color1 → color2, 위→아래)
+                drawGradient(ctx, cgRect(cmd.rect), cmd.color1, cmd.color2)
+            case 2: // Pattern: 바탕(color2) 위에 무늬 색(color1)을 무늬 밀도만큼 섞어 칠한다.
+                ctx.setFillColor(cgColor(cmd.color2))
+                ctx.fill(cgRect(cmd.rect))
+                ctx.setFillColor(cgColor(cmd.color1, alpha: patternDensity(cmd.sub_type)))
                 ctx.fill(cgRect(cmd.rect))
             case 3: // Line (rect = x1,y1,x2,y2)
-                ctx.saveGState()
-                ctx.setStrokeColor(cgColor(cmd.color1))
-                ctx.setLineWidth(CGFloat(max(cmd.stroke_width, 0.25)))
-                if cmd.sub_type == 2 { ctx.setLineDash(phase: 0, lengths: [1.5, 1.5]) }
-                if cmd.sub_type == 3 { ctx.setLineDash(phase: 0, lengths: [3, 2]) }
-                ctx.move(to: CGPoint(x: CGFloat(cmd.rect.x), y: CGFloat(cmd.rect.y)))
-                ctx.addLine(to: CGPoint(x: CGFloat(cmd.rect.w), y: CGFloat(cmd.rect.h)))
-                ctx.strokePath()
-                ctx.restoreGState()
+                drawLine(ctx, cmd)
             case 4: // Text
                 // 오프셋+길이를 Int 로 더한다(UInt32 끼리 더하면 넘칠 때 앱이 죽는다).
                 let off = Int(cmd.text_offset), len = Int(cmd.text_len)
@@ -252,12 +249,18 @@ final class ArgoSheetTileView: UIView {
                 let raw = UnsafeRawPointer(base).advanced(by: off)
                 let text = String(decoding: UnsafeRawBufferPointer(start: raw, count: len), as: UTF8.self)
                 drawText(ctx, text, cmd)
-            case 5: // Marker (메모 삼각형)
+            case 5: // Marker: 0 = 메모(오른쪽 위 빨간 삼각형), 1 = 자동 필터 단추
                 let r = cgRect(cmd.rect)
                 ctx.setFillColor(cgColor(cmd.color1))
-                ctx.move(to: CGPoint(x: r.minX, y: r.minY))
-                ctx.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-                ctx.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+                if cmd.sub_type == 1 {
+                    ctx.move(to: CGPoint(x: r.minX + r.width * 0.25, y: r.minY + r.height * 0.4))
+                    ctx.addLine(to: CGPoint(x: r.maxX - r.width * 0.25, y: r.minY + r.height * 0.4))
+                    ctx.addLine(to: CGPoint(x: r.midX, y: r.maxY - r.height * 0.3))
+                } else {
+                    ctx.move(to: CGPoint(x: r.minX, y: r.minY))
+                    ctx.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+                    ctx.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+                }
                 ctx.closePath()
                 ctx.fillPath()
             default:
@@ -276,47 +279,236 @@ final class ArgoSheetTileView: UIView {
                 alpha: alpha ?? CGFloat(c.a) / 255)
     }
 
-    /// 글꼴은 CoreText 로만 만든다(UIFont 를 백그라운드에서 만들지 않는다).
-    private static func drawText(_ ctx: CGContext, _ text: String, _ cmd: ASDrawCmd) {
-        let box = cgRect(cmd.rect)
-        guard box.width > 0, box.height > 0, !text.isEmpty else { return }
-        ctx.saveGState()
-        ctx.clip(to: cgRect(cmd.clip_rect))
+    /// 엑셀 무늬(patternType) 번호 → 앞색 비율. 무늬를 점점이 그리지 않고 섞인 색으로 보인다.
+    private static func patternDensity(_ id: UInt8) -> CGFloat {
+        switch id {
+        case 2: return 0.50   // mediumGray
+        case 3: return 0.75   // darkGray
+        case 4: return 0.25   // lightGray
+        case 17: return 0.125 // gray125
+        case 18: return 0.0625 // gray0625
+        default: return 0.40  // 줄무늬·격자무늬류
+        }
+    }
 
-        let size = max(CGFloat(cmd.font_size_pt), 6)
+    private static func drawGradient(_ ctx: CGContext, _ r: CGRect, _ a: ASColor, _ b: ASColor) {
+        guard r.width > 0, r.height > 0,
+              let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                 colors: [cgColor(a), cgColor(b)] as CFArray, locations: [0, 1]) else { return }
+        ctx.saveGState()
+        ctx.clip(to: r)
+        ctx.drawLinearGradient(g, start: CGPoint(x: r.minX, y: r.minY), end: CGPoint(x: r.minX, y: r.maxY), options: [])
+        ctx.restoreGState()
+    }
+
+    /// 선 13종(+격자선 0). 두께는 Rust 가 stroke_width 로 준다.
+    private static func drawLine(_ ctx: CGContext, _ cmd: ASDrawCmd) {
+        let p1 = CGPoint(x: CGFloat(cmd.rect.x), y: CGFloat(cmd.rect.y))
+        let p2 = CGPoint(x: CGFloat(cmd.rect.w), y: CGFloat(cmd.rect.h))
+        let w = CGFloat(max(cmd.stroke_width, 0.25))
+        ctx.saveGState()
+        ctx.setStrokeColor(cgColor(cmd.color1))
+        ctx.setLineCap(.butt)
+        if cmd.sub_type == 12 { // double: 가는 선 두 줄, 사이 1pt
+            let dx = p2.x - p1.x, dy = p2.y - p1.y
+            let len = max(hypot(dx, dy), 0.001)
+            let nx = -dy / len, ny = dx / len   // 선에 수직인 방향
+            ctx.setLineWidth(0.6)
+            for s in [-1.0, 1.0] as [CGFloat] {
+                ctx.move(to: CGPoint(x: p1.x + nx * s, y: p1.y + ny * s))
+                ctx.addLine(to: CGPoint(x: p2.x + nx * s, y: p2.y + ny * s))
+            }
+            ctx.strokePath()
+            ctx.restoreGState()
+            return
+        }
+        ctx.setLineWidth(w)
+        let dash: [CGFloat]
+        switch cmd.sub_type {
+        case 1: dash = [0.75, 0.75]                       // hair
+        case 2: dash = [1, 1]                             // dotted
+        case 3, 7: dash = [3, 1, 1, 1, 1, 1]              // dashDotDot / mediumDashDotDot
+        case 4, 9: dash = [3, 1, 1, 1]                    // dashDot / mediumDashDot
+        case 5: dash = [3, 1]                             // dashed
+        case 8: dash = [4, 1, 2, 1]                       // slantDashDot
+        case 10: dash = [4, 2]                            // mediumDashed
+        default: dash = []                                // grid, thin, medium, thick
+        }
+        if !dash.isEmpty { ctx.setLineDash(phase: 0, lengths: dash.map { $0 * max(1, w) }) }
+        ctx.move(to: p1)
+        ctx.addLine(to: p2)
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    // 글자 속성 비트 (argosheet.h AS_TEXT_FLAG_*)
+    private static let flagBold: UInt8 = 1 << 0
+    private static let flagItalic: UInt8 = 1 << 1
+    private static let flagUnderline: UInt8 = 1 << 2
+    private static let flagStrike: UInt8 = 1 << 3
+    private static let flagWrap: UInt8 = 1 << 4
+    private static let flagShrink: UInt8 = 1 << 5
+
+    private static func makeFont(size: CGFloat, flags: UInt8) -> CTFont {
         var font = CTFontCreateUIFontForLanguage(.system, size, nil)
             ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
         var traits: CTFontSymbolicTraits = []
-        if cmd.font_bold { traits.insert(.traitBold) }
-        if cmd.font_italic { traits.insert(.traitItalic) }
+        if flags & flagBold != 0 { traits.insert(.traitBold) }
+        if flags & flagItalic != 0 { traits.insert(.traitItalic) }
         if !traits.isEmpty, let f = CTFontCreateCopyWithSymbolicTraits(font, size, nil, traits, traits) {
             font = f
         }
-        let attrs: [NSAttributedString.Key: Any] = [
-            NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorAttributeName as String): cgColor(cmd.color1),
-        ]
-        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
-        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        return font
+    }
 
-        let x: CGFloat
-        switch cmd.align_horiz {
-        case 1: x = box.minX + (box.width - width) / 2
-        case 2: x = box.maxX - width
-        default: x = box.minX
+    /// 글꼴은 CoreText 로만 만든다(UIFont 를 백그라운드에서 만들지 않는다).
+    private static func drawText(_ ctx: CGContext, _ rawText: String, _ cmd: ASDrawCmd) {
+        var box = cgRect(cmd.rect)
+        guard box.width > 0, box.height > 0, !rawText.isEmpty else { return }
+        ctx.saveGState()
+        ctx.clip(to: cgRect(cmd.clip_rect))
+        defer { ctx.restoreGState() }
+
+        let flags = cmd.text_flags
+        let align = cmd.align_horiz
+        // 들여쓰기: 단계당 7pt. 왼쪽 정렬은 왼쪽에서, 오른쪽 정렬은 오른쪽에서 민다.
+        let indent = CGFloat(cmd.indent) * 7
+        if indent > 0 {
+            if align == 2 { box.size.width -= indent } else if align == 0 || align == 3 {
+                box.origin.x += indent; box.size.width -= indent
+            }
+            guard box.width > 0 else { return }
         }
-        let baseline: CGFloat
-        switch cmd.align_vert {
-        case 0: baseline = box.minY + ascent
-        case 1: baseline = box.minY + (box.height - ascent - descent) / 2 + ascent
-        default: baseline = box.maxY - descent - 1
+        var size = max(CGFloat(cmd.font_size_pt), 6)
+        let color = cgColor(cmd.color1)
+        let rotation = Int(cmd.rotation)
+
+        func attributed(_ s: String, _ font: CTFont) -> NSAttributedString {
+            NSAttributedString(string: s, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font,
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): color,
+            ])
         }
+        func lineWidth(_ line: CTLine) -> CGFloat { CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)) }
+
+        var text = rawText
+        var font = makeFont(size: size, flags: flags)
+
+        // 세로쓰기(255): 글자를 한 자씩 위에서 아래로.
+        if rotation == 255 {
+            text = text.map { String($0) }.joined(separator: "\n")
+        }
+        let wrap = flags & flagWrap != 0 || rotation == 255
+
+        // 셀에 맞춤: 한 줄 폭이 넘치면 글자를 줄인다(최소 4pt).
+        if flags & flagShrink != 0 && !wrap {
+            let w = lineWidth(CTLineCreateWithAttributedString(attributed(text, font)))
+            if w > box.width, w > 0 {
+                size = max(4, size * box.width / w)
+                font = makeFont(size: size, flags: flags)
+            }
+        }
+        // 채우기(fill): 셀 폭이 찰 때까지 글자를 되풀이.
+        if align == 3, !wrap {
+            let w = lineWidth(CTLineCreateWithAttributedString(attributed(text, font)))
+            if w > 0 && w < box.width {
+                text = String(repeating: text, count: min(500, Int(box.width / w)))
+            }
+        }
+
+        // 줄 나누기: 줄바꿈 글자로 나누고, 줄바꿈 켜짐이면 상자 폭에 맞춰 더 나눈다.
+        // 회전(1~180)이면 상자 폭 대신 높이를 기준으로 쓴다.
+        let angle: CGFloat
+        if rotation >= 1 && rotation <= 90 { angle = CGFloat(rotation) * .pi / 180 }
+        else if rotation > 90 && rotation <= 180 { angle = -CGFloat(rotation - 90) * .pi / 180 }
+        else { angle = 0 }
+        let layoutWidth = angle == 0 ? box.width : (abs(angle) > .pi / 4 ? box.height : box.width)
+
+        var lines: [CTLine] = []
+        for para in text.components(separatedBy: "\n") {
+            let attr = attributed(para, font)
+            if !wrap || para.isEmpty {
+                lines.append(CTLineCreateWithAttributedString(attr))
+                continue
+            }
+            let typesetter = CTTypesetterCreateWithAttributedString(attr)
+            var start = 0
+            let total = (para as NSString).length
+            var guardN = 0
+            while start < total && guardN < 2000 {
+                var n = CTTypesetterSuggestLineBreak(typesetter, start, Double(max(layoutWidth, 1)))
+                if n <= 0 { n = 1 }
+                lines.append(CTTypesetterCreateLine(typesetter, CFRange(location: start, length: n)))
+                start += n
+                guardN += 1
+            }
+        }
+        guard !lines.isEmpty else { return }
+
+        let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
+        let lineH = ascent + descent + CTFontGetLeading(font) + size * 0.1
+        let blockH = lineH * CGFloat(lines.count)
+        let maxLineW = lines.map(lineWidth).max() ?? 0
+
         // 바깥 변환이 y 를 뒤집었으므로 글자만 다시 뒤집어 바로 세운다.
         ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        ctx.textPosition = CGPoint(x: x, y: baseline)
-        CTLineDraw(line, ctx)
-        ctx.restoreGState()
+
+        if angle != 0 {
+            // 회전 글자: 셀 가운데를 축으로 돌려 한 덩어리로 그린다.
+            ctx.translateBy(x: box.midX, y: box.midY)
+            ctx.rotate(by: -angle)
+            var y = -blockH / 2 + ascent
+            for line in lines {
+                ctx.textPosition = CGPoint(x: -lineWidth(line) / 2, y: y)
+                CTLineDraw(line, ctx)
+                y += lineH
+            }
+            return
+        }
+
+        let topY: CGFloat
+        switch cmd.align_vert {
+        case 0: topY = box.minY
+        case 2: topY = box.maxY - blockH
+        default: topY = box.minY + (box.height - blockH) / 2   // center·justify·distributed
+        }
+        var y = topY + ascent
+        for (i, line) in lines.enumerated() {
+            let w = lineWidth(line)
+            var x: CGFloat
+            switch align {
+            case 1, 6: x = box.minX + (box.width - w) / 2       // center · centerContinuous
+            case 2: x = box.maxX - w                             // right
+            default: x = box.minX                                // left · fill · justify · distributed
+            }
+            var drawLine = line
+            // 양쪽 맞춤·균등 분할: 마지막 줄이 아니면(분할은 모든 줄) 폭에 맞춰 늘린다.
+            if (align == 4 && i < lines.count - 1) || align == 5,
+               w > box.width * 0.5,
+               let j = CTLineCreateJustifiedLine(line, 1.0, Double(box.width)) {
+                drawLine = j
+                x = box.minX
+            }
+            ctx.textPosition = CGPoint(x: x, y: y)
+            CTLineDraw(drawLine, ctx)
+            let dw = lineWidth(drawLine)
+            if flags & flagUnderline != 0 {
+                ctx.setStrokeColor(color)
+                ctx.setLineWidth(max(0.5, size / 16))
+                ctx.move(to: CGPoint(x: x, y: y + descent * 0.5))
+                ctx.addLine(to: CGPoint(x: x + dw, y: y + descent * 0.5))
+                ctx.strokePath()
+            }
+            if flags & flagStrike != 0 {
+                ctx.setStrokeColor(color)
+                ctx.setLineWidth(max(0.5, size / 16))
+                ctx.move(to: CGPoint(x: x, y: y - ascent * 0.32))
+                ctx.addLine(to: CGPoint(x: x + dw, y: y - ascent * 0.32))
+                ctx.strokePath()
+            }
+            y += lineH
+        }
+        _ = maxLineW
     }
 }
 
@@ -810,7 +1002,12 @@ final class ArgoSheetViewerController: UIViewController {
             msg = L("값") + ": " + (v.isEmpty ? L("(빈 칸)") : v)
             if !f.isEmpty { msg += "\n" + L("수식") + ": =" + f }
             if !fmt.isEmpty && fmt != "General" { msg += "\n" + L("서식") + ": " + fmt }
-            if !memo.isEmpty { msg += "\n\n" + L("메모") + "\n" + memo }
+            let author = argoSheetString(ci.comment_author)
+            if !memo.isEmpty {
+                msg += "\n\n" + L("메모") + (author.isEmpty ? "" : " (\(author))") + "\n" + memo
+            }
+            let link = argoSheetString(ci.link_target)
+            if !link.isEmpty { msg += "\n\n" + L("링크") + ": " + link }
         }
         let title = cursorInfo.map { argoSheetString($0.address) } ?? ""
         let a = UIAlertController(title: title, message: msg, preferredStyle: .alert)
@@ -824,11 +1021,100 @@ final class ArgoSheetViewerController: UIViewController {
                 a.addAction(UIAlertAction(title: L("축소") + " \(Int(z * 100))%", style: .default) { [weak self] _ in self?.setZoom(z) })
             }
         }
+        if let ci = cursorInfo {
+            let link = argoSheetString(ci.link_target)
+            if !link.isEmpty {
+                if ci.link_is_internal {
+                    a.addAction(UIAlertAction(title: L("링크로 이동"), style: .default) { [weak self] _ in self?.jump(to: link) })
+                } else {
+                    a.addAction(UIAlertAction(title: L("링크 QR 보기"), style: .default) { [weak self] _ in self?.showQR(link) })
+                }
+            }
+        }
         if visibleSheets.count > 1 {
             a.addAction(UIAlertAction(title: L("다음 시트"), style: .default) { [weak self] _ in self?.nextSheet() })
         }
         a.addAction(UIAlertAction(title: L("닫기"), style: .cancel))
         present(a, animated: true)
+    }
+
+    /// 내부 링크 "'시트 이름'!B3" · "시트!B3" · "B3"(같은 시트) 로 간다.
+    private func jump(to target: String) {
+        guard let book = book else { return }
+        var sheetName = "", cell = target
+        if let bang = target.range(of: "!", options: .backwards) {
+            sheetName = String(target[..<bang.lowerBound])
+            cell = String(target[bang.upperBound...])
+            if sheetName.hasPrefix("'") && sheetName.hasSuffix("'") && sheetName.count >= 2 {
+                sheetName = String(sheetName.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
+            }
+        }
+        var destSheet = sheetIndex
+        if !sheetName.isEmpty {
+            guard let i = (0..<book.sheetCount).first(where: {
+                book.sheetInfo($0).map { argoSheetString($0.name).caseInsensitiveCompare(sheetName) == .orderedSame } ?? false
+            }) else { return }
+            destSheet = i
+        }
+        // 주소 "B3" 또는 "$B$3" (범위면 앞 칸)
+        let first = cell.split(separator: ":").first.map(String.init) ?? cell
+        var letters = 0, digits = ""
+        for ch in first.uppercased() where ch != "$" {
+            if let a = ch.asciiValue, a >= 65, a <= 90, digits.isEmpty {
+                letters = letters * 26 + Int(a - 64)
+                if letters > 16384 { return }
+            } else if ch.isNumber {
+                digits.append(ch)
+            }
+        }
+        if destSheet != sheetIndex {
+            if !visibleSheets.contains(destSheet) { visibleSheets.append(destSheet); visibleSheets.sort() }
+            loadSheet(destSheet)
+        }
+        if let r = Int(digits.prefix(7)), r >= 1, letters >= 1 {
+            cursorRow = min(r, max(1, rowCount))
+            cursorCol = min(letters, max(1, colCount))
+            syncCursor(ensureVisible: true)
+        }
+    }
+
+    /// 바깥 링크: TV 에는 브라우저가 없으니 QR 로 보여 준다(휴대폰으로 찍어서 연다).
+    private func showQR(_ link: String) {
+        let vc = UIViewController()
+        vc.view.backgroundColor = UIColor(white: 0, alpha: 0.85)
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFit
+        iv.layer.magnificationFilter = .nearest
+        if let f = CIFilter(name: "CIQRCodeGenerator") {
+            f.setValue(Data(link.utf8), forKey: "inputMessage")
+            f.setValue("M", forKey: "inputCorrectionLevel")
+            if let out = f.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+               let cg = CIContext().createCGImage(out, from: out.extent) {
+                iv.image = UIImage(cgImage: cg)
+            }
+        }
+        let label = UILabel()
+        label.text = link
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 26)
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        vc.view.addSubview(iv)
+        vc.view.addSubview(label)
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            iv.centerXAnchor.constraint(equalTo: vc.view.centerXAnchor),
+            iv.centerYAnchor.constraint(equalTo: vc.view.centerYAnchor, constant: -40),
+            iv.widthAnchor.constraint(equalToConstant: 560),
+            iv.heightAnchor.constraint(equalToConstant: 560),
+            label.topAnchor.constraint(equalTo: iv.bottomAnchor, constant: 30),
+            label.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor, constant: 80),
+            label.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor, constant: -80),
+        ])
+        vc.modalPresentationStyle = .overFullScreen
+        // 메뉴 버튼으로 닫힌다(모달 기본 동작).
+        present(vc, animated: true)
     }
 
     private func close() {

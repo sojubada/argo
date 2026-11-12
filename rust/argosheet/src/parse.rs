@@ -1,13 +1,13 @@
-use crate::package::{is_rel_type, read_part_relationships, resolve_part_target};
+use crate::package::{is_rel_type, read_part_relationships, resolve_part_target, Relationship};
 use crate::style::{
     default_column_width_chars, excel_column_width_to_points_with_mdw, parse_styles_xml,
     read_theme_colors, StyleSheet,
 };
 use crate::{
     Cell, CellKind, CellPayload, CellRange, CommentEntry, DataValidationEntry, DefinedName,
-    FormulaEntry, FormulaKind, FreezePane, Rows, Sheet, SheetState, StrSpan, StringPool, Workbook,
-    CELL_FLAG_FORMULA_ARRAY, CELL_FLAG_FORMULA_SHARED, CELL_FLAG_HAS_COMMENT,
-    CELL_FLAG_HAS_FORMULA,
+    FormulaEntry, FormulaKind, FreezePane, HyperlinkEntry, Rows, Sheet, SheetState, StrSpan,
+    StringPool, Workbook, CELL_FLAG_FORMULA_ARRAY, CELL_FLAG_FORMULA_SHARED,
+    CELL_FLAG_HAS_COMMENT, CELL_FLAG_HAS_FORMULA, CELL_FLAG_HAS_LINK,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -16,7 +16,6 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use zip::ZipArchive;
 
-/// OOXML `_xHHHH_` 이스케이프 시퀀스를 해제한다.
 pub fn unescape_ooxml_x(input: &str) -> String {
     if !input.contains("_x") && !input.contains("_X") {
         return input.to_string();
@@ -47,7 +46,6 @@ pub fn unescape_ooxml_x(input: &str) -> String {
     out
 }
 
-/// 1-based 셀 주소("A1" -> (1, 1), "$E$5" -> (5, 5))를 파싱한다.
 pub fn parse_cell_ref_1based(s: &str) -> Option<(u32, u32)> {
     let mut col: u32 = 0;
     let mut row: u32 = 0;
@@ -79,7 +77,6 @@ pub fn parse_cell_ref_1based(s: &str) -> Option<(u32, u32)> {
     Some((row, col))
 }
 
-/// 1-based 열 번호를 엑셀 열 문자("A", "Z", "AA")로 변환한다.
 pub fn col_to_letters(mut col_1based: u32) -> String {
     if col_1based == 0 {
         return "A".to_string();
@@ -93,12 +90,10 @@ pub fn col_to_letters(mut col_1based: u32) -> String {
     chars.iter().rev().collect()
 }
 
-/// 1-based (row, col)을 "A1" 형식 문자열로 변환한다.
 pub fn format_cell_address(row_1based: u32, col_1based: u32) -> String {
     format!("{}{}", col_to_letters(col_1based), row_1based)
 }
 
-/// 범위 문자열("A1:D2" 또는 "E5")을 1-based CellRange로 파싱한다.
 pub fn parse_range_1based(ref_str: &str) -> Option<CellRange> {
     if let Some((left, right)) = ref_str.split_once(':') {
         let (r1, c1) = parse_cell_ref_1based(left)?;
@@ -120,9 +115,6 @@ pub fn parse_range_1based(ref_str: &str) -> Option<CellRange> {
     }
 }
 
-/// 공유 수식(t="shared")의 마스터 수식에서 상대 참조를 (d_row, d_col)만큼 이동시킨다.
-/// 왜: 정규식으로 치환하면 `LOG10(`, `"A1"` 문자열 리터럴, `'A1'!B2` 시트 이름이 망가지므로
-/// 어휘 토큰 단위로 문자열 리터럴·작은따옴표 시트명·함수 호출(`(` 뒤따름)을 구별해 이동시킨다.
 pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String {
     if d_row == 0 && d_col == 0 {
         return master.to_string();
@@ -134,8 +126,6 @@ pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String 
 
     while i < len {
         let b = bytes[i];
-
-        // 1. 큰따옴표 문자열 리터럴은 내부를 그대로 복사
         if b == b'"' {
             out.push('"');
             i += 1;
@@ -154,8 +144,6 @@ pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String 
             }
             continue;
         }
-
-        // 2. 작은따옴표 시트 이름('01_시트'!)은 그대로 복사
         if b == b'\'' {
             out.push('\'');
             i += 1;
@@ -174,10 +162,7 @@ pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String 
             }
             continue;
         }
-
-        // 3. 식별자/셀 참조 후보 시작 ($ 또는 영문자/밑줄)
         if b == b'$' || b.is_ascii_alphabetic() || b == b'_' {
-            // 직전 문자가 영숫자나 마침표면 이미 다른 토큰의 일부
             let start = i;
             while i < len {
                 let c = bytes[i];
@@ -188,7 +173,6 @@ pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String 
                 }
             }
             let token = &master[start..i];
-            // 뒤에 '(' 또는 '!' 가 바로 오면 함수 이름(LOG10 등)이거나 시트 이름이므로 치환 금지
             let next_byte = if i < len { Some(bytes[i]) } else { None };
             if next_byte == Some(b'(') || next_byte == Some(b'!') {
                 out.push_str(token);
@@ -199,12 +183,10 @@ pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String 
             }
             continue;
         }
-
         let ch = master[i..].chars().next().unwrap();
         out.push(ch);
         i += ch.len_utf8();
     }
-
     out
 }
 
@@ -249,19 +231,19 @@ fn try_shift_single_ref(token: &str, d_row: i32, d_col: i32) -> Option<String> {
         let up = c.to_ascii_uppercase();
         col_idx = col_idx * 26 + (up - b'A' + 1) as i32;
     }
-    if col_idx < 1 || col_idx > 16384 {
+    if !(1..=16384).contains(&col_idx) {
         return None;
     }
 
     let row_idx: i32 = token[row_start..].parse().ok()?;
-    if row_idx < 1 || row_idx > 1_048_576 {
+    if !(1..=1_048_576).contains(&row_idx) {
         return None;
     }
 
     let new_col = if col_abs { col_idx } else { col_idx + d_col };
     let new_row = if row_abs { row_idx } else { row_idx + d_row };
 
-    if new_col < 1 || new_col > 16384 || new_row < 1 || new_row > 1_048_576 {
+    if !(1..=16384).contains(&new_col) || !(1..=1_048_576).contains(&new_row) {
         return Some("#REF!".to_string());
     }
 
@@ -284,7 +266,6 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
 
     let mut pool = StringPool::default();
 
-    // 1. 루트 .rels에서 workbook 경로 탐색
     let root_rels = read_part_relationships(&mut archive, "")?;
     let workbook_path = root_rels
         .values()
@@ -293,11 +274,8 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
         .unwrap_or_else(|| "xl/workbook.xml".to_string());
 
     let wb_rels = read_part_relationships(&mut archive, &workbook_path)?;
-
-    // 2. workbook.xml 파싱 (시트 목록, definedName, fullCalcOnLoad, date1904)
     let wb_meta = parse_workbook_xml(&mut archive, &workbook_path)?;
 
-    // 3. 테마(theme1.xml) 및 스타일(styles.xml) 파싱
     let theme_path = wb_rels
         .values()
         .find(|r| is_rel_type(&r.rel_type, "/theme"))
@@ -312,7 +290,6 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
         .unwrap_or_else(|| "xl/styles.xml".to_string());
     let styles = parse_styles_xml(&mut archive, &styles_path, theme_colors)?;
 
-    // 4. sharedStrings.xml 파싱 (없어도 정상 진행)
     let sst_path = wb_rels
         .values()
         .find(|r| is_rel_type(&r.rel_type, "/sharedStrings"))
@@ -325,7 +302,6 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
         Vec::new()
     };
 
-    // 5. 각 워크시트 및 연결된 comments 파싱
     let mut sheets = Vec::with_capacity(wb_meta.sheets.len());
     for entry in wb_meta.sheets {
         let sheet_path = wb_rels
@@ -357,6 +333,7 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
             entry.state,
             &sst_spans,
             &styles,
+            &sheet_rels,
             comments,
             &mut pool,
         )?;
@@ -413,15 +390,9 @@ fn parse_workbook_xml<R: Read + Seek>(
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
-                b"workbookPr" => {
-                    extract_workbook_pr(&e, &mut date1904);
-                }
-                b"calcPr" => {
-                    extract_calc_pr(&e, &mut full_calc_on_load);
-                }
-                b"sheet" => {
-                    sheets.push(extract_sheet_entry(&e));
-                }
+                b"workbookPr" => extract_workbook_pr(&e, &mut date1904),
+                b"calcPr" => extract_calc_pr(&e, &mut full_calc_on_load),
+                b"sheet" => sheets.push(extract_sheet_entry(&e)),
                 b"definedName" => {
                     in_defined_name = true;
                     cur_dn_name.clear();
@@ -536,8 +507,6 @@ fn extract_sheet_entry(e: &quick_xml::events::BytesStart) -> WorkbookSheetEntry 
     }
 }
 
-/// `xl/sharedStrings.xml`을 스트리밍으로 읽어 StringPool에 적재한다.
-/// 왜: `trim_text(false)`를 유지해야 `xml:space="preserve"`가 붙은 원문 앞뒤 공백이 손실되지 않는다.
 fn parse_shared_strings<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     sst_path: &str,
@@ -601,7 +570,6 @@ fn parse_shared_strings<R: Read + Seek>(
     Ok(spans)
 }
 
-/// `xl/commentsN.xml`을 파싱하여 시트 메모 목록을 반환한다.
 fn parse_comments_xml<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     comments_path: &str,
@@ -715,6 +683,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
     state: SheetState,
     sst_spans: &[StrSpan],
     styles: &StyleSheet,
+    sheet_rels: &HashMap<String, Relationship>,
     comments: Vec<CommentEntry>,
     pool: &mut StringPool,
 ) -> Result<Sheet, String> {
@@ -723,7 +692,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
         .map_err(|e| format!("워크시트 없음 ({}): {}", sheet_path, e))?;
 
     let mut reader = Reader::from_reader(BufReader::new(file));
-    // 왜: 03 시트 A열의 앞뒤 공백(xml:space="preserve")을 보존하기 위해 trim_text(false) 필수
     reader.config_mut().trim_text(false);
 
     let mdw_px = styles.mdw_px;
@@ -735,13 +703,13 @@ fn parse_worksheet_xml<R: Read + Seek>(
     let mut auto_filter: Option<CellRange> = None;
     let mut merges: Vec<CellRange> = Vec::new();
     let mut validations: Vec<DataValidationEntry> = Vec::new();
+    let mut links: HashMap<u64, HyperlinkEntry> = HashMap::new();
 
     let mut custom_col_widths_pt: HashMap<u32, f32> = HashMap::new();
     let mut custom_row_heights_pt: HashMap<u32, f32> = HashMap::new();
 
     let mut data = Rows::default();
     let mut formulas: HashMap<u64, FormulaEntry> = HashMap::new();
-    // 공유 수식 마스터: si -> (master_row_1based, master_col_1based, master_formula_string)
     let mut shared_masters: HashMap<u32, (u32, u32, String)> = HashMap::new();
 
     let mut max_row_1based: u32 = 0;
@@ -914,6 +882,9 @@ fn parse_worksheet_xml<R: Read + Seek>(
                         in_dv_f2 = true;
                         dv_f_buf.clear();
                     }
+                    b"hyperlink" => {
+                        extract_hyperlink_tag(&e, sheet_rels, pool, &mut links);
+                    }
                     _ => {}
                 }
             }
@@ -935,16 +906,13 @@ fn parse_worksheet_xml<R: Read + Seek>(
                         &mut custom_col_widths_pt,
                     ),
                     b"f" if in_cell => {
-                        // 왜: 공유 수식 자식 셀은 <f t="shared" si="0"/> 처럼 빈 태그로 온다.
                         has_f_tag = true;
                         extract_f_attrs(&e, &mut f_type, &mut f_ref, &mut f_si);
                     }
                     b"v" if in_cell => {
-                        // 왜: openpyxl 등이 만든 수식 셀은 <v/> 처럼 값이 비어 있다. 파싱 실패로 처리하면 안 된다.
                         has_v_tag = true;
                     }
                     b"c" => {
-                        // 자식 요소가 없는 빈 셀 (<c r="B2" s="3"/>)
                         let mut c_col = next_col;
                         let mut c_style = 0u16;
                         for attr in e.attributes().flatten() {
@@ -993,6 +961,9 @@ fn parse_worksheet_xml<R: Read + Seek>(
                     b"dataValidation" => {
                         validations.push(extract_dv_attrs(&e));
                     }
+                    b"hyperlink" => {
+                        extract_hyperlink_tag(&e, sheet_rels, pool, &mut links);
+                    }
                     _ => {}
                 }
             }
@@ -1032,7 +1003,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                         in_cell = false;
                         let mut flags = 0u8;
 
-                        // 1. 수식 처리 (일반 / 공유 / 배열)
                         if has_f_tag {
                             flags |= CELL_FLAG_HAS_FORMULA;
                             let trimmed_f = f_buf.trim().strip_prefix('=').unwrap_or(f_buf.trim());
@@ -1071,6 +1041,21 @@ fn parse_worksheet_xml<R: Read + Seek>(
                                 _ => (FormulaKind::Normal, trimmed_f.to_string()),
                             };
 
+                            // HYPERLINK("target", "label") 수식이면 링크 목록에도 자동 등록
+                            if let Some((target_url, is_int)) =
+                                try_extract_hyperlink_formula(&resolved_f)
+                            {
+                                flags |= CELL_FLAG_HAS_LINK;
+                                let span = pool.intern(&target_url);
+                                links.insert(
+                                    crate::cell_key(current_row, cell_col),
+                                    HyperlinkEntry {
+                                        target: span,
+                                        is_internal: is_int,
+                                    },
+                                );
+                            }
+
                             let f_span = pool.intern(&resolved_f);
                             let key = crate::cell_key(current_row, cell_col);
                             formulas.insert(
@@ -1084,7 +1069,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                             );
                         }
 
-                        // 2. 값 종류 및 8바이트 union 페이로드 결정
                         let (kind, payload) = match cell_type.as_str() {
                             "s" => {
                                 let idx = val_buf.trim().parse::<usize>().unwrap_or(0);
@@ -1117,7 +1101,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                                 (CellKind::Err, CellPayload { str_span: span })
                             }
                             _ => {
-                                // t="n" 또는 t 생략: <v>가 비어 있으면(openpyxl 수식 셀 등) Blank로 둔다.
                                 let v_trimmed = val_buf.trim();
                                 if !has_v_tag || v_trimmed.is_empty() {
                                     (CellKind::Blank, CellPayload { raw: 0 })
@@ -1153,7 +1136,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                     b"formula1" if in_dv => {
                         in_dv_f1 = false;
                         if let Some(dv) = cur_dv.as_mut() {
-                            // 왜: 02 시트 유효성 목록 수식 앞에 '='가 붙어 있는 비표준 케이스를 벗겨낸다.
                             let clean = dv_f_buf.trim().strip_prefix('=').unwrap_or(dv_f_buf.trim());
                             dv.formula1 = Some(clean.to_string());
                         }
@@ -1181,14 +1163,19 @@ fn parse_worksheet_xml<R: Read + Seek>(
         buf.clear();
     }
 
-    // 메모가 달린 셀에 CELL_FLAG_HAS_COMMENT 표시
     for cm in &comments {
         if let Some(cell) = data.get_cell_mut(cm.row, cm.col) {
             cell.flags |= CELL_FLAG_HAS_COMMENT;
         }
     }
+    for &key in links.keys() {
+        let r = (key >> 32) as u32;
+        let c = (key & 0xFFFF_FFFF) as u32;
+        if let Some(cell) = data.get_cell_mut(r, c) {
+            cell.flags |= CELL_FLAG_HAS_LINK;
+        }
+    }
 
-    // 1..=max_col_1based 및 1..=max_row_1based 열 너비·행 높이(pt) 배열 생성
     let mut col_widths_pt = Vec::with_capacity(max_col_1based as usize);
     for c in 1..=max_col_1based {
         let w = custom_col_widths_pt
@@ -1226,7 +1213,88 @@ fn parse_worksheet_xml<R: Read + Seek>(
         auto_filter,
         validations,
         comments,
+        links,
     })
+}
+
+fn extract_hyperlink_tag(
+    e: &quick_xml::events::BytesStart,
+    sheet_rels: &HashMap<String, Relationship>,
+    pool: &mut StringPool,
+    links: &mut HashMap<u64, HyperlinkEntry>,
+) {
+    let mut ref_str = String::new();
+    let mut r_id = String::new();
+    let mut location = String::new();
+
+    for attr in e.attributes().flatten() {
+        match attr.key.local_name().as_ref() {
+            b"ref" => ref_str = attr.unescape_value().unwrap_or_default().into_owned(),
+            b"id" => r_id = attr.unescape_value().unwrap_or_default().into_owned(),
+            b"location" => location = attr.unescape_value().unwrap_or_default().into_owned(),
+            _ => {}
+        }
+    }
+
+    let Some(range) = parse_range_1based(&ref_str) else {
+        return;
+    };
+
+    let (target_str, is_internal) = if !location.is_empty() {
+        (location.trim_start_matches('#').to_string(), true)
+    } else if let Some(rel) = sheet_rels.get(&r_id) {
+        let is_ext = rel
+            .target_mode
+            .as_deref()
+            .map(|m| m.eq_ignore_ascii_case("External"))
+            .unwrap_or(true);
+        (rel.target.clone(), !is_ext)
+    } else {
+        return;
+    };
+
+    let span = pool.intern(&target_str);
+    // 링크 범위가 열·시트 전체(A1:XFD1048576)면 칸마다 넣다가 메모리가 터진다.
+    // 한 링크는 1만 칸, 시트 전체는 20만 칸까지만 넣는다(그 밖은 링크 표시 없이 보인다).
+    const MAX_PER_LINK: u64 = 10_000;
+    const MAX_LINK_CELLS: usize = 200_000;
+    let mut range = range;
+    let width = (range.end_col.saturating_sub(range.start_col) as u64) + 1;
+    if width > MAX_PER_LINK {
+        range.end_col = range.start_col + (MAX_PER_LINK as u32 - 1);
+    }
+    let width = (range.end_col - range.start_col + 1) as u64;
+    let max_rows = (MAX_PER_LINK / width).max(1) as u32;
+    if range.end_row.saturating_sub(range.start_row) >= max_rows {
+        range.end_row = range.start_row + max_rows - 1;
+    }
+    if links.len() >= MAX_LINK_CELLS {
+        return;
+    }
+    for r in range.start_row..=range.end_row {
+        for c in range.start_col..=range.end_col {
+            links.insert(
+                crate::cell_key(r, c),
+                HyperlinkEntry {
+                    target: span,
+                    is_internal,
+                },
+            );
+        }
+    }
+}
+
+fn try_extract_hyperlink_formula(formula: &str) -> Option<(String, bool)> {
+    let trimmed = formula.trim();
+    if !trimmed.to_ascii_uppercase().starts_with("HYPERLINK(") {
+        return None;
+    }
+    let inside = trimmed.get(10..trimmed.len().saturating_sub(1))?.trim();
+    let first_quote = inside.strip_prefix('"')?;
+    let end_quote = first_quote.find('"')?;
+    let target = &first_quote[..end_quote];
+    let is_internal = target.starts_with('#') || target.contains('!');
+    Some((target.trim_start_matches('#').to_string(), is_internal))
 }
 
 fn parse_sheet_view_attrs(e: &quick_xml::events::BytesStart, show_grid_lines: &mut bool) {

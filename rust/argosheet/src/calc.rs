@@ -4863,6 +4863,7 @@ mod tests {
             auto_filter: None,
             validations: Vec::new(),
             comments: Vec::new(),
+            links: HashMap::new(),
         };
 
         Workbook {
@@ -5154,6 +5155,7 @@ mod tests {
             auto_filter: None,
             validations: Vec::new(),
             comments: Vec::new(),
+            links: HashMap::new(),
         };
 
         Workbook {

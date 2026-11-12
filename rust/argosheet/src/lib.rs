@@ -46,6 +46,7 @@ pub const CELL_FLAG_HAS_FORMULA: u8    = 1 << 0;
 pub const CELL_FLAG_FORMULA_SHARED: u8 = 1 << 1;
 pub const CELL_FLAG_FORMULA_ARRAY: u8  = 1 << 2;
 pub const CELL_FLAG_HAS_COMMENT: u8    = 1 << 3;
+pub const CELL_FLAG_HAS_LINK: u8       = 1 << 4;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -106,7 +107,9 @@ impl StringPool {
             return "";
         }
         let start = span.offset as usize;
-        let end = start.saturating_add(span.len as usize);
+        let Some(end) = start.checked_add(span.len as usize) else {
+            return "";
+        };
         self.buf.get(start..end).unwrap_or("")
     }
 }
@@ -200,6 +203,12 @@ pub struct CommentEntry {
     pub text: StrSpan,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HyperlinkEntry {
+    pub target: StrSpan,
+    pub is_internal: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct DefinedName {
     pub name: String,
@@ -234,6 +243,7 @@ pub struct Sheet {
     pub auto_filter: Option<CellRange>,
     pub validations: Vec<DataValidationEntry>,
     pub comments: Vec<CommentEntry>,
+    pub links: HashMap<u64, HyperlinkEntry>,
 }
 
 impl Sheet {
@@ -288,10 +298,6 @@ pub struct Workbook {
     pub sheets: Vec<Sheet>,
 }
 
-// ============================================================================
-// C ABI 구조체 및 진입점 (모두 catch_unwind 보호, 읽기 전용 불변 캐시 내장)
-// ============================================================================
-
 pub struct ASBook {
     pub wb: Workbook,
     pub calc_res: WorkbookCalcResult,
@@ -299,7 +305,6 @@ pub struct ASBook {
     pub render_caches: Vec<SheetRenderCache>,
 }
 
-// 왜: ASBook은 open 이후 절대 변경되지 않는 불변 구조체이므로 다중 백그라운드 타일 큐에서 안전하게 공유된다.
 unsafe impl Sync for ASBook {}
 unsafe impl Send for ASBook {}
 
@@ -345,6 +350,9 @@ pub struct ASCellInfo {
     pub formula: [c_char; 512],
     pub format_code: [c_char; 128],
     pub comment_text: [c_char; 512],
+    pub comment_author: [c_char; 128],
+    pub link_target: [c_char; 512],
+    pub link_is_internal: bool,
 }
 
 #[repr(C)]
@@ -553,7 +561,8 @@ pub extern "C" fn as_tile(
             return ptr::null_mut();
         };
         let tile_rect = ASRect { x, y, w, h };
-        let inner = build_tile_drawlist(&b.wb, &b.calc_res, &b.fmt_cache, rc, s_idx, tile_rect, zoom);
+        let inner =
+            build_tile_drawlist(&b.wb, &b.calc_res, &b.fmt_cache, rc, s_idx, tile_rect, zoom);
         Box::into_raw(Box::new(ASDrawList { inner }))
     }));
     res.unwrap_or(ptr::null_mut())
@@ -684,16 +693,30 @@ pub extern "C" fn as_cell_info(
         let formula = s.formula_str(&b.wb.pool, target_r, target_c);
         write_c_string_buf(&mut info.formula, formula);
 
-        let comment = s
+        if let Some(cm) = s
             .comments
             .iter()
             .find(|cm| cm.row == target_r && cm.col == target_c)
-            .map(|cm| b.wb.pool.get(cm.text))
-            .unwrap_or("");
-        write_c_string_buf(&mut info.comment_text, comment);
+        {
+            write_c_string_buf(&mut info.comment_text, b.wb.pool.get(cm.text));
+            let author = cm.author.map(|a| b.wb.pool.get(a)).unwrap_or("");
+            write_c_string_buf(&mut info.comment_author, author);
+        } else {
+            write_c_string_buf(&mut info.comment_text, "");
+            write_c_string_buf(&mut info.comment_author, "");
+        }
+
+        let target_key = cell_key(target_r, target_c);
+        if let Some(lnk) = s.links.get(&target_key) {
+            write_c_string_buf(&mut info.link_target, b.wb.pool.get(lnk.target));
+            info.link_is_internal = lnk.is_internal;
+        } else {
+            write_c_string_buf(&mut info.link_target, "");
+            info.link_is_internal = false;
+        }
 
         if let Some(c_data) = cell {
-            let (disp, resolved_kind) = format_cell_display(
+            let (disp, resolved_kind, raw_num) = format_cell_display(
                 &b.wb,
                 &b.calc_res,
                 &b.fmt_cache,
@@ -706,23 +729,7 @@ pub extern "C" fn as_cell_info(
             );
             info.kind = resolved_kind as u8;
             info.flags = c_data.flags;
-            info.num_value = if resolved_kind == CellKind::Num {
-                if (c_data.flags & CELL_FLAG_HAS_FORMULA) != 0 {
-                    b.calc_res
-                        .values
-                        .get(&CellAddr {
-                            sheet: s_idx,
-                            row: target_r,
-                            col: target_c,
-                        })
-                        .and_then(|v| v.coerce_num().ok())
-                        .unwrap_or(0.0)
-                } else {
-                    unsafe { c_data.payload.num }
-                }
-            } else {
-                0.0
-            };
+            info.num_value = raw_num.unwrap_or(0.0);
             write_c_string_buf(&mut info.display_text, &disp);
         } else {
             info.kind = CellKind::Blank as u8;
@@ -766,7 +773,7 @@ pub extern "C" fn as_find(
                         .get(cell.style_idx as usize)
                         .cloned()
                         .unwrap_or_default();
-                    let (disp, _) = format_cell_display(
+                    let (disp, _, _) = format_cell_display(
                         &b.wb,
                         &b.calc_res,
                         &b.fmt_cache,
@@ -940,6 +947,24 @@ mod p2_review_tests {
         assert!(as_tile(book, 99, 0.0, 0.0, 1.0, 1.0, 1.0).is_null());
         as_close(book);
         assert!(t0.elapsed().as_secs() < 10, "너무 느림: {:?}", t0.elapsed());
+    }
+
+    #[test]
+    fn hyperlink_whole_sheet_range_is_capped() {
+        let tmp = xlsx_with_sheet(r##"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>
+<row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="B1" t="str"><f>HYPERLINK("#'S'!C9","go")</f><v>go</v></c></row></sheetData>
+<hyperlinks><hyperlink ref="A1:XFD1048576" location="S!B2"/><hyperlink ref="A:A" location="S!B3"/></hyperlinks></worksheet>"##);
+        let t0 = std::time::Instant::now();
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+        assert!(t0.elapsed().as_secs() < 5, "링크 범위 펼치기가 너무 느림 {:?}", t0.elapsed());
+        let mut info: ASCellInfo = unsafe { std::mem::zeroed() };
+        assert!(as_cell_info(book, 0, 1, 2, &mut info));
+        let link = unsafe { CStr::from_ptr(info.link_target.as_ptr()) }.to_str().unwrap().to_string();
+        assert!(info.link_is_internal);
+        assert!(!link.is_empty());
+        as_close(book);
     }
 
     #[test]
@@ -1201,7 +1226,7 @@ mod abi_layout {
         use crate::*;
         use std::mem::{offset_of, size_of};
         assert_eq!(size_of::<ASSheetInfo>(), 324);
-        assert_eq!(size_of::<ASCellInfo>(), 1736);
+        assert_eq!(size_of::<ASCellInfo>(), 2384);
         assert_eq!(size_of::<ASDrawCmd>(), 64);
         assert_eq!(size_of::<ASHit>(), 12);
         assert_eq!(offset_of!(ASSheetInfo, state), 260);
@@ -1214,13 +1239,19 @@ mod abi_layout {
         assert_eq!(offset_of!(ASCellInfo, address), 40);
         assert_eq!(offset_of!(ASCellInfo, display_text), 72);
         assert_eq!(offset_of!(ASCellInfo, comment_text), 1224);
+        assert_eq!(offset_of!(ASCellInfo, comment_author), 1736);
+        assert_eq!(offset_of!(ASCellInfo, link_target), 1864);
+        assert_eq!(offset_of!(ASCellInfo, link_is_internal), 2376);
         assert_eq!(offset_of!(ASDrawCmd, rect), 4);
         assert_eq!(offset_of!(ASDrawCmd, clip_rect), 20);
         assert_eq!(offset_of!(ASDrawCmd, color1), 36);
+        assert_eq!(offset_of!(ASDrawCmd, color2), 40);
         assert_eq!(offset_of!(ASDrawCmd, stroke_width), 44);
         assert_eq!(offset_of!(ASDrawCmd, text_offset), 48);
+        assert_eq!(offset_of!(ASDrawCmd, text_len), 52);
         assert_eq!(offset_of!(ASDrawCmd, font_size_pt), 56);
-        assert_eq!(offset_of!(ASDrawCmd, font_bold), 60);
-        assert_eq!(offset_of!(ASDrawCmd, _pad), 63);
+        assert_eq!(offset_of!(ASDrawCmd, rotation), 60);
+        assert_eq!(offset_of!(ASDrawCmd, indent), 62);
+        assert_eq!(offset_of!(ASDrawCmd, text_flags), 63);
     }
 }
