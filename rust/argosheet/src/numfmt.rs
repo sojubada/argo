@@ -1,6 +1,5 @@
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
 
 // ============================================================================
 // 1. 서식 AST 및 토큰 정의
@@ -796,7 +795,7 @@ fn format_numeric(mut raw_n: f64, section: &NumFmtSection, suppress_sign: bool) 
     let abs_rounded = rounded.abs();
     let int_part_str = abs_rounded.trunc().to_string();
     let mut frac_part_str = if scale > 0 {
-        let mut frac = abs_rounded.fract().to_string();
+        let frac = abs_rounded.fract().to_string();
         // fract()는 "0.125" 형태이므로 "0." 접두어 제거
         if let Some(stripped) = frac.strip_prefix("0.") {
             stripped.to_string()
@@ -836,7 +835,6 @@ fn format_numeric(mut raw_n: f64, section: &NumFmtSection, suppress_sign: bool) 
         out.push('-');
     }
     let mut int_emitted = false;
-    let mut frac_emitted = false;
 
     for tok in &section.tokens {
         match tok {
@@ -853,7 +851,6 @@ fn format_numeric(mut raw_n: f64, section: &NumFmtSection, suppress_sign: bool) 
                 if !frac_part_str.is_empty() || section.min_frac_digits > 0 {
                     out.push('.');
                     out.push_str(&frac_part_str);
-                    frac_emitted = true;
                 }
             }
             FmtToken::Percent => out.push('%'),

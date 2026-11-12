@@ -2,7 +2,7 @@ use crate::cf::{
     CfBlock, CfRule, CfRuleKind, Cfvo, CfvoType, ColorScaleSpec, DataBarAxisPos, DataBarSpec,
     IconSetKind, IconSetSpec, TableDef,
 };
-use crate::drawing::{parse_sheet_drawings, RawSheetDrawing};
+use crate::drawing::{parse_sheet_drawings, MediaCache, RawSheetDrawing};
 use crate::package::{is_rel_type, read_part_relationships, resolve_part_target, Relationship};
 use crate::style::{
     default_column_width_chars, excel_column_width_to_points_with_mdw, parse_color_attrs,
@@ -315,6 +315,7 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
     };
 
     let mut sheets = Vec::with_capacity(wb_meta.sheets.len());
+    let mut media_cache = MediaCache::default();
     for entry in wb_meta.sheets {
         let sheet_path = wb_rels
             .get(&entry.r_id)
@@ -357,7 +358,7 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
         }
 
         let raw_drawings =
-            parse_sheet_drawings(&mut archive, &drawing_paths, &vml_paths, &styles);
+            parse_sheet_drawings(&mut archive, &drawing_paths, &vml_paths, &styles, &mut media_cache);
 
         let sheet = parse_worksheet_xml(
             &mut archive,

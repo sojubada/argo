@@ -1281,6 +1281,46 @@ mod p2_review_tests {
     }
 
     #[test]
+    fn many_anchors_share_one_image_and_are_capped() {
+        // 같은 그림을 가리키는 앵커 5,000개: 그림은 한 번만 읽어 함께 쓰고, 시트당 1,000개에서 자른다.
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let o = SimpleFileOptions::default();
+            let put = |zip: &mut ZipWriter<&mut std::fs::File>, name: &str, body: &[u8]| {
+                zip.start_file(name, o).unwrap();
+                zip.write_all(body).unwrap();
+            };
+            put(&mut zip, "_rels/.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#);
+            put(&mut zip, "xl/_rels/workbook.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#);
+            put(&mut zip, "xl/workbook.xml", br#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#);
+            put(&mut zip, "xl/worksheets/_rels/sheet1.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="d1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>"#);
+            put(&mut zip, "xl/worksheets/sheet1.xml", br#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><drawing r:id="d1"/></worksheet>"#);
+            put(&mut zip, "xl/drawings/_rels/drawing1.xml.rels", br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="i1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/></Relationships>"#);
+            let mut d = String::from(r#"<?xml version="1.0"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#);
+            for i in 0..5000 {
+                d.push_str(&format!(r#"<xdr:twoCellAnchor><xdr:from><xdr:col>{c}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{r}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>{c2}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>{r2}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:pic><xdr:blipFill><a:blip r:embed="i1"/></xdr:blipFill></xdr:pic></xdr:twoCellAnchor>"#, c = i % 50, r = i / 50, c2 = i % 50 + 1, r2 = i / 50 + 1));
+            }
+            d.push_str("</xdr:wsDr>");
+            put(&mut zip, "xl/drawings/drawing1.xml", d.as_bytes());
+            put(&mut zip, "xl/media/logo.png", &vec![7u8; 1 << 20]);
+            zip.finish().unwrap();
+        }
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+        let n = as_sheet_overlay_count(book, 0);
+        assert_eq!(n as usize, crate::drawing::MAX_DRAWINGS_PER_SHEET);
+        let mut len0 = 0u32;
+        let p0 = as_sheet_overlay_bytes(book, 0, 0, &mut len0);
+        assert_eq!(len0, 1 << 20);
+        let mut len1 = 0u32;
+        let p1 = as_sheet_overlay_bytes(book, 0, n - 1, &mut len1);
+        assert_eq!(p0, p1, "같은 그림을 앵커마다 따로 복사함");
+        as_close(book);
+    }
+
+    #[test]
     fn null_and_garbage_pointers_are_refused() {
         assert!(as_open(ptr::null()).is_null());
         let bad = CString::new("/없는/파일.xlsx").unwrap();

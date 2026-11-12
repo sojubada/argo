@@ -12,6 +12,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
+use std::sync::Arc;
 use zip::ZipArchive;
 
 /// 1 엑셀 포인트(pt, 1/72 inch) = 12,700 EMU
@@ -28,6 +29,46 @@ fn read_capped<R: Read>(r: &mut R, out: &mut Vec<u8>) -> std::io::Result<usize> 
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "부품이 너무 큼"));
     }
     Ok(n)
+}
+
+/// 시트 하나에서 받아들일 그림·차트·도형 수. 넘는 것은 버린다(앵커 수십만 개짜리 악성 파일 대비).
+pub const MAX_DRAWINGS_PER_SHEET: usize = 1000;
+/// 차트 하나의 계열 수 상한.
+pub const MAX_SERIES_PER_CHART: usize = 64;
+/// 차트 하나에 그릴 점 총수 상한(계열 전부 합쳐서).
+pub const MAX_POINTS_PER_CHART: usize = 200_000;
+/// 통합 문서 하나에서 메모리에 올릴 그림 원본 총량. 같은 그림 파일은 한 번만 읽어 함께 쓴다.
+pub const MAX_MEDIA_TOTAL_BYTES: u64 = 192 * 1024 * 1024;
+
+/// 그림 원본 캐시. 같은 media 파일을 여러 앵커·시트가 가리키면 하나의 Arc 를 나눠 쓰고,
+/// 총량이 `MAX_MEDIA_TOTAL_BYTES` 를 넘으면 더 읽지 않는다.
+#[derive(Default)]
+pub struct MediaCache {
+    map: HashMap<String, Option<Arc<Vec<u8>>>>,
+    total: u64,
+}
+
+impl MediaCache {
+    pub fn get<R: Read + Seek>(&mut self, archive: &mut ZipArchive<R>, path: &str) -> Option<Arc<Vec<u8>>> {
+        if let Some(v) = self.map.get(path) {
+            return v.clone();
+        }
+        let mut loaded = None;
+        if self.total < MAX_MEDIA_TOTAL_BYTES {
+            if let Ok(mut mf) = archive.by_name(path) {
+                let mut bytes = Vec::new();
+                if read_capped(&mut mf, &mut bytes).is_ok()
+                    && !bytes.is_empty()
+                    && self.total + bytes.len() as u64 <= MAX_MEDIA_TOTAL_BYTES
+                {
+                    self.total += bytes.len() as u64;
+                    loaded = Some(Arc::new(bytes));
+                }
+            }
+        }
+        self.map.insert(path.to_string(), loaded.clone());
+        loaded
+    }
 }
 
 #[inline]
@@ -186,7 +227,7 @@ pub struct ChartSpec {
 pub enum RawDrawingPayload {
     Chart(ChartSpec),
     Image {
-        media_bytes: Vec<u8>,
+        media_bytes: Arc<Vec<u8>>,
         is_emf: bool,
         crop: (f32, f32, f32, f32), // l, t, r, b (0.0 ~ 1.0)
         rotation_deg: f32,
@@ -217,7 +258,7 @@ pub struct ResolvedOverlay {
     pub rotation_deg: f32,
     pub title: String,
     pub draw_list: Option<DrawList>,
-    pub raw_bytes: Vec<u8>,
+    pub raw_bytes: Arc<Vec<u8>>,
 }
 
 // ============================================================================
@@ -229,21 +270,29 @@ pub fn parse_sheet_drawings<R: Read + Seek>(
     drawing_paths: &[String],
     vml_paths: &[String],
     styles: &StyleSheet,
+    media: &mut MediaCache,
 ) -> Vec<RawSheetDrawing> {
     let mut out = Vec::new();
 
     for d_path in drawing_paths {
-        if let Ok(items) = parse_one_drawing_xml(archive, d_path, styles) {
+        if out.len() >= MAX_DRAWINGS_PER_SHEET {
+            break;
+        }
+        if let Ok(items) = parse_one_drawing_xml(archive, d_path, styles, media) {
             out.extend(items);
         }
     }
 
     for v_path in vml_paths {
-        if let Ok(vml_imgs) = read_legacy_drawing_images(archive, v_path) {
+        if out.len() >= MAX_DRAWINGS_PER_SHEET {
+            break;
+        }
+        if let Ok(vml_imgs) = read_legacy_drawing_images(archive, v_path, media) {
             out.extend(vml_imgs);
         }
     }
 
+    out.truncate(MAX_DRAWINGS_PER_SHEET);
     out
 }
 
@@ -251,6 +300,7 @@ fn parse_one_drawing_xml<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     drawing_path: &str,
     styles: &StyleSheet,
+    media: &mut MediaCache,
 ) -> Result<Vec<RawSheetDrawing>, String> {
     let d_rels = read_part_relationships(archive, drawing_path)?;
     let xml_bytes = {
@@ -563,7 +613,9 @@ fn parse_one_drawing_xml<R: Read + Seek>(
                             PendingKind::None
                         };
                         if !matches!(kind, PendingKind::None) {
-                            pending.push(PendingItem { anchor, kind });
+                            if pending.len() < MAX_DRAWINGS_PER_SHEET {
+                                pending.push(PendingItem { anchor, kind });
+                            }
                         }
                         anchor_mode = 0;
                     }
@@ -599,9 +651,8 @@ fn parse_one_drawing_xml<R: Read + Seek>(
             } => {
                 if let Some(rel) = d_rels.get(&r_id) {
                     let media_path = resolve_part_target(drawing_path, &rel.target);
-                    if let Ok(mut mf) = archive.by_name(&media_path) {
-                        let mut bytes = Vec::new();
-                        if read_capped(&mut mf, &mut bytes).is_ok() && !bytes.is_empty() {
+                    {
+                        if let Some(bytes) = media.get(archive, &media_path) {
                             let lower = media_path.to_ascii_lowercase();
                             let is_emf = lower.ends_with(".emf") || lower.ends_with(".wmf");
                             results.push(RawSheetDrawing {
@@ -918,7 +969,9 @@ fn parse_chart_xml<R: Read + Seek>(
                                 }
                             }
                             cur_ser_group_idx.push(plot_group_index);
-                            series.push(s);
+                            if series.len() < MAX_SERIES_PER_CHART {
+                                series.push(s);
+                            }
                         }
                     }
                     b"barChart" | b"bar3DChart" | b"lineChart" | b"line3DChart" | b"areaChart"
@@ -1221,7 +1274,11 @@ pub fn render_chart_to_drawlist(
 
     // 2. 계열 값을 시트 수식 계산 결과에서 추출 (시트 값이 비어 있을 때만 XML 캐시 사용)
     let mut resolved_series: Vec<ResolvedSeriesData> = Vec::with_capacity(spec.series.len());
-    for (idx, s) in spec.series.iter().enumerate() {
+    let mut points_left = MAX_POINTS_PER_CHART;
+    for (idx, s) in spec.series.iter().enumerate().take(MAX_SERIES_PER_CHART) {
+        if points_left == 0 {
+            break;
+        }
         let name = s
             .name_formula
             .as_deref()
@@ -1267,6 +1324,11 @@ pub fn render_chart_to_drawlist(
                 b: pb,
                 a: 255,
             });
+
+        // 캐시 값(<c:pt>)도 파일에서 온 것이라 끝없이 클 수 있다 — 차트 전체 점 예산으로 자른다.
+        vals.truncate(points_left);
+        cats.truncate(MAX_POINTS_PER_CHART);
+        points_left -= vals.len().min(points_left);
 
         resolved_series.push(ResolvedSeriesData {
             name,
@@ -1829,6 +1891,7 @@ pub fn rasterize_emf(data: &[u8], target_w: u32, target_h: u32) -> Option<(u32, 
 pub fn read_legacy_drawing_images<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     vml_path: &str,
+    media: &mut MediaCache,
 ) -> Result<Vec<RawSheetDrawing>, String> {
     let vml_rels = read_part_relationships(archive, vml_path)?;
     let xml_bytes = {
@@ -1881,7 +1944,9 @@ pub fn read_legacy_drawing_images<R: Read + Seek>(
                 b"Anchor" => in_anchor = false,
                 b"shape" => {
                     if cur_rid.is_some() && !cur_anchor_text.is_empty() {
-                        pending.push((cur_rid.take(), cur_anchor_text.clone()));
+                        if pending.len() < MAX_DRAWINGS_PER_SHEET {
+                            pending.push((cur_rid.take(), cur_anchor_text.clone()));
+                        }
                     }
                 }
                 _ => {}
@@ -1908,21 +1973,20 @@ pub fn read_legacy_drawing_images<R: Read + Seek>(
         let anchor = CellAnchorSpec::TwoCell {
             from: AnchorMarker {
                 col_0based: nums[0].max(0) as u32,
-                col_off_emu: nums[1] * 9525, // VML 픽셀(96dpi) -> EMU
+                col_off_emu: nums[1].saturating_mul(9525), // VML 픽셀(96dpi) -> EMU
                 row_0based: nums[2].max(0) as u32,
-                row_off_emu: nums[3] * 9525,
+                row_off_emu: nums[3].saturating_mul(9525),
             },
             to: AnchorMarker {
                 col_0based: nums[4].max(0) as u32,
-                col_off_emu: nums[5] * 9525,
+                col_off_emu: nums[5].saturating_mul(9525),
                 row_0based: nums[6].max(0) as u32,
-                row_off_emu: nums[7] * 9525,
+                row_off_emu: nums[7].saturating_mul(9525),
             },
         };
         let media_path = resolve_part_target(vml_path, &rel.target);
-        if let Ok(mut mf) = archive.by_name(&media_path) {
-            let mut bytes = Vec::new();
-            if read_capped(&mut mf, &mut bytes).is_ok() && !bytes.is_empty() {
+        {
+            if let Some(bytes) = media.get(archive, &media_path) {
                 let lower = media_path.to_ascii_lowercase();
                 let is_emf = lower.ends_with(".emf") || lower.ends_with(".wmf");
                 out.push(RawSheetDrawing {
@@ -1971,7 +2035,7 @@ pub fn build_sheet_overlays(
                     rotation_deg: 0.0,
                     title: spec.title.clone(),
                     draw_list: Some(dl),
-                    raw_bytes: Vec::new(),
+                    raw_bytes: Arc::new(Vec::new()),
                 });
             }
             RawDrawingPayload::Image {
@@ -1995,7 +2059,7 @@ pub fn build_sheet_overlays(
                             rotation_deg: *rotation_deg,
                             title: String::new(),
                             draw_list: None,
-                            raw_bytes: rgba,
+                            raw_bytes: Arc::new(rgba),
                         });
                     }
                 } else {
@@ -2010,7 +2074,7 @@ pub fn build_sheet_overlays(
                         rotation_deg: *rotation_deg,
                         title: String::new(),
                         draw_list: None,
-                        raw_bytes: media_bytes.clone(),
+                        raw_bytes: Arc::clone(media_bytes),
                     });
                 }
             }
@@ -2069,7 +2133,7 @@ pub fn build_sheet_overlays(
                     rotation_deg: *rotation_deg,
                     title: text.clone(),
                     draw_list: Some(dl),
-                    raw_bytes: Vec::new(),
+                    raw_bytes: Arc::new(Vec::new()),
                 });
             }
         }

@@ -224,7 +224,7 @@ final class ArgoSheetTileView: UIView {
     private var overlayInFlight: Set<OverlayKey> = []
     private var overlayGen: UInt64 = 0
     /// 한 시트에서 다룰 오버레이 상한(악성 파일 대비).
-    private static let maxOverlays = 500
+    private static let maxOverlays = 1000   // Rust MAX_DRAWINGS_PER_SHEET 와 같게
     /// 오버레이 한 장의 긴 변 픽셀 상한(2048² × 4 = 16MB).
     private static let overlayMaxPx: CGFloat = 2048
     private static let overlayQueue = DispatchQueue(label: "argo.sheet.overlay", qos: .userInitiated)
