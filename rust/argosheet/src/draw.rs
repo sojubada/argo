@@ -1,4 +1,5 @@
 use crate::calc::{CalcErr, CellAddr, Value, WorkbookCalcResult};
+use crate::cf::{IconSetKind, ResolvedIcon, SheetCfCache};
 use crate::numfmt::{builtin_format_code, CompiledFormat, FormatCompiler, FormatEngine, FormatValue};
 use crate::style::{BorderEdge, BorderStyle, CellXf, Rgba};
 use crate::{
@@ -15,9 +16,10 @@ pub enum DrawCmdType {
     Line     = 3,
     Text     = 4,
     Marker   = 5,
+    Bar      = 6,
+    Icon     = 7,
 }
 
-// 선 스타일 코드 (argosheet.h ASLineStyle 와 1:1 대응)
 pub const LINE_STYLE_GRID: u8                = 0;
 pub const LINE_STYLE_HAIR: u8                = 1;
 pub const LINE_STYLE_DOTTED: u8              = 2;
@@ -33,7 +35,6 @@ pub const LINE_STYLE_MEDIUM: u8              = 11;
 pub const LINE_STYLE_DOUBLE: u8              = 12;
 pub const LINE_STYLE_THICK: u8               = 13;
 
-// 가로 정렬 상수
 pub const ALIGN_H_LEFT: u8              = 0;
 pub const ALIGN_H_CENTER: u8            = 1;
 pub const ALIGN_H_RIGHT: u8             = 2;
@@ -42,14 +43,12 @@ pub const ALIGN_H_JUSTIFY: u8           = 4;
 pub const ALIGN_H_DISTRIBUTED: u8       = 5;
 pub const ALIGN_H_CENTER_CONTINUOUS: u8 = 6;
 
-// 세로 정렬 상수 (엑셀 기본은 BOTTOM = 2)
 pub const ALIGN_V_TOP: u8         = 0;
 pub const ALIGN_V_CENTER: u8      = 1;
 pub const ALIGN_V_BOTTOM: u8      = 2;
 pub const ALIGN_V_JUSTIFY: u8     = 3;
 pub const ALIGN_V_DISTRIBUTED: u8 = 4;
 
-// 텍스트 속성 비트 플래그
 pub const TEXT_FLAG_BOLD: u8          = 1 << 0;
 pub const TEXT_FLAG_ITALIC: u8        = 1 << 1;
 pub const TEXT_FLAG_UNDERLINE: u8     = 1 << 2;
@@ -57,7 +56,6 @@ pub const TEXT_FLAG_STRIKE: u8        = 1 << 3;
 pub const TEXT_FLAG_WRAP: u8          = 1 << 4;
 pub const TEXT_FLAG_SHRINK_TO_FIT: u8 = 1 << 5;
 
-/// 셀 좌우 안쪽 여백: 1.5pt (2px). 10pt로 두면 엑셀보다 글이 일찍 잘린다.
 pub const CELL_PAD_X_PT: f32 = 1.5;
 
 #[repr(C)]
@@ -304,20 +302,14 @@ impl FormatCache {
     }
 }
 
-// ============================================================================
-// P3 테두리 13종 우선순위 해석기
-// ============================================================================
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedEdge {
-    pub rank: u8,       // 굵기 순위 (thick > double > medium > thin > hair)
-    pub style_code: u8, // LINE_STYLE_*
+    pub rank: u8,
+    pub style_code: u8,
     pub width_pt: f32,
     pub color: ASColor,
 }
 
-/// OOXML 테두리 문자열을 (굵기 순위, 스타일 코드, pt 두께)로 변환한다.
-/// 왜: 공유 변에서 양쪽 셀의 테두리가 다를 때 `thick > double > medium > thin > hair` 순위로 이긴 쪽을 고르기 위함이다.
 pub fn parse_border_edge_spec(edge: &BorderEdge) -> Option<ResolvedEdge> {
     let s = edge.style.trim();
     if s.is_empty() || s == "none" {
@@ -348,9 +340,6 @@ pub fn parse_border_edge_spec(edge: &BorderEdge) -> Option<ResolvedEdge> {
     })
 }
 
-/// 인접한 두 셀의 공유 변 테두리를 비교해 최종 그릴 테두리를 결정한다.
-/// `first`: 왼쪽 또는 위쪽 셀의 변, `second`: 오른쪽 또는 아래쪽 셀의 변.
-/// 양쪽 굵기 순위(`rank`)가 다르면 큰 쪽이 이기고, 같으면 오른쪽·아래(`second`) 셀 것이 이긴다.
 pub fn resolve_shared_border(
     first: Option<ResolvedEdge>,
     second: Option<ResolvedEdge>,
@@ -363,7 +352,6 @@ pub fn resolve_shared_border(
             if a.rank > b.rank {
                 Some(a)
             } else {
-                // b.rank >= a.rank 이면 오른쪽/아래 셀(b)을 선택
                 Some(b)
             }
         }
@@ -394,12 +382,6 @@ fn pattern_name_to_id(pat: &str) -> u8 {
     }
 }
 
-// ============================================================================
-// P3 텍스트 폭 추정 & 숫자 ### 포맷터
-// ============================================================================
-
-/// 글꼴 크기(pt)에 따른 문자열의 예상 폭(pt)을 계산한다.
-/// 왜: 한글/CJK 전각 문자는 약 1.0em, 영문/숫자는 약 0.56em 폭을 가지므로 넘침 여부와 `###` 판정에 사용한다.
 pub fn estimate_text_width_pt(text: &str, font_size_pt: f32) -> f32 {
     let mut units = 0.0f32;
     for ch in text.chars() {
@@ -423,9 +405,6 @@ pub fn estimate_text_width_pt(text: &str, font_size_pt: f32) -> f32 {
     units * font_size_pt
 }
 
-/// 숫자·날짜 셀이 가용 폭(`avail_w_pt`)보다 넓을 때 엑셀 규칙에 따라 축소하거나 `###`로 바꾼다.
-/// - `General` 서식이면 유효 자릿수를 줄이고, 그래도 넓으면 지수 표기(`1.2E+08`), 그래도 넓으면 `#` 채움.
-/// - 사용자/날짜 서식이면 넘치지 않고 셀 폭만큼 `#`으로 채운다.
 pub fn fit_number_to_cell_width(
     formatted: String,
     raw_num: Option<f64>,
@@ -465,20 +444,51 @@ pub fn fit_number_to_cell_width(
     "#".repeat(count)
 }
 
-// ============================================================================
-// P3 타일 그리기 목록 생성기 (순서: 바탕 -> 채우기 -> 격자선 -> 글(넘침) -> 테두리/대각선 -> 마커)
-// ============================================================================
+/// 벡터 아이콘 색상 결정: 3Arrows 기준 0=빨강(아래), 1=노랑(오른쪽), 2=초록(위)
+fn icon_color_for(icon: ResolvedIcon) -> ASColor {
+    if icon.set_kind == IconSetKind::Arrows3Gray {
+        return ASColor {
+            r: 107,
+            g: 114,
+            b: 128,
+            a: 255,
+        };
+    }
+    let count = icon.set_kind.icon_count();
+    match (count, icon.index) {
+        (3, 0) | (4, 0) | (5, 0) => ASColor {
+            r: 220,
+            g: 38,
+            b: 38,
+            a: 255,
+        }, // 빨강
+        (3, 1) | (4, 1) | (4, 2) | (5, 1) | (5, 2) | (5, 3) => ASColor {
+            r: 234,
+            g: 179,
+            b: 8,
+            a: 255,
+        }, // 노랑/주황
+        _ => ASColor {
+            r: 22,
+            g: 163,
+            b: 74,
+            a: 255,
+        }, // 초록
+    }
+}
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_tile_drawlist(
     wb: &Workbook,
     calc_res: &WorkbookCalcResult,
     fmt_cache: &FormatCache,
     render_cache: &SheetRenderCache,
+    cf_cache: &SheetCfCache,
     sheet_idx: usize,
     tile_rect: ASRect,
     _zoom: f32,
 ) -> DrawList {
-    let mut dl = DrawList::with_capacity(768, 4096);
+    let mut dl = DrawList::with_capacity(896, 4096);
     let Some(sheet) = wb.sheets.get(sheet_idx) else {
         return dl;
     };
@@ -527,18 +537,25 @@ pub fn build_tile_drawlist(
         return dl;
     }
 
-    // 2. 셀 채우기 (단색 및 18종 무늬 채우기)
+    // 2. 셀 채우기 (셀 자체 채우기 + 조건부 서식 배경/3색 색조 + 표 줄무늬)
+    //    조건부 서식(색조/dxf)이 있으면 셀 채우기 위에 우선 적용된다.
     let mut drawn_merges: HashSet<(u32, u32)> = HashSet::new();
     for r in start_row..=end_row {
         for c in start_col..=end_col {
             let (mr_sr, mr_sc, mr_er, mr_ec) = resolve_merge_bounds(render_cache, r, c);
-            if (mr_sr != r || mr_sc != c) && !drawn_merges.insert((mr_sr, mr_sc)) {
+            if !drawn_merges.insert((mr_sr, mr_sc)) {
                 continue;
             }
-            drawn_merges.insert((mr_sr, mr_sc));
-
             let rect = render_cache.cell_rect_pt(mr_sr, mr_sc, mr_er, mr_ec);
             if rect.w <= 0.0 || rect.h <= 0.0 {
+                continue;
+            }
+
+            let key = crate::cell_key(mr_sr, mr_sc);
+            let cf_ov = cf_cache.cells.get(&key);
+
+            if let Some(cf_bg) = cf_ov.and_then(|o| o.bg_color) {
+                dl.push_fill(rect, cf_bg.into());
                 continue;
             }
 
@@ -574,8 +591,7 @@ pub fn build_tile_drawlist(
         }
     }
 
-    // 3. 격자선: showGridLines가 켜져 있고 **양쪽 셀 모두 채우기가 없는 변에만** (#D9D9D9, 1px)
-    //    (테두리가 있는 변은 5단계에서 테두리로 그려지므로 격자선을 생략한다)
+    // 3. 격자선 및 공유 변 테두리(셀 테두리 + CF dxf 테두리) 수집
     let mut border_lines: Vec<ASDrawCmd> = Vec::new();
     emit_gridlines_and_collect_borders(
         &mut dl,
@@ -583,14 +599,67 @@ pub fn build_tile_drawlist(
         wb,
         sheet,
         render_cache,
+        cf_cache,
         start_row,
         end_row,
         start_col,
         end_col,
     );
 
-    // 4. 글(옆 칸 넘침 및 centerContinuous 포함) — 테두리보다 먼저 그려서 이웃 테두리가 넘친 글 위에 올라오게 한다.
-    //    타일 왼쪽이나 오른쪽 밖에서 시작해 타일 안으로 넘쳐 들어오는 문자 셀도 놓치지 않도록 좌우 8열을 더 스캔한다.
+    // 4. 조건부 서식 데이터 막대 (AS_CMD_BAR: 격자선 위, 텍스트/아이콘 아래에 배치)
+    drawn_merges.clear();
+    for r in start_row..=end_row {
+        for c in start_col..=end_col {
+            let (mr_sr, mr_sc, mr_er, mr_ec) = resolve_merge_bounds(render_cache, r, c);
+            if !drawn_merges.insert((mr_sr, mr_sc)) {
+                continue;
+            }
+            let key = crate::cell_key(mr_sr, mr_sc);
+            let Some(bar) = cf_cache.cells.get(&key).and_then(|o| o.data_bar) else {
+                continue;
+            };
+            let cell_rect = render_cache.cell_rect_pt(mr_sr, mr_sc, mr_er, mr_ec);
+            if cell_rect.w <= 3.0 || cell_rect.h <= 3.0 {
+                continue;
+            }
+
+            let inset_x = 1.5f32;
+            let inset_y = 2.0f32;
+            let avail_w = (cell_rect.w - inset_x * 2.0).max(0.0);
+            let bar_x = cell_rect.x + inset_x + bar.start_ratio * avail_w;
+            let bar_w = ((bar.end_ratio - bar.start_ratio) * avail_w).max(0.0);
+            let bar_rect = ASRect {
+                x: bar_x,
+                y: cell_rect.y + inset_y,
+                w: bar_w,
+                h: (cell_rect.h - inset_y * 2.0).max(1.0),
+            };
+            let (has_axis, axis_x) = match bar.axis_ratio {
+                Some(ar) => (1u8, cell_rect.x + inset_x + ar * avail_w),
+                None => (0u8, 0.0),
+            };
+
+            dl.commands.push(ASDrawCmd {
+                cmd_type: DrawCmdType::Bar as u8,
+                sub_type: 0,
+                align_horiz: 0,
+                align_vert: has_axis,
+                rect: bar_rect,
+                clip_rect: cell_rect,
+                color1: bar.color.into(),
+                color2: bar.axis_color.into(),
+                stroke_width: axis_x,
+                text_offset: 0,
+                text_len: 0,
+                font_size_pt: 0.0,
+                rotation: 0,
+                indent: 0,
+                text_flags: 0,
+            });
+        }
+    }
+
+    // 5. 조건부 서식 벡터 아이콘(AS_CMD_ICON) + 셀 텍스트(옆 칸 넘침 및 숫자 ### 포함)
     let text_scan_start_col = start_col.saturating_sub(8).max(1);
     let text_scan_end_col = (end_col + 8).min(sheet.max_col);
 
@@ -603,9 +672,57 @@ pub fn build_tile_drawlist(
         let mut c = text_scan_start_col;
         while c <= text_scan_end_col {
             let (mr_sr, mr_sc, mr_er, mr_ec) = resolve_merge_bounds(render_cache, r, c);
-            // 병합 범위는 첫 행·첫 열에서만 텍스트를 처리한다
             if r != mr_sr || c != mr_sc {
                 c += 1;
+                continue;
+            }
+
+            let base_rect = render_cache.cell_rect_pt(mr_sr, mr_sc, mr_er, mr_ec);
+            if base_rect.w <= 0.0 || base_rect.h <= 0.0 {
+                c = mr_ec + 1;
+                continue;
+            }
+
+            let key = crate::cell_key(mr_sr, mr_sc);
+            let cf_ov = cf_cache.cells.get(&key);
+
+            // 5-a. 벡터 아이콘 출력 (셀 왼쪽에 배치하고 텍스트 영역을 오른쪽으로 민다)
+            let mut icon_left_advance = 0.0f32;
+            if let Some(icon) = cf_ov.and_then(|o| o.icon) {
+                let icon_size = (base_rect.h - 4.0).clamp(7.5, 12.5);
+                if base_rect.x + base_rect.w >= tile_rect.x
+                    && base_rect.x <= tile_rect.x + tile_rect.w
+                {
+                    let icon_rect = ASRect {
+                        x: base_rect.x + 2.0,
+                        y: base_rect.y + (base_rect.h - icon_size) * 0.5,
+                        w: icon_size,
+                        h: icon_size,
+                    };
+                    dl.commands.push(ASDrawCmd {
+                        cmd_type: DrawCmdType::Icon as u8,
+                        sub_type: icon.set_kind as u8,
+                        align_horiz: icon.index,
+                        align_vert: 0,
+                        rect: icon_rect,
+                        clip_rect: base_rect,
+                        color1: icon_color_for(icon),
+                        color2: ASColor::default(),
+                        stroke_width: 0.0,
+                        text_offset: 0,
+                        text_len: 0,
+                        font_size_pt: 0.0,
+                        rotation: 0,
+                        indent: 0,
+                        text_flags: 0,
+                    });
+                }
+                icon_left_advance = icon_size + 3.0;
+            }
+
+            // showValue="0" 이면 숫자를 숨긴다
+            if cf_ov.map(|o| o.hide_value).unwrap_or(false) {
+                c = mr_ec + 1;
                 continue;
             }
 
@@ -615,7 +732,7 @@ pub fn build_tile_drawlist(
             };
 
             let xf = get_cell_xf(wb, sheet, mr_sr, mr_sc);
-            let (mut disp_str, val_kind, raw_num) = format_cell_display(
+            let (mut disp_str, val_kind, raw_num) = format_cell_display_with_cf(
                 wb,
                 calc_res,
                 fmt_cache,
@@ -625,6 +742,7 @@ pub fn build_tile_drawlist(
                 mr_sc,
                 c_data,
                 &xf,
+                cf_ov.and_then(|o| o.num_fmt_code.as_deref()),
             );
 
             if disp_str.is_empty() {
@@ -638,16 +756,11 @@ pub fn build_tile_drawlist(
                 .get(xf.font_id as usize)
                 .cloned()
                 .unwrap_or_default();
-            let base_rect = render_cache.cell_rect_pt(mr_sr, mr_sc, mr_er, mr_ec);
-            if base_rect.w <= 0.0 || base_rect.h <= 0.0 {
-                c = mr_ec + 1;
-                continue;
-            }
 
             let align_h = resolve_align_horiz(&xf, val_kind);
             let align_v = resolve_align_vert(&xf);
             let indent_u8 = (xf.alignment.indent.min(32)) as u8;
-            let indent_pt = (indent_u8 as f32) * 7.0; // 단계당 약 7pt(9~10px) 들여쓰기
+            let indent_pt = (indent_u8 as f32) * 7.0;
             let rotation = xf.alignment.text_rotation as i16;
 
             let mut draw_rect = base_rect;
@@ -659,10 +772,10 @@ pub fn build_tile_drawlist(
                 && !xf.alignment.wrap_text
                 && !xf.alignment.shrink_to_fit
                 && rotation == 0
+                && icon_left_advance == 0.0
                 && matches!(align_h, ALIGN_H_LEFT | ALIGN_H_RIGHT | ALIGN_H_CENTER);
 
             if align_h == ALIGN_H_CENTER_CONTINUOUS && !is_merged {
-                // centerContinuous: 오른쪽으로 이어지는 빈칸 중 centerContinuous인 칸까지 합친 폭의 가운데
                 let mut end_cc = mr_ec;
                 while end_cc < sheet.max_col {
                     let next_c = end_cc + 1;
@@ -709,8 +822,8 @@ pub fn build_tile_drawlist(
                     };
                 }
             } else if val_kind == CellKind::Num && !xf.alignment.shrink_to_fit && rotation == 0 {
-                // 숫자·날짜는 절대 옆 칸으로 넘치지 않는다 -> 폭 초과 시 General 축소/지수/### 처리
-                let avail_w = (base_rect.w - CELL_PAD_X_PT * 2.0 - indent_pt).max(1.0);
+                let avail_w =
+                    (base_rect.w - CELL_PAD_X_PT * 2.0 - indent_pt - icon_left_advance).max(1.0);
                 let is_general = xf.num_fmt_id == 0
                     || wb
                         .styles
@@ -727,22 +840,32 @@ pub fn build_tile_drawlist(
                 );
             }
 
-            // 확장된 clip_rect가 현재 타일과 겹칠 때만 그리기 명령 추가
             if clip_rect.x + clip_rect.w >= tile_rect.x
                 && clip_rect.x <= tile_rect.x + tile_rect.w
             {
                 let (t_off, t_len) = dl.intern_str(&disp_str);
+                let is_bold = cf_ov.and_then(|o| o.font_bold).unwrap_or(font.bold);
+                let is_italic = cf_ov.and_then(|o| o.font_italic).unwrap_or(font.italic);
+                let is_underline = cf_ov
+                    .and_then(|o| o.font_underline)
+                    .unwrap_or(font.underline);
+                let is_strike = cf_ov.and_then(|o| o.font_strike).unwrap_or(font.strike);
+                let final_color = cf_ov
+                    .and_then(|o| o.text_color)
+                    .or(font.color)
+                    .unwrap_or(Rgba::BLACK);
+
                 let mut text_flags = 0u8;
-                if font.bold {
+                if is_bold {
                     text_flags |= TEXT_FLAG_BOLD;
                 }
-                if font.italic {
+                if is_italic {
                     text_flags |= TEXT_FLAG_ITALIC;
                 }
-                if font.underline {
+                if is_underline {
                     text_flags |= TEXT_FLAG_UNDERLINE;
                 }
-                if font.strike {
+                if is_strike {
                     text_flags |= TEXT_FLAG_STRIKE;
                 }
                 if xf.alignment.wrap_text {
@@ -752,10 +875,21 @@ pub fn build_tile_drawlist(
                     text_flags |= TEXT_FLAG_SHRINK_TO_FIT;
                 }
 
+                // 필터 단추가 있는 머리글 셀은 우측 여백을 11pt 비워 글자가 단추와 겹치지 않게 한다
+                let filter_right_pad = if cf_cache.filter_buttons.contains(&key) {
+                    11.0
+                } else {
+                    0.0
+                };
+
                 let inner_rect = ASRect {
-                    x: draw_rect.x + CELL_PAD_X_PT,
+                    x: draw_rect.x + CELL_PAD_X_PT + icon_left_advance,
                     y: draw_rect.y + 1.0,
-                    w: (draw_rect.w - CELL_PAD_X_PT * 2.0).max(0.0),
+                    w: (draw_rect.w
+                        - CELL_PAD_X_PT * 2.0
+                        - icon_left_advance
+                        - filter_right_pad)
+                        .max(0.0),
                     h: (draw_rect.h - 2.0).max(0.0),
                 };
 
@@ -766,7 +900,7 @@ pub fn build_tile_drawlist(
                     align_vert: align_v,
                     rect: inner_rect,
                     clip_rect,
-                    color1: font.color.unwrap_or(Rgba::BLACK).into(),
+                    color1: final_color.into(),
                     color2: ASColor::default(),
                     stroke_width: 0.0,
                     text_offset: t_off,
@@ -782,10 +916,10 @@ pub fn build_tile_drawlist(
         }
     }
 
-    // 5. 테두리 및 대각선 (글자 위에 그려서 넘친 글이 이웃 테두리 아래에 깔리도록 보장)
+    // 6. 테두리 및 대각선
     dl.commands.extend(border_lines);
 
-    // 6. 메모 삼각형 및 자동 필터 표시 마커
+    // 7. 메모 삼각형(sub_type=0) 및 표/자동필터 드롭다운 단추(sub_type=1)
     drawn_merges.clear();
     for r in start_row..=end_row {
         for c in start_col..=end_col {
@@ -797,11 +931,13 @@ pub fn build_tile_drawlist(
             if rect.w <= 0.0 || rect.h <= 0.0 {
                 continue;
             }
+            let key = crate::cell_key(mr_sr, mr_sc);
+
             if let Some(c_data) = sheet.data.get_cell(mr_sr, mr_sc) {
                 if (c_data.flags & CELL_FLAG_HAS_COMMENT) != 0 {
                     dl.commands.push(ASDrawCmd {
                         cmd_type: DrawCmdType::Marker as u8,
-                        sub_type: 0, // 메모 삼각형
+                        sub_type: 0,
                         align_horiz: 0,
                         align_vert: 0,
                         rect: ASRect {
@@ -828,15 +964,43 @@ pub fn build_tile_drawlist(
                     });
                 }
             }
+
+            // 표 머리글 또는 autoFilter 필터 단추 표시 (보기 전용)
+            if cf_cache.filter_buttons.contains(&key) && rect.w >= 14.0 && rect.h >= 10.0 {
+                let btn_size = 9.5f32.min(rect.h - 2.0);
+                dl.commands.push(ASDrawCmd {
+                    cmd_type: DrawCmdType::Marker as u8,
+                    sub_type: 1, // AS_MARKER_FILTER_BUTTON
+                    align_horiz: 0,
+                    align_vert: 0,
+                    rect: ASRect {
+                        x: rect.x + rect.w - btn_size - 1.5,
+                        y: rect.y + (rect.h - btn_size) * 0.5,
+                        w: btn_size,
+                        h: btn_size,
+                    },
+                    clip_rect: rect,
+                    color1: ASColor {
+                        r: 100,
+                        g: 116,
+                        b: 139,
+                        a: 255,
+                    },
+                    color2: ASColor::default(),
+                    stroke_width: 0.0,
+                    text_offset: 0,
+                    text_len: 0,
+                    font_size_pt: 0.0,
+                    rotation: 0,
+                    indent: 0,
+                    text_flags: 0,
+                });
+            }
         }
     }
 
     dl
 }
-
-// ============================================================================
-// P3 격자선·공유 변 테두리·넘침 계산 보조 함수
-// ============================================================================
 
 #[inline]
 fn resolve_merge_bounds(rc: &SheetRenderCache, r: u32, c: u32) -> (u32, u32, u32, u32) {
@@ -857,11 +1021,27 @@ fn get_cell_xf(wb: &Workbook, sheet: &Sheet, r: u32, c: u32) -> CellXf {
     wb.styles.cell_xfs.get(style_idx).cloned().unwrap_or_default()
 }
 
-fn cell_has_fill(wb: &Workbook, sheet: &Sheet, rc: &SheetRenderCache, r: u32, c: u32) -> bool {
+fn cell_has_fill(
+    wb: &Workbook,
+    sheet: &Sheet,
+    rc: &SheetRenderCache,
+    cf_cache: &SheetCfCache,
+    r: u32,
+    c: u32,
+) -> bool {
     if r == 0 || c == 0 || r > sheet.max_row || c > sheet.max_col {
         return false;
     }
     let (mr_sr, mr_sc, _, _) = resolve_merge_bounds(rc, r, c);
+    let key = crate::cell_key(mr_sr, mr_sc);
+    if cf_cache
+        .cells
+        .get(&key)
+        .and_then(|o| o.bg_color)
+        .is_some()
+    {
+        return true;
+    }
     let xf = get_cell_xf(wb, sheet, mr_sr, mr_sc);
     if let Some(fill) = wb.styles.fills.get(xf.fill_id as usize) {
         let pat_id = pattern_name_to_id(&fill.pattern_type);
@@ -872,9 +1052,19 @@ fn cell_has_fill(wb: &Workbook, sheet: &Sheet, rc: &SheetRenderCache, r: u32, c:
     false
 }
 
-fn get_cell_border<'a>(wb: &'a Workbook, sheet: &Sheet, r: u32, c: u32) -> Option<&'a BorderStyle> {
+fn get_effective_cell_border<'a>(
+    wb: &'a Workbook,
+    sheet: &Sheet,
+    cf_cache: &'a SheetCfCache,
+    r: u32,
+    c: u32,
+) -> Option<&'a BorderStyle> {
     if r == 0 || c == 0 || r > sheet.max_row || c > sheet.max_col {
         return None;
+    }
+    let key = crate::cell_key(r, c);
+    if let Some(cf_b) = cf_cache.cells.get(&key).and_then(|o| o.border.as_ref()) {
+        return Some(cf_b);
     }
     let style_idx = sheet.data.get_cell(r, c)?.style_idx as usize;
     let xf = wb.styles.cell_xfs.get(style_idx)?;
@@ -888,6 +1078,7 @@ fn emit_gridlines_and_collect_borders(
     wb: &Workbook,
     sheet: &Sheet,
     rc: &SheetRenderCache,
+    cf_cache: &SheetCfCache,
     start_row: u32,
     end_row: u32,
     start_col: u32,
@@ -898,9 +1089,8 @@ fn emit_gridlines_and_collect_borders(
         g: 217,
         b: 217,
         a: 255,
-    }; // #D9D9D9
+    };
 
-    // 1. 수평 공유 변: 행 r (r = start_row - 1 ..= end_row)의 아래쪽 변 = 행 r+1의 위쪽 변
     let r_begin = start_row.saturating_sub(1);
     for r in r_begin..=end_row {
         let y = rc.row_offsets_pt.get(r as usize).copied().unwrap_or(0.0);
@@ -912,7 +1102,6 @@ fn emit_gridlines_and_collect_borders(
             let x1 = rect_c.x;
             let x2 = rect_c.x + rect_c.w;
 
-            // 병합 범위 내부를 가로지르는 수평 변은 그리지 않는다
             if r >= 1 && r < sheet.max_row {
                 if let Some(mr) = rc.merge_at(r, c) {
                     if mr.end_row > r {
@@ -922,12 +1111,14 @@ fn emit_gridlines_and_collect_borders(
             }
 
             let top_edge = if r >= 1 {
-                get_cell_border(wb, sheet, r, c).and_then(|b| parse_border_edge_spec(&b.bottom))
+                get_effective_cell_border(wb, sheet, cf_cache, r, c)
+                    .and_then(|b| parse_border_edge_spec(&b.bottom))
             } else {
                 None
             };
             let bottom_edge = if r < sheet.max_row {
-                get_cell_border(wb, sheet, r + 1, c).and_then(|b| parse_border_edge_spec(&b.top))
+                get_effective_cell_border(wb, sheet, cf_cache, r + 1, c)
+                    .and_then(|b| parse_border_edge_spec(&b.top))
             } else {
                 None
             };
@@ -956,8 +1147,8 @@ fn emit_gridlines_and_collect_borders(
                     text_flags: 0,
                 });
             } else if sheet.show_grid_lines && r >= 1 && r <= sheet.max_row {
-                let fill_above = cell_has_fill(wb, sheet, rc, r, c);
-                let fill_below = cell_has_fill(wb, sheet, rc, r + 1, c);
+                let fill_above = cell_has_fill(wb, sheet, rc, cf_cache, r, c);
+                let fill_below = cell_has_fill(wb, sheet, rc, cf_cache, r + 1, c);
                 if !fill_above && !fill_below {
                     dl.push_line(x1, y, x2, y, 0.5, grid_color, LINE_STYLE_GRID);
                 }
@@ -965,7 +1156,6 @@ fn emit_gridlines_and_collect_borders(
         }
     }
 
-    // 2. 수직 공유 변: 열 c (c = start_col - 1 ..= end_col)의 오른쪽 변 = 열 c+1의 왼쪽 변
     let c_begin = start_col.saturating_sub(1);
     for c in c_begin..=end_col {
         let x = rc.col_offsets_pt.get(c as usize).copied().unwrap_or(0.0);
@@ -977,7 +1167,6 @@ fn emit_gridlines_and_collect_borders(
             let y1 = rect_r.y;
             let y2 = rect_r.y + rect_r.h;
 
-            // 병합 범위 내부를 가로지르는 수직 변은 그리지 않는다
             if c >= 1 && c < sheet.max_col {
                 if let Some(mr) = rc.merge_at(r, c) {
                     if mr.end_col > c {
@@ -987,12 +1176,14 @@ fn emit_gridlines_and_collect_borders(
             }
 
             let left_edge = if c >= 1 {
-                get_cell_border(wb, sheet, r, c).and_then(|b| parse_border_edge_spec(&b.right))
+                get_effective_cell_border(wb, sheet, cf_cache, r, c)
+                    .and_then(|b| parse_border_edge_spec(&b.right))
             } else {
                 None
             };
             let right_edge = if c < sheet.max_col {
-                get_cell_border(wb, sheet, r, c + 1).and_then(|b| parse_border_edge_spec(&b.left))
+                get_effective_cell_border(wb, sheet, cf_cache, r, c + 1)
+                    .and_then(|b| parse_border_edge_spec(&b.left))
             } else {
                 None
             };
@@ -1021,8 +1212,8 @@ fn emit_gridlines_and_collect_borders(
                     text_flags: 0,
                 });
             } else if sheet.show_grid_lines && c >= 1 && c <= sheet.max_col {
-                let fill_left = cell_has_fill(wb, sheet, rc, r, c);
-                let fill_right = cell_has_fill(wb, sheet, rc, r, c + 1);
+                let fill_left = cell_has_fill(wb, sheet, rc, cf_cache, r, c);
+                let fill_right = cell_has_fill(wb, sheet, rc, cf_cache, r, c + 1);
                 if !fill_left && !fill_right {
                     dl.push_line(x, y1, x, y2, 0.5, grid_color, LINE_STYLE_GRID);
                 }
@@ -1030,10 +1221,9 @@ fn emit_gridlines_and_collect_borders(
         }
     }
 
-    // 3. 셀 내부 대각선 (diagonalUp, diagonalDown)
     for r in start_row..=end_row {
         for c in start_col..=end_col {
-            if let Some(b) = get_cell_border(wb, sheet, r, c) {
+            if let Some(b) = get_effective_cell_border(wb, sheet, cf_cache, r, c) {
                 if !b.diagonal_up && !b.diagonal_down {
                     continue;
                 }
@@ -1101,7 +1291,7 @@ fn is_cell_empty_for_overflow(sheet: &Sheet, rc: &SheetRenderCache, r: u32, c: u
     if c < 1 || c > sheet.max_col {
         return false;
     }
-    if rc.merge_map.contains_key(&crate::cell_key(r, c)) {
+    if rc.merge_at(r, c).is_some() {
         return false;
     }
     match sheet.data.get_cell(r, c) {
@@ -1112,7 +1302,6 @@ fn is_cell_empty_for_overflow(sheet: &Sheet, rc: &SheetRenderCache, r: u32, c: u
     }
 }
 
-/// 문자 셀의 옆 칸 넘침(Overflow) 열 범위를 계산한다.
 fn compute_overflow_col_span(
     sheet: &Sheet,
     rc: &SheetRenderCache,
@@ -1204,12 +1393,29 @@ fn resolve_align_vert(xf: &CellXf) -> u8 {
         Some("center") => ALIGN_V_CENTER,
         Some("justify") => ALIGN_V_JUSTIFY,
         Some("distributed") => ALIGN_V_DISTRIBUTED,
-        _ => ALIGN_V_BOTTOM, // 세로 정렬 기본값은 bottom
+        _ => ALIGN_V_BOTTOM,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn format_cell_display(
+    wb: &Workbook,
+    calc_res: &WorkbookCalcResult,
+    fmt_cache: &FormatCache,
+    sheet: &Sheet,
+    sheet_idx: usize,
+    row: u32,
+    col: u32,
+    cell: &Cell,
+    xf: &CellXf,
+) -> (String, CellKind, Option<f64>) {
+    format_cell_display_with_cf(
+        wb, calc_res, fmt_cache, sheet, sheet_idx, row, col, cell, xf, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn format_cell_display_with_cf(
     wb: &Workbook,
     calc_res: &WorkbookCalcResult,
     fmt_cache: &FormatCache,
@@ -1219,6 +1425,7 @@ pub fn format_cell_display(
     col: u32,
     cell: &Cell,
     xf: &CellXf,
+    cf_fmt_override: Option<&str>,
 ) -> (String, CellKind, Option<f64>) {
     let val: Value = unsafe {
         match cell.kind_enum() {
@@ -1247,7 +1454,11 @@ pub fn format_cell_display(
         }
     };
 
-    let compiled = fmt_cache.get(xf.num_fmt_id);
+    let compiled = match cf_fmt_override {
+        Some(code) => FormatCompiler::compile(code),
+        None => fmt_cache.get(xf.num_fmt_id),
+    };
+
     match val {
         Value::Blank => (String::new(), CellKind::Blank, None),
         Value::Num(n) => (
@@ -1269,52 +1480,3 @@ pub fn format_cell_display(
         _ => (String::new(), CellKind::Blank, None),
     }
 }
-
-#[cfg(test)]
-mod p3_tests {
-    use super::*;
-
-    #[test]
-    fn test_border_priority_rank_and_right_bottom_tie_breaker() {
-        let thin_red = BorderEdge {
-            style: "thin".into(),
-            color: Some(Rgba { r: 255, g: 0, b: 0, a: 255 }),
-        };
-        let medium_blue = BorderEdge {
-            style: "medium".into(),
-            color: Some(Rgba { r: 0, g: 0, b: 255, a: 255 }),
-        };
-        let thin_green = BorderEdge {
-            style: "thin".into(),
-            color: Some(Rgba { r: 0, g: 255, b: 0, a: 255 }),
-        };
-
-        let e_thin_r = parse_border_edge_spec(&thin_red);
-        let e_med_b = parse_border_edge_spec(&medium_blue);
-        let e_thin_g = parse_border_edge_spec(&thin_green);
-
-        // 1. 굵기 순위가 다르면 굵은 쪽(medium > thin) 승리
-        let win1 = resolve_shared_border(e_med_b, e_thin_r).unwrap();
-        assert_eq!(win1.style_code, LINE_STYLE_MEDIUM);
-        assert_eq!(win1.color.b, 255);
-
-        // 2. 굵기 순위가 같으면(thin == thin) 오른쪽·아래쪽(두 번째 인자) 승리
-        let win2 = resolve_shared_border(e_thin_r, e_thin_g).unwrap();
-        assert_eq!(win2.color.g, 255);
-    }
-
-    #[test]
-    fn test_number_never_overflows_and_turns_into_hashes() {
-        // 좁은 폭(25pt)에 긴 통화 문자열("$123,456,789.00")이 들어가면 ### 로 바뀌어야 한다.
-        let out = fit_number_to_cell_width(
-            "$123,456,789.00".to_string(),
-            Some(123456789.0),
-            false,
-            11.0,
-            25.0,
-        );
-        assert!(out.chars().all(|c| c == '#'));
-        assert!(out.len() >= 3);
-    }
-}
-

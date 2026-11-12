@@ -64,6 +64,7 @@ typedef struct ASHit {
     uint32_t col;
 } ASHit;
 
+// 그리기 명령 종류 (P4: AS_CMD_BAR, AS_CMD_ICON 추가)
 typedef enum ASDrawCmdType {
     AS_CMD_FILL     = 0,
     AS_CMD_GRADIENT = 1,
@@ -71,27 +72,48 @@ typedef enum ASDrawCmdType {
     AS_CMD_LINE     = 3,
     AS_CMD_TEXT     = 4,
     AS_CMD_MARKER   = 5,
+    AS_CMD_BAR      = 6, // 조건부 서식 데이터 막대 (color1=막대색, color2=축색, stroke_width=축 X좌표 pt)
+    AS_CMD_ICON     = 7, // 조건부 서식 벡터 아이콘 (sub_type=아이콘셋 종류, align_horiz=방향/단계 번호)
 } ASDrawCmdType;
+
+// 마커 하위 종류 (AS_CMD_MARKER 의 sub_type)
+typedef enum ASMarkerSubType {
+    AS_MARKER_COMMENT       = 0, // 우상단 빨간 메모 삼각형
+    AS_MARKER_FILTER_BUTTON = 1, // 표(Table) 머리글 우하단 드롭다운 화살표 단추 (보기 전용)
+} ASMarkerSubType;
+
+// 벡터 아이콘 집합 종류 (AS_CMD_ICON 의 sub_type)
+typedef enum ASIconSetType {
+    AS_ICONSET_3ARROWS       = 0, // 0=아래(빨강), 1=오른쪽(노랑), 2=위(초록)
+    AS_ICONSET_3ARROWS_GRAY  = 1,
+    AS_ICONSET_3TRAFFIC1     = 2, // 신호등 원형
+    AS_ICONSET_3SIGNS        = 3, // 다이아몬드/삼각형/원
+    AS_ICONSET_3SYMBOLS      = 4, // X / ! / V
+    AS_ICONSET_3FLAGS        = 5, // 깃발
+    AS_ICONSET_3TRIANGLES    = 6,
+    AS_ICONSET_4ARROWS       = 7, // 0=아래, 1=우하향, 2=우상향, 3=위
+    AS_ICONSET_5ARROWS       = 8, // 0=아래, 1=우하향, 2=오른쪽, 3=우상향, 4=위
+} ASIconSetType;
 
 // 선 스타일 (13종 + 격자선 0)
 typedef enum ASLineStyle {
-    AS_LINE_GRID             = 0,
-    AS_LINE_HAIR             = 1,
-    AS_LINE_DOTTED           = 2,
-    AS_LINE_DASH_DOT_DOT     = 3,
-    AS_LINE_DASH_DOT         = 4,
-    AS_LINE_DASHED           = 5,
-    AS_LINE_THIN             = 6,
+    AS_LINE_GRID                = 0,
+    AS_LINE_HAIR                = 1,
+    AS_LINE_DOTTED              = 2,
+    AS_LINE_DASH_DOT_DOT        = 3,
+    AS_LINE_DASH_DOT            = 4,
+    AS_LINE_DASHED              = 5,
+    AS_LINE_THIN                = 6,
     AS_LINE_MEDIUM_DASH_DOT_DOT = 7,
-    AS_LINE_SLANT_DASH_DOT   = 8,
-    AS_LINE_MEDIUM_DASH_DOT  = 9,
-    AS_LINE_MEDIUM_DASHED    = 10,
-    AS_LINE_MEDIUM           = 11,
-    AS_LINE_DOUBLE           = 12,
-    AS_LINE_THICK            = 13,
+    AS_LINE_SLANT_DASH_DOT      = 8,
+    AS_LINE_MEDIUM_DASH_DOT     = 9,
+    AS_LINE_MEDIUM_DASHED       = 10,
+    AS_LINE_MEDIUM              = 11,
+    AS_LINE_DOUBLE              = 12,
+    AS_LINE_THICK               = 13,
 } ASLineStyle;
 
-// 가로 정렬 (P3 전체 규격)
+// 가로 정렬
 typedef enum ASAlignHoriz {
     AS_ALIGN_H_LEFT              = 0,
     AS_ALIGN_H_CENTER            = 1,
@@ -111,7 +133,6 @@ typedef enum ASAlignVert {
     AS_ALIGN_V_DISTRIBUTED = 4,
 } ASAlignVert;
 
-// 텍스트 속성 비트 플래그
 #define AS_TEXT_FLAG_BOLD          (1u << 0)
 #define AS_TEXT_FLAG_ITALIC        (1u << 1)
 #define AS_TEXT_FLAG_UNDERLINE     (1u << 2)
@@ -135,14 +156,14 @@ typedef struct ASColor {
 
 typedef struct ASDrawCmd {
     uint8_t  cmd_type;     // ASDrawCmdType
-    uint8_t  sub_type;     // ASLineStyle / Pattern ID / Marker ID(0=comment, 1=filter)
-    uint8_t  align_horiz;  // ASAlignHoriz
-    uint8_t  align_vert;   // ASAlignVert
-    ASRect   rect;         // Line일 때: (x=x1, y=y1, w=x2, h=y2), Text일 때: 여백/넘침 적용된 텍스트 박스
-    ASRect   clip_rect;    // Text 클리핑 사각형 (넘친 빈 칸까지 확장된 영역)
-    ASColor  color1;
-    ASColor  color2;
-    float    stroke_width;
+    uint8_t  sub_type;     // ASLineStyle / Pattern ID / ASMarkerSubType / ASIconSetType
+    uint8_t  align_horiz;  // ASAlignHoriz (AS_CMD_ICON 일 때는 아이콘 단계 인덱스 0..4)
+    uint8_t  align_vert;   // ASAlignVert  (AS_CMD_BAR 일 때는 축 표시 여부: 0=축없음, 1=점선축표시)
+    ASRect   rect;         // Line: (x1,y1,x2,y2), Bar: 막대 사각형, Icon: 아이콘 사각형, Text: 텍스트 박스
+    ASRect   clip_rect;    // 클리핑 영역 (시트 pt)
+    ASColor  color1;       // 주 색상 (Bar: 막대 채우기 색, Icon: 아이콘 색)
+    ASColor  color2;       // 보조 색상 (Bar: 기준축 색, Pattern: 배경색)
+    float    stroke_width; // Line: 선 두께(pt), Bar: 기준축의 시트 X 좌표(pt)
     uint32_t text_offset;
     uint32_t text_len;
     float    font_size_pt;

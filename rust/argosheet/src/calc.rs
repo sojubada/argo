@@ -910,6 +910,94 @@ fn evaluate_workbook_on_this_thread(wb: &Workbook) -> WorkbookCalcResult {
     }
 }
 
+/// 큰 스택(64MB) 스레드에서 f 를 돌린다. 수식 계산은 재귀가 깊어 tvOS 보조 스레드의
+/// 기본 스택(512KB)에서는 넘칠 수 있다. 스레드를 못 만들거나 f 가 패닉하면 None.
+pub fn run_on_big_stack<T: Send>(f: impl FnOnce() -> T + Send) -> Option<T> {
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .name("argosheet-work".into())
+            .stack_size(CALC_STACK_BYTES)
+            .spawn_scoped(s, f)
+            .ok()
+            .and_then(|h| h.join().ok())
+    })
+}
+
+struct StandaloneState {
+    values: HashMap<CellAddr, Value>,
+    defined_ast: HashMap<String, (Option<usize>, Expr)>,
+}
+
+thread_local! {
+    static STANDALONE: std::cell::RefCell<Option<StandaloneState>> = const { std::cell::RefCell::new(None) };
+}
+
+/// 조건부 서식처럼 "시트 밖 수식"을 여러 번 계산할 때 여는 세션.
+/// 계산값 표와 이름 정의를 한 번만 준비해 두고, 닫힐 때(Drop) 버린다.
+/// 세션 없이 eval_standalone_expr 를 부르면 그때마다 준비한다(느리지만 결과는 같다).
+pub struct StandaloneSession;
+
+impl StandaloneSession {
+    pub fn begin(wb: &Workbook, calc_res: &WorkbookCalcResult) -> Self {
+        let state = build_standalone_state(wb, calc_res);
+        STANDALONE.with(|s| *s.borrow_mut() = Some(state));
+        StandaloneSession
+    }
+}
+
+impl Drop for StandaloneSession {
+    fn drop(&mut self) {
+        STANDALONE.with(|s| *s.borrow_mut() = None);
+    }
+}
+
+fn build_standalone_state(wb: &Workbook, calc_res: &WorkbookCalcResult) -> StandaloneState {
+    let mut defined_ast: HashMap<String, (Option<usize>, Expr)> = HashMap::new();
+    for dn in &wb.defined_names {
+        if let Ok(e) = FormulaParser::parse_str(&dn.formula) {
+            defined_ast.insert(
+                dn.name.to_ascii_uppercase(),
+                (dn.local_sheet_id.map(|i| i as usize), e),
+            );
+        }
+    }
+    StandaloneState {
+        values: calc_res.values.clone(),
+        defined_ast,
+    }
+}
+
+/// 조건부 서식(expression, cellIs)에서 이동된 수식 구문 트리를 즉시 계산한다.
+/// 왜: 시트 셀에 저장된 수식과 달리 조건부 서식 수식은 범위 내 각 셀 좌표를 기준으로 상대 평가되어야 한다.
+pub fn eval_standalone_expr(
+    wb: &Workbook,
+    calc_res: &WorkbookCalcResult,
+    caller: CellAddr,
+    expr: &Expr,
+) -> Value {
+    // 세션 상태를 잠깐 꺼내 쓰고 되돌린다(계산 도중 재진입해도 빌림 충돌이 없게).
+    let taken = STANDALONE.with(|s| s.borrow_mut().take());
+    let had_session = taken.is_some();
+    let mut state = taken.unwrap_or_else(|| build_standalone_state(wb, calc_res));
+    let empty_ast: HashMap<CellAddr, Expr> = HashMap::new();
+    let mut warnings = Vec::new();
+    let out = {
+        let mut ev = Evaluator {
+            wb,
+            ast_map: &empty_ast,
+            defined_ast: &state.defined_ast,
+            values: &mut state.values,
+            visiting: HashSet::new(),
+            circular_warnings: &mut warnings,
+        };
+        ev.eval_scalar(caller, expr)
+    };
+    if had_session {
+        STANDALONE.with(|s| *s.borrow_mut() = Some(state));
+    }
+    out
+}
+
 fn contains_dynamic_ref_func(expr: &Expr) -> bool {
     match expr {
         Expr::Func { name, args } => {
@@ -4864,6 +4952,8 @@ mod tests {
             validations: Vec::new(),
             comments: Vec::new(),
             links: HashMap::new(),
+            cf_blocks: Vec::new(),
+            tables: Vec::new(),
         };
 
         Workbook {
@@ -5156,6 +5246,8 @@ mod tests {
             validations: Vec::new(),
             comments: Vec::new(),
             links: HashMap::new(),
+            cf_blocks: Vec::new(),
+            tables: Vec::new(),
         };
 
         Workbook {

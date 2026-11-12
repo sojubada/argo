@@ -19,8 +19,14 @@ impl Rgba {
 
     pub fn from_hex(hex: &str) -> Option<Self> {
         let s = hex.trim().trim_start_matches('#');
-        // 왜: 엑셀 ARGB 8자리에서 앞 2자리 알파가 00으로 잘못 적힌 문서도 엑셀은 불투명으로 그린다.
-        let rgb_str = if s.len() == 8 { &s[2..] } else if s.len() == 6 { s } else { return None };
+        // 왜: 엑셀 ARGB 8자리에서 앞 2자리 알파가 00으로 적힌 문서도 엑셀은 불투명으로 그린다.
+        let rgb_str = if s.len() == 8 {
+            &s[2..]
+        } else if s.len() == 6 {
+            s
+        } else {
+            return None;
+        };
         let val = u32::from_str_radix(rgb_str, 16).ok()?;
         Some(Self {
             r: ((val >> 16) & 0xFF) as u8,
@@ -28,6 +34,15 @@ impl Rgba {
             b: (val & 0xFF) as u8,
             a: 255,
         })
+    }
+
+    /// 두 색상 사이를 `t` (0.0 ~ 1.0) 비율로 RGB 선형 보간한다.
+    pub fn lerp(a: Self, b: Self, t: f64) -> Self {
+        let tc = t.clamp(0.0, 1.0);
+        let r = (a.r as f64 + (b.r as f64 - a.r as f64) * tc).round().clamp(0.0, 255.0) as u8;
+        let g = (a.g as f64 + (b.g as f64 - a.g as f64) * tc).round().clamp(0.0, 255.0) as u8;
+        let bl = (a.b as f64 + (b.b as f64 - a.b as f64) * tc).round().clamp(0.0, 255.0) as u8;
+        Self { r, g, b: bl, a: 255 }
     }
 }
 
@@ -45,14 +60,13 @@ pub fn indexed_color(index: u32) -> Option<Rgba> {
     ];
     match index {
         0..=63 => Rgba::from_hex(TABLE[index as usize]),
-        64 => Some(Rgba::BLACK), // 시스템 전경
-        65 => Some(Rgba::WHITE), // 시스템 배경
+        64 => Some(Rgba::BLACK),
+        65 => Some(Rgba::WHITE),
         _ => None,
     }
 }
 
 /// minipdf/src/xlsx.rs 에서 옮긴 HLS 기반 밝기 보정(tint) 계산 함수.
-/// 왜: 엑셀의 테마 색 tint는 RGB 단순 가감이 아니라 HLS 색공간의 Luminance(L) 채널만 선형 보간한다.
 pub fn apply_color_tint(color: Rgba, tint: f64) -> Rgba {
     if tint.abs() < 1e-9 {
         return color;
@@ -136,8 +150,6 @@ fn hls_to_rgb(h: f64, l: f64, s: f64) -> (u8, u8, u8) {
 }
 
 /// minipdf/src/xlsx.rs 에서 옮긴 열 너비(문자 단위) -> 엑셀 pt 환산 함수.
-/// 왜: 엑셀의 열 너비는 기본 글꼴 최대 숫자 폭(MDW, 96dpi 픽셀)을 기준으로 픽셀로 먼저 환산한 뒤
-/// 0.75를 곱해 pt로 바꾼다. 임의 상수를 곱하면 그림/차트 앵커와 셀 경계가 어긋난다.
 pub fn excel_column_width_to_points_with_mdw(width_chars: f32, mdw_px: f32) -> f32 {
     if width_chars <= 0.0 || mdw_px <= 0.0 {
         return 0.0;
@@ -146,11 +158,7 @@ pub fn excel_column_width_to_points_with_mdw(width_chars: f32, mdw_px: f32) -> f
     px * 0.75
 }
 
-/// Normal 스타일 글꼴 크기(pt)로부터 기본 최대 숫자 폭(MDW, 96dpi px)을 산출한다.
 pub fn excel_max_digit_width(font_name: &str, font_size_pt: f32) -> f32 {
-    // MDW 는 Normal 글꼴로 '0' 을 그렸을 때의 픽셀 폭(96dpi)이다. 엑셀이 열 너비를
-    // 픽셀로 바꿀 때 쓰는 값이라 1px 만 틀려도 열 폭이 어긋난다.
-    // 아래 값은 널리 알려진 실측값이다. 모르는 글꼴·크기는 11pt 7px 비례로 본다.
     let lower = font_name.to_ascii_lowercase();
     let known = [
         ("calibri", 11.0, 7.0),
@@ -167,14 +175,11 @@ pub fn excel_max_digit_width(font_name: &str, font_size_pt: f32) -> f32 {
     (font_size_pt * 7.0 / 11.0).round().max(5.0)
 }
 
-/// 기본 열 너비(문자 단위)가 명시되지 않았을 때 baseColWidth(기본 8)로부터 계산한다.
 pub fn default_column_width_chars(base_col_width: f32, mdw_px: f32) -> f32 {
     (((base_col_width * mdw_px + 5.0) / mdw_px) * 256.0).trunc() / 256.0
 }
 
-/// minipdf/src/xlsx.rs 에서 옮긴 테마 색상 파서.
-/// 왜: theme1.xml의 clrScheme은 dk1, lt1, dk2, lt2 순서로 적혀 있으나,
-/// styles.xml의 theme="0"은 lt1, "1"은 dk1, "2"는 lt2, "3"은 dk2를 가리키므로 앞 두 쌍을 맞바꿔야 한다.
+/// minipdf/src/xlsx.rs 에서 옮긴 테마 색상 파서 (0↔1, 2↔3 보정 포함).
 pub fn read_theme_colors<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     theme_path: &str,
@@ -206,7 +211,6 @@ pub fn read_theme_colors<R: Read + Seek>(
     let mut current_slot: Option<usize> = None;
     let mut palette = default_palette;
 
-    // 주의: theme 번호 매핑 (lt1=0, dk1=1, lt2=2, dk2=3)
     fn slot_index(tag: &[u8]) -> Option<usize> {
         match tag {
             b"lt1" => Some(0),
@@ -320,6 +324,10 @@ pub struct FontStyle {
     pub underline: bool,
     pub strike: bool,
     pub color: Option<Rgba>,
+    pub has_bold: bool,
+    pub has_italic: bool,
+    pub has_underline: bool,
+    pub has_strike: bool,
 }
 
 impl Default for FontStyle {
@@ -332,6 +340,10 @@ impl Default for FontStyle {
             underline: false,
             strike: false,
             color: None,
+            has_bold: false,
+            has_italic: false,
+            has_underline: false,
+            has_strike: false,
         }
     }
 }
@@ -341,6 +353,17 @@ pub struct FillStyle {
     pub pattern_type: String,
     pub fg_color: Option<Rgba>,
     pub bg_color: Option<Rgba>,
+}
+
+impl FillStyle {
+    /// dxf(조건부 서식·표 스타일)에서 단색 배경색을 꺼낸다.
+    /// 왜: 일반 셀 채우기는 fgColor에 색을 넣지만, dxf는 bgColor에 단색을 넣는 경우가 많다.
+    pub fn dxf_solid_color(&self) -> Option<Rgba> {
+        if self.pattern_type == "none" {
+            return None;
+        }
+        self.bg_color.or(self.fg_color)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -384,6 +407,7 @@ pub struct DxfStyle {
     pub font: Option<FontStyle>,
     pub fill: Option<FillStyle>,
     pub border: Option<BorderStyle>,
+    pub num_fmt_id: Option<u32>,
     pub num_fmt_code: Option<String>,
 }
 
@@ -396,6 +420,7 @@ pub struct StyleSheet {
     pub cell_xfs: Vec<CellXf>,
     pub dxfs: Vec<DxfStyle>,
     pub theme_colors: Vec<Rgba>,
+    pub custom_indexed: Vec<Rgba>,
     pub mdw_px: f32,
 }
 
@@ -409,12 +434,12 @@ impl StyleSheet {
             cell_xfs: vec![CellXf::default()],
             dxfs: Vec::new(),
             theme_colors,
+            custom_indexed: Vec::new(),
             mdw_px: 7.0,
         }
     }
 }
 
-/// `xl/styles.xml`을 스트리밍으로 읽어 StyleSheet 모델을 만든다.
 pub fn parse_styles_xml<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     styles_path: &str,
@@ -434,7 +459,6 @@ pub fn parse_styles_xml<R: Read + Seek>(
     sheet.borders.clear();
     sheet.cell_xfs.clear();
 
-    let mut custom_indexed: Vec<Rgba> = Vec::new();
     let mut in_cell_xfs = false;
     let mut in_dxfs = false;
 
@@ -453,6 +477,7 @@ pub fn parse_styles_xml<R: Read + Seek>(
                     b"numFmt" => {
                         if let Some((id, code)) = parse_num_fmt_attrs(&e) {
                             if let Some(dxf) = cur_dxf.as_mut() {
+                                dxf.num_fmt_id = Some(id);
                                 dxf.num_fmt_code = Some(code);
                             } else {
                                 sheet.num_fmts.insert(id, code);
@@ -474,13 +499,13 @@ pub fn parse_styles_xml<R: Read + Seek>(
                     b"fgColor" => {
                         if let Some(fill) = cur_fill.as_mut() {
                             let spec = parse_color_attrs(&e);
-                            fill.fg_color = spec.resolve(&sheet.theme_colors, &custom_indexed);
+                            fill.fg_color = spec.resolve(&sheet.theme_colors, &sheet.custom_indexed);
                         }
                     }
                     b"bgColor" => {
                         if let Some(fill) = cur_fill.as_mut() {
                             let spec = parse_color_attrs(&e);
-                            fill.bg_color = spec.resolve(&sheet.theme_colors, &custom_indexed);
+                            fill.bg_color = spec.resolve(&sheet.theme_colors, &sheet.custom_indexed);
                         }
                     }
                     b"border" => {
@@ -516,7 +541,7 @@ pub fn parse_styles_xml<R: Read + Seek>(
                     }
                     b"color" => {
                         let spec = parse_color_attrs(&e);
-                        let resolved = spec.resolve(&sheet.theme_colors, &custom_indexed);
+                        let resolved = spec.resolve(&sheet.theme_colors, &sheet.custom_indexed);
                         if let Some(font) = cur_font.as_mut() {
                             font.color = resolved;
                         } else if let (Some(border), Some(edge_tag)) =
@@ -552,6 +577,7 @@ pub fn parse_styles_xml<R: Read + Seek>(
                     b"numFmt" => {
                         if let Some((id, code)) = parse_num_fmt_attrs(&e) {
                             if let Some(dxf) = cur_dxf.as_mut() {
+                                dxf.num_fmt_id = Some(id);
                                 dxf.num_fmt_code = Some(code);
                             } else {
                                 sheet.num_fmts.insert(id, code);
@@ -584,26 +610,30 @@ pub fn parse_styles_xml<R: Read + Seek>(
                     b"b" => {
                         if let Some(font) = cur_font.as_mut() {
                             font.bold = parse_bool_flag_attr(&e);
+                            font.has_bold = true;
                         }
                     }
                     b"i" => {
                         if let Some(font) = cur_font.as_mut() {
                             font.italic = parse_bool_flag_attr(&e);
+                            font.has_italic = true;
                         }
                     }
                     b"u" => {
                         if let Some(font) = cur_font.as_mut() {
-                            font.underline = true;
+                            font.underline = parse_underline_attr(&e);
+                            font.has_underline = true;
                         }
                     }
                     b"strike" => {
                         if let Some(font) = cur_font.as_mut() {
                             font.strike = parse_bool_flag_attr(&e);
+                            font.has_strike = true;
                         }
                     }
                     b"color" => {
                         let spec = parse_color_attrs(&e);
-                        let resolved = spec.resolve(&sheet.theme_colors, &custom_indexed);
+                        let resolved = spec.resolve(&sheet.theme_colors, &sheet.custom_indexed);
                         if let Some(font) = cur_font.as_mut() {
                             font.color = resolved;
                         } else if let (Some(border), Some(edge_tag)) =
@@ -632,13 +662,13 @@ pub fn parse_styles_xml<R: Read + Seek>(
                     b"fgColor" => {
                         if let Some(fill) = cur_fill.as_mut() {
                             let spec = parse_color_attrs(&e);
-                            fill.fg_color = spec.resolve(&sheet.theme_colors, &custom_indexed);
+                            fill.fg_color = spec.resolve(&sheet.theme_colors, &sheet.custom_indexed);
                         }
                     }
                     b"bgColor" => {
                         if let Some(fill) = cur_fill.as_mut() {
                             let spec = parse_color_attrs(&e);
-                            fill.bg_color = spec.resolve(&sheet.theme_colors, &custom_indexed);
+                            fill.bg_color = spec.resolve(&sheet.theme_colors, &sheet.custom_indexed);
                         }
                     }
                     b"xf" if in_cell_xfs => {
@@ -655,7 +685,7 @@ pub fn parse_styles_xml<R: Read + Seek>(
                                 if let Some(c) =
                                     Rgba::from_hex(&attr.unescape_value().unwrap_or_default())
                                 {
-                                    custom_indexed.push(c);
+                                    sheet.custom_indexed.push(c);
                                 }
                             }
                         }
@@ -751,7 +781,17 @@ fn parse_bool_flag_attr(e: &quick_xml::events::BytesStart) -> bool {
     true
 }
 
-fn parse_color_attrs(e: &quick_xml::events::BytesStart) -> ColorSpec {
+fn parse_underline_attr(e: &quick_xml::events::BytesStart) -> bool {
+    for attr in e.attributes().flatten() {
+        if attr.key.local_name().as_ref() == b"val" {
+            let v = attr.unescape_value().unwrap_or_default();
+            return !v.eq_ignore_ascii_case("none");
+        }
+    }
+    true
+}
+
+pub fn parse_color_attrs(e: &quick_xml::events::BytesStart) -> ColorSpec {
     let mut spec = ColorSpec::default();
     for attr in e.attributes().flatten() {
         match attr.key.local_name().as_ref() {
@@ -782,10 +822,18 @@ fn parse_xf_attrs(e: &quick_xml::events::BytesStart) -> CellXf {
     let mut xf = CellXf::default();
     for attr in e.attributes().flatten() {
         match attr.key.local_name().as_ref() {
-            b"numFmtId" => xf.num_fmt_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0),
-            b"fontId" => xf.font_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0),
-            b"fillId" => xf.fill_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0),
-            b"borderId" => xf.border_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0),
+            b"numFmtId" => {
+                xf.num_fmt_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0)
+            }
+            b"fontId" => {
+                xf.font_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0)
+            }
+            b"fillId" => {
+                xf.fill_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0)
+            }
+            b"borderId" => {
+                xf.border_id = attr.unescape_value().unwrap_or_default().parse().unwrap_or(0)
+            }
             _ => {}
         }
     }

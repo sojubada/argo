@@ -1,7 +1,11 @@
+use crate::cf::{
+    CfBlock, CfRule, CfRuleKind, Cfvo, CfvoType, ColorScaleSpec, DataBarAxisPos, DataBarSpec,
+    IconSetKind, IconSetSpec, TableDef,
+};
 use crate::package::{is_rel_type, read_part_relationships, resolve_part_target, Relationship};
 use crate::style::{
-    default_column_width_chars, excel_column_width_to_points_with_mdw, parse_styles_xml,
-    read_theme_colors, StyleSheet,
+    default_column_width_chars, excel_column_width_to_points_with_mdw, parse_color_attrs,
+    parse_styles_xml, read_theme_colors, Rgba, StyleSheet,
 };
 use crate::{
     Cell, CellKind, CellPayload, CellRange, CommentEntry, DataValidationEntry, DefinedName,
@@ -113,6 +117,13 @@ pub fn parse_range_1based(ref_str: &str) -> Option<CellRange> {
             end_col: c,
         })
     }
+}
+
+pub fn parse_sqref_ranges(sqref: &str) -> Vec<CellRange> {
+    sqref
+        .split_whitespace()
+        .filter_map(parse_range_1based)
+        .collect()
 }
 
 pub fn shift_formula_references(master: &str, d_row: i32, d_col: i32) -> String {
@@ -325,6 +336,19 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
             Vec::new()
         };
 
+        // 시트에 연결된 모든 표(xl/tables/tableN.xml) 파싱
+        let mut tables = Vec::new();
+        for rel in sheet_rels.values() {
+            if is_rel_type(&rel.rel_type, "/table") {
+                let tbl_path = resolve_part_target(&sheet_path, &rel.target);
+                if archive.by_name(&tbl_path).is_ok() {
+                    if let Ok(tbl) = parse_table_xml(&mut archive, &tbl_path) {
+                        tables.push(tbl);
+                    }
+                }
+            }
+        }
+
         let sheet = parse_worksheet_xml(
             &mut archive,
             &sheet_path,
@@ -335,6 +359,7 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
             &styles,
             &sheet_rels,
             comments,
+            tables,
             &mut pool,
         )?;
         sheets.push(sheet);
@@ -348,6 +373,108 @@ pub fn open_xlsx_workbook(path: &str) -> Result<Workbook, String> {
         styles,
         pool,
         sheets,
+    })
+}
+
+/// `xl/tables/tableN.xml`을 파싱하여 표 범위, 머리글/요약 행, 줄무늬, 필터 단추 여부를 읽는다.
+fn parse_table_xml<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    table_path: &str,
+) -> Result<TableDef, String> {
+    let file = archive
+        .by_name(table_path)
+        .map_err(|e| format!("{} 없음: {}", table_path, e))?;
+    let mut reader = Reader::from_reader(BufReader::new(file));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::with_capacity(512);
+    let mut name = String::from("Table");
+    let mut range = CellRange {
+        start_row: 1,
+        start_col: 1,
+        end_row: 1,
+        end_col: 1,
+    };
+    let mut header_row_count = 1u32;
+    let mut totals_row_count = 0u32;
+    let mut has_auto_filter = false;
+    let mut style_name = String::from("TableStyleMedium2");
+    let mut show_first_column = false;
+    let mut show_last_column = false;
+    let mut show_row_stripes = true;
+    let mut show_column_stripes = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"table" => {
+                    for attr in e.attributes().flatten() {
+                        match attr.key.local_name().as_ref() {
+                            b"name" | b"displayName" => {
+                                name = attr.unescape_value().unwrap_or_default().into_owned();
+                            }
+                            b"ref" => {
+                                if let Some(r) =
+                                    parse_range_1based(&attr.unescape_value().unwrap_or_default())
+                                {
+                                    range = r;
+                                }
+                            }
+                            b"headerRowCount" => {
+                                header_row_count = attr
+                                    .unescape_value()
+                                    .unwrap_or_default()
+                                    .parse()
+                                    .unwrap_or(1);
+                            }
+                            b"totalsRowCount" => {
+                                totals_row_count = attr
+                                    .unescape_value()
+                                    .unwrap_or_default()
+                                    .parse()
+                                    .unwrap_or(0);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                b"autoFilter" => {
+                    has_auto_filter = true;
+                }
+                b"tableStyleInfo" => {
+                    for attr in e.attributes().flatten() {
+                        let v = attr.unescape_value().unwrap_or_default();
+                        let flag = v == "1" || v.eq_ignore_ascii_case("true");
+                        match attr.key.local_name().as_ref() {
+                            b"name" => style_name = v.into_owned(),
+                            b"showFirstColumn" => show_first_column = flag,
+                            b"showLastColumn" => show_last_column = flag,
+                            b"showRowStripes" => show_row_stripes = flag,
+                            b"showColumnStripes" => show_column_stripes = flag,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("table XML 파싱 오류: {}", e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(TableDef {
+        name,
+        range,
+        header_row_count,
+        totals_row_count,
+        has_auto_filter,
+        style_name,
+        show_first_column,
+        show_last_column,
+        show_row_stripes,
+        show_column_stripes,
     })
 }
 
@@ -674,6 +801,157 @@ fn parse_comments_xml<R: Read + Seek>(
     Ok(comments)
 }
 
+/// 조건부 서식(`<conditionalFormatting>` 및 `x14:conditionalFormatting`) 파싱용 임시 빌더
+#[derive(Default)]
+struct CfRuleBuilder {
+    rule_type: String,
+    operator: String,
+    priority: i32,
+    stop_if_true: bool,
+    dxf_id: Option<u32>,
+    bottom: bool,
+    percent: bool,
+    rank: u32,
+    above: bool,
+    equal_average: bool,
+    std_dev: Option<i32>,
+    text_attr: String,
+    formulas: Vec<String>,
+    cfvos: Vec<Cfvo>,
+    colors: Vec<Rgba>,
+    databar_min_len: u32,
+    databar_max_len: u32,
+    databar_show_val: bool,
+    databar_axis_pos: Option<DataBarAxisPos>,
+    databar_neg_color: Option<Rgba>,
+    databar_axis_color: Option<Rgba>,
+    icon_set_name: String,
+    icon_reverse: bool,
+    icon_show_val: bool,
+}
+
+impl CfRuleBuilder {
+    fn from_attrs(e: &quick_xml::events::BytesStart) -> Self {
+        let mut b = Self {
+            priority: 9999,
+            above: true,
+            databar_min_len: 0,
+            databar_max_len: 100,
+            databar_show_val: true,
+            icon_set_name: String::from("3Arrows"),
+            icon_show_val: true,
+            ..Default::default()
+        };
+        for attr in e.attributes().flatten() {
+            let v = attr.unescape_value().unwrap_or_default();
+            let flag = v == "1" || v.eq_ignore_ascii_case("true");
+            match attr.key.local_name().as_ref() {
+                b"type" => b.rule_type = v.into_owned(),
+                b"operator" => b.operator = v.into_owned(),
+                b"priority" => b.priority = v.parse().unwrap_or(9999),
+                b"stopIfTrue" => b.stop_if_true = flag,
+                b"dxfId" => b.dxf_id = v.parse().ok(),
+                b"bottom" => b.bottom = flag,
+                b"percent" => b.percent = flag,
+                b"rank" => b.rank = v.parse().unwrap_or(10),
+                b"aboveAverage" => b.above = !(v == "0" || v.eq_ignore_ascii_case("false")),
+                b"equalAverage" => b.equal_average = flag,
+                b"stdDev" => b.std_dev = v.parse().ok(),
+                b"text" => b.text_attr = v.into_owned(),
+                _ => {}
+            }
+        }
+        b
+    }
+
+    fn finish(self) -> Option<CfRule> {
+        let kind = match self.rule_type.as_str() {
+            "dataBar" => {
+                let min_cfvo = self.cfvos.first().cloned().unwrap_or(Cfvo {
+                    cfvo_type: CfvoType::Min,
+                    val: None,
+                    gte: true,
+                });
+                let max_cfvo = self.cfvos.get(1).cloned().unwrap_or(Cfvo {
+                    cfvo_type: CfvoType::Max,
+                    val: None,
+                    gte: true,
+                });
+                let color = self.colors.first().copied().unwrap_or(Rgba {
+                    r: 59,
+                    g: 130,
+                    b: 246,
+                    a: 255,
+                });
+                CfRuleKind::DataBar(DataBarSpec {
+                    min_cfvo,
+                    max_cfvo,
+                    color,
+                    negative_color: self.databar_neg_color,
+                    axis_color: self.databar_axis_color,
+                    axis_pos: self.databar_axis_pos.unwrap_or(DataBarAxisPos::Automatic),
+                    min_length: self.databar_min_len,
+                    max_length: self.databar_max_len,
+                    show_value: self.databar_show_val,
+                })
+            }
+            "colorScale" => CfRuleKind::ColorScale(ColorScaleSpec {
+                cfvos: self.cfvos,
+                colors: self.colors,
+            }),
+            "iconSet" => CfRuleKind::IconSet(IconSetSpec {
+                kind: IconSetKind::from_str(&self.icon_set_name),
+                cfvos: self.cfvos,
+                reverse: self.icon_reverse,
+                show_value: self.icon_show_val,
+            }),
+            "cellIs" => CfRuleKind::CellIs {
+                operator: self.operator,
+                formulas: self.formulas,
+            },
+            "expression" => CfRuleKind::Expression {
+                formula: self.formulas.into_iter().next().unwrap_or_default(),
+            },
+            "top10" => CfRuleKind::Top10 {
+                bottom: self.bottom,
+                percent: self.percent,
+                rank: self.rank,
+            },
+            "aboveAverage" => CfRuleKind::AboveAverage {
+                above: self.above,
+                equal_average: self.equal_average,
+                std_dev: self.std_dev,
+            },
+            "duplicateValues" => CfRuleKind::DuplicateValues,
+            "uniqueValues" => CfRuleKind::UniqueValues,
+            "containsText" | "notContainsText" | "beginsWith" | "endsWith" => {
+                let op = if self.operator.is_empty() {
+                    self.rule_type.clone()
+                } else {
+                    self.operator
+                };
+                CfRuleKind::ContainsText {
+                    text: self.text_attr,
+                    operator: op,
+                }
+            }
+            "containsBlanks" => CfRuleKind::ContainsBlanks,
+            "notContainsBlanks" => CfRuleKind::NotContainsBlanks,
+            "containsErrors" => CfRuleKind::ContainsErrors,
+            "notContainsErrors" => CfRuleKind::NotContainsErrors,
+            _ => return None,
+        };
+
+        Some(CfRule {
+            priority: self.priority,
+            stop_if_true: self.stop_if_true,
+            dxf_id: self.dxf_id,
+            dxf_inline: None,
+            kind,
+        })
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parse_worksheet_xml<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
@@ -685,6 +963,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
     styles: &StyleSheet,
     sheet_rels: &HashMap<String, Relationship>,
     comments: Vec<CommentEntry>,
+    tables: Vec<TableDef>,
     pool: &mut StringPool,
 ) -> Result<Sheet, String> {
     let file = archive
@@ -704,6 +983,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
     let mut merges: Vec<CellRange> = Vec::new();
     let mut validations: Vec<DataValidationEntry> = Vec::new();
     let mut links: HashMap<u64, HyperlinkEntry> = HashMap::new();
+    let mut cf_blocks: Vec<CfBlock> = Vec::new();
 
     let mut custom_col_widths_pt: HashMap<u32, f32> = HashMap::new();
     let mut custom_row_heights_pt: HashMap<u32, f32> = HashMap::new();
@@ -746,6 +1026,16 @@ fn parse_worksheet_xml<R: Read + Seek>(
     let mut in_dv_f1 = false;
     let mut in_dv_f2 = false;
     let mut dv_f_buf = String::new();
+
+    // 조건부 서식 상태 머신
+    let mut cur_cf_block: Option<CfBlock> = None;
+    let mut cur_cf_rule: Option<CfRuleBuilder> = None;
+    let mut in_cf_formula = false;
+    let mut cf_formula_buf = String::new();
+    let mut in_cfvo_f = false;
+    let mut cfvo_f_buf = String::new();
+    let mut in_sqref_tag = false;
+    let mut sqref_buf = String::new();
 
     let mut buf = Vec::with_capacity(4096);
 
@@ -885,6 +1175,76 @@ fn parse_worksheet_xml<R: Read + Seek>(
                     b"hyperlink" => {
                         extract_hyperlink_tag(&e, sheet_rels, pool, &mut links);
                     }
+                    // P4: 조건부 서식 블록 (<conditionalFormatting> 및 <x14:conditionalFormatting>)
+                    b"conditionalFormatting" => {
+                        let mut ranges = Vec::new();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.local_name().as_ref() == b"sqref" {
+                                ranges = parse_sqref_ranges(
+                                    &attr.unescape_value().unwrap_or_default(),
+                                );
+                            }
+                        }
+                        cur_cf_block = Some(CfBlock {
+                            ranges,
+                            rules: Vec::new(),
+                        });
+                    }
+                    b"sqref" if cur_cf_block.is_some() => {
+                        in_sqref_tag = true;
+                        sqref_buf.clear();
+                    }
+                    b"cfRule" if cur_cf_block.is_some() => {
+                        cur_cf_rule = Some(CfRuleBuilder::from_attrs(&e));
+                    }
+                    b"formula" if cur_cf_rule.is_some() => {
+                        in_cf_formula = true;
+                        cf_formula_buf.clear();
+                    }
+                    b"dataBar" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            parse_databar_attrs(&e, rb);
+                        }
+                    }
+                    b"iconSet" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            parse_iconset_attrs(&e, rb);
+                        }
+                    }
+                    b"cfvo" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            rb.cfvos.push(parse_cfvo_attrs(&e));
+                        }
+                    }
+                    b"f" if cur_cf_rule.is_some() && !in_cell => {
+                        // x14:cfvo 내부의 <xm:f> 값
+                        in_cfvo_f = true;
+                        cfvo_f_buf.clear();
+                    }
+                    b"color" | b"fillColor" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let spec = parse_color_attrs(&e);
+                            if let Some(c) =
+                                spec.resolve(&styles.theme_colors, &styles.custom_indexed)
+                            {
+                                rb.colors.push(c);
+                            }
+                        }
+                    }
+                    b"negativeFillColor" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let spec = parse_color_attrs(&e);
+                            rb.databar_neg_color =
+                                spec.resolve(&styles.theme_colors, &styles.custom_indexed);
+                        }
+                    }
+                    b"axisColor" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let spec = parse_color_attrs(&e);
+                            rb.databar_axis_color =
+                                spec.resolve(&styles.theme_colors, &styles.custom_indexed);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -964,6 +1324,41 @@ fn parse_worksheet_xml<R: Read + Seek>(
                     b"hyperlink" => {
                         extract_hyperlink_tag(&e, sheet_rels, pool, &mut links);
                     }
+                    b"cfRule" if cur_cf_block.is_some() => {
+                        let rb = CfRuleBuilder::from_attrs(&e);
+                        if let (Some(block), Some(rule)) = (cur_cf_block.as_mut(), rb.finish()) {
+                            block.rules.push(rule);
+                        }
+                    }
+                    b"cfvo" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            rb.cfvos.push(parse_cfvo_attrs(&e));
+                        }
+                    }
+                    b"color" | b"fillColor" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let spec = parse_color_attrs(&e);
+                            if let Some(c) =
+                                spec.resolve(&styles.theme_colors, &styles.custom_indexed)
+                            {
+                                rb.colors.push(c);
+                            }
+                        }
+                    }
+                    b"negativeFillColor" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let spec = parse_color_attrs(&e);
+                            rb.databar_neg_color =
+                                spec.resolve(&styles.theme_colors, &styles.custom_indexed);
+                        }
+                    }
+                    b"axisColor" if cur_cf_rule.is_some() => {
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let spec = parse_color_attrs(&e);
+                            rb.databar_axis_color =
+                                spec.resolve(&styles.theme_colors, &styles.custom_indexed);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -982,6 +1377,15 @@ fn parse_worksheet_xml<R: Read + Seek>(
                 } else if in_dv && (in_dv_f1 || in_dv_f2) {
                     let raw = e.unescape().map_err(|err| err.to_string())?;
                     dv_f_buf.push_str(&raw);
+                } else if in_cf_formula {
+                    let raw = e.unescape().map_err(|err| err.to_string())?;
+                    cf_formula_buf.push_str(&raw);
+                } else if in_cfvo_f {
+                    let raw = e.unescape().map_err(|err| err.to_string())?;
+                    cfvo_f_buf.push_str(&raw);
+                } else if in_sqref_tag {
+                    let raw = e.unescape().map_err(|err| err.to_string())?;
+                    sqref_buf.push_str(&raw);
                 }
             }
             Ok(Event::CData(e)) => {
@@ -994,7 +1398,17 @@ fn parse_worksheet_xml<R: Read + Seek>(
             Ok(Event::End(e)) => {
                 let local = e.local_name();
                 match local.as_ref() {
-                    b"f" => in_f = false,
+                    b"f" if in_cell => in_f = false,
+                    b"f" if in_cfvo_f => {
+                        in_cfvo_f = false;
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            if let Some(last_cfvo) = rb.cfvos.last_mut() {
+                                if last_cfvo.val.is_none() {
+                                    last_cfvo.val = Some(cfvo_f_buf.trim().to_string());
+                                }
+                            }
+                        }
+                    }
                     b"v" => in_v = false,
                     b"t" if in_is => in_is_t = false,
                     b"rPh" if in_is => in_is_rph = false,
@@ -1041,7 +1455,6 @@ fn parse_worksheet_xml<R: Read + Seek>(
                                 _ => (FormulaKind::Normal, trimmed_f.to_string()),
                             };
 
-                            // HYPERLINK("target", "label") 수식이면 링크 목록에도 자동 등록
                             if let Some((target_url, is_int)) =
                                 try_extract_hyperlink_formula(&resolved_f)
                             {
@@ -1153,6 +1566,37 @@ fn parse_worksheet_xml<R: Read + Seek>(
                             validations.push(dv);
                         }
                     }
+                    b"formula" if in_cf_formula => {
+                        in_cf_formula = false;
+                        if let Some(rb) = cur_cf_rule.as_mut() {
+                            let clean = cf_formula_buf
+                                .trim()
+                                .strip_prefix('=')
+                                .unwrap_or(cf_formula_buf.trim());
+                            rb.formulas.push(clean.to_string());
+                        }
+                    }
+                    b"sqref" if in_sqref_tag => {
+                        in_sqref_tag = false;
+                        if let Some(block) = cur_cf_block.as_mut() {
+                            block.ranges = parse_sqref_ranges(&sqref_buf);
+                        }
+                    }
+                    b"cfRule" => {
+                        if let Some(rb) = cur_cf_rule.take() {
+                            if let (Some(block), Some(rule)) = (cur_cf_block.as_mut(), rb.finish())
+                            {
+                                block.rules.push(rule);
+                            }
+                        }
+                    }
+                    b"conditionalFormatting" => {
+                        if let Some(block) = cur_cf_block.take() {
+                            if !block.ranges.is_empty() && !block.rules.is_empty() {
+                                cf_blocks.push(block);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1214,7 +1658,54 @@ fn parse_worksheet_xml<R: Read + Seek>(
         validations,
         comments,
         links,
+        cf_blocks,
+        tables,
     })
+}
+
+fn parse_databar_attrs(e: &quick_xml::events::BytesStart, rb: &mut CfRuleBuilder) {
+    for attr in e.attributes().flatten() {
+        let v = attr.unescape_value().unwrap_or_default();
+        match attr.key.local_name().as_ref() {
+            b"minLength" => rb.databar_min_len = v.parse().unwrap_or(0),
+            b"maxLength" => rb.databar_max_len = v.parse().unwrap_or(100),
+            b"showValue" => rb.databar_show_val = !(v == "0" || v.eq_ignore_ascii_case("false")),
+            b"axisPosition" => {
+                rb.databar_axis_pos = Some(match v.as_ref() {
+                    "middle" | "midpoint" => DataBarAxisPos::Midpoint,
+                    "none" => DataBarAxisPos::None,
+                    _ => DataBarAxisPos::Automatic,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_iconset_attrs(e: &quick_xml::events::BytesStart, rb: &mut CfRuleBuilder) {
+    for attr in e.attributes().flatten() {
+        let v = attr.unescape_value().unwrap_or_default();
+        match attr.key.local_name().as_ref() {
+            b"iconSet" => rb.icon_set_name = v.into_owned(),
+            b"reverse" => rb.icon_reverse = v == "1" || v.eq_ignore_ascii_case("true"),
+            b"showValue" => rb.icon_show_val = !(v == "0" || v.eq_ignore_ascii_case("false")),
+            _ => {}
+        }
+    }
+}
+
+fn parse_cfvo_attrs(e: &quick_xml::events::BytesStart) -> Cfvo {
+    let mut cfvo = Cfvo::default();
+    for attr in e.attributes().flatten() {
+        let v = attr.unescape_value().unwrap_or_default();
+        match attr.key.local_name().as_ref() {
+            b"type" => cfvo.cfvo_type = CfvoType::from_str(&v),
+            b"val" => cfvo.val = Some(v.into_owned()),
+            b"gte" => cfvo.gte = !(v == "0" || v.eq_ignore_ascii_case("false")),
+            _ => {}
+        }
+    }
+    cfvo
 }
 
 fn extract_hyperlink_tag(
@@ -1477,4 +1968,3 @@ fn extract_dv_attrs(e: &quick_xml::events::BytesStart) -> DataValidationEntry {
     }
     dv
 }
-

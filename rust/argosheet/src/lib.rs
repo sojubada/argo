@@ -1,11 +1,13 @@
 pub mod calc;
+pub mod cf;
 pub mod draw;
 pub mod numfmt;
 pub mod package;
 pub mod parse;
 pub mod style;
 
-use crate::calc::{evaluate_workbook, CellAddr, WorkbookCalcResult};
+use crate::calc::{evaluate_workbook, WorkbookCalcResult};
+use crate::cf::{build_sheet_cf_cache, CfBlock, SheetCfCache, TableDef};
 use crate::draw::{
     build_tile_drawlist, format_cell_display, ASDrawCmd, ASRect, DrawList, FormatCache,
     SheetRenderCache,
@@ -244,6 +246,8 @@ pub struct Sheet {
     pub validations: Vec<DataValidationEntry>,
     pub comments: Vec<CommentEntry>,
     pub links: HashMap<u64, HyperlinkEntry>,
+    pub cf_blocks: Vec<CfBlock>,
+    pub tables: Vec<TableDef>,
 }
 
 impl Sheet {
@@ -303,6 +307,7 @@ pub struct ASBook {
     pub calc_res: WorkbookCalcResult,
     pub fmt_cache: FormatCache,
     pub render_caches: Vec<SheetRenderCache>,
+    pub cf_caches: Vec<SheetCfCache>,
 }
 
 unsafe impl Sync for ASBook {}
@@ -420,11 +425,20 @@ pub extern "C" fn as_open(path: *const c_char) -> *mut ASBook {
                 let calc_res = evaluate_workbook(&wb);
                 let fmt_cache = FormatCache::build(&wb);
                 let render_caches = wb.sheets.iter().map(SheetRenderCache::build).collect();
+                // 조건부 서식의 수식 규칙도 계산 엔진을 쓰므로 큰 스택 스레드에서 만든다.
+                // 실패하면(스레드 생성 실패·패닉) 조건부 서식 없이 연다.
+                let cf_caches: Vec<SheetCfCache> = calc::run_on_big_stack(|| {
+                    (0..wb.sheets.len())
+                        .map(|idx| build_sheet_cf_cache(&wb, &calc_res, idx))
+                        .collect()
+                })
+                .unwrap_or_else(|| (0..wb.sheets.len()).map(|_| SheetCfCache::default()).collect());
                 Box::into_raw(Box::new(ASBook {
                     wb,
                     calc_res,
                     fmt_cache,
                     render_caches,
+                    cf_caches,
                 }))
             }
             Err(e) => {
@@ -560,9 +574,20 @@ pub extern "C" fn as_tile(
         let Some(rc) = b.render_caches.get(s_idx) else {
             return ptr::null_mut();
         };
+        let Some(cfc) = b.cf_caches.get(s_idx) else {
+            return ptr::null_mut();
+        };
         let tile_rect = ASRect { x, y, w, h };
-        let inner =
-            build_tile_drawlist(&b.wb, &b.calc_res, &b.fmt_cache, rc, s_idx, tile_rect, zoom);
+        let inner = build_tile_drawlist(
+            &b.wb,
+            &b.calc_res,
+            &b.fmt_cache,
+            rc,
+            cfc,
+            s_idx,
+            tile_rect,
+            zoom,
+        );
         Box::into_raw(Box::new(ASDrawList { inner }))
     }));
     res.unwrap_or(ptr::null_mut())
@@ -968,6 +993,51 @@ mod p2_review_tests {
     }
 
     #[test]
+    fn conditional_format_whole_sheet_ranges_are_bounded() {
+        // 시트 전체에 걸린 조건부 서식 4종 + 맨 끝 칸. 칸마다 돌면 170억 칸이다.
+        let tmp = xlsx_with_sheet(r##"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>-5</v></c></row><row r="2"><c r="A2"><v>9</v></c></row>
+<row r="1048576"><c r="XFD1048576"><v>1</v></c></row></sheetData>
+<autoFilter ref="A1:XFD1048576"/>
+<conditionalFormatting sqref="A1:XFD1048576"><cfRule type="expression" priority="1"><formula>SUM($A:$A)&gt;A1</formula></cfRule>
+<cfRule type="dataBar" priority="2"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF3B82F6"/></dataBar></cfRule>
+<cfRule type="colorScale" priority="3"><colorScale><cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/><color rgb="FFFF0000"/><color rgb="FFFFFFFF"/><color rgb="FF00FF00"/></colorScale></cfRule>
+<cfRule type="iconSet" priority="4"><iconSet iconSet="5Arrows"><cfvo type="percent" val="0"/><cfvo type="percent" val="20"/><cfvo type="percent" val="40"/><cfvo type="percent" val="60"/><cfvo type="percent" val="80"/></iconSet></cfRule>
+<cfRule type="top10" priority="5" rank="4000000000"/><cfRule type="duplicateValues" priority="6"/><cfRule type="cellIs" operator="between" priority="7"><formula>1/0</formula><formula>((((</formula></cfRule>
+</conditionalFormatting>
+<conditionalFormatting sqref="XFD1048576:A1 ZZZ9 A0"><cfRule type="iconSet" priority="9"><iconSet iconSet="없는집합"/></cfRule><cfRule type="dataBar" priority="8"/></conditionalFormatting>
+</worksheet>"##);
+        let t0 = std::time::Instant::now();
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null(), "열기 실패: {:?}", unsafe { CStr::from_ptr(as_last_note()) });
+        let dl = as_tile(book, 0, 0.0, 0.0, 256.0, 256.0, 1.0);
+        assert!(!dl.is_null());
+        as_drawlist_free(dl);
+        as_close(book);
+        assert!(t0.elapsed().as_secs() < 20, "조건부 서식 범위가 너무 오래 걸림: {:?}", t0.elapsed());
+    }
+
+    #[test]
+    fn icon_set_with_thresholds_only_as_in_sample_06() {
+        // 샘플 06 시트 F열 그대로: 3Arrows 인데 cfvo 가 하한 두 개뿐이다.
+        let tmp = xlsx_with_sheet(r##"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1"><v>-20</v></c></row><row r="2"><c r="A2"><v>0</v></c></row><row r="3"><c r="A3"><v>15</v></c></row></sheetData>
+<conditionalFormatting sqref="A1:A3"><cfRule type="iconSet" priority="3"><iconSet iconSet="3Arrows" showValue="1" reverse="0"><cfvo type="num" val="-15"/><cfvo type="num" val="15"/></iconSet></cfRule></conditionalFormatting>
+</worksheet>"##);
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+        let dl = as_tile(book, 0, 0.0, 0.0, 256.0, 256.0, 1.0);
+        let n = as_drawlist_count(dl) as usize;
+        let cmds = unsafe { std::slice::from_raw_parts(as_drawlist_commands(dl), n) };
+        let icons: Vec<u8> = cmds.iter().filter(|c| c.cmd_type == 7).map(|c| c.align_horiz).collect();
+        assert_eq!(icons, vec![0, 1, 2], "아래·옆·위 순서");
+        as_drawlist_free(dl);
+        as_close(book);
+    }
+
+    #[test]
     fn null_and_garbage_pointers_are_refused() {
         assert!(as_open(ptr::null()).is_null());
         let bad = CString::new("/없는/파일.xlsx").unwrap();
@@ -1253,5 +1323,124 @@ mod abi_layout {
         assert_eq!(offset_of!(ASDrawCmd, rotation), 60);
         assert_eq!(offset_of!(ASDrawCmd, indent), 62);
         assert_eq!(offset_of!(ASDrawCmd, text_flags), 63);
+    }
+}
+
+// ---- 제미나이 P4 통합 시험 ----
+#[cfg(test)]
+mod p4_integration_tests {
+    use super::*;
+    use crate::draw::DrawCmdType;
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    #[test]
+    fn test_p4_end_to_end_databar_colorscale_iconset_and_table_filter() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let opts = SimpleFileOptions::default();
+
+            zip.start_file("_rels/.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/workbook.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="01_P4" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#).unwrap();
+
+            zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTbl1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/tables/table1.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Tbl1" displayName="Tbl1" ref="A1:C3" headerRowCount="1">
+  <autoFilter ref="A1:C3"/>
+  <tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>
+</table>"#).unwrap();
+
+            zip.start_file("xl/worksheets/sheet1.xml", opts).unwrap();
+            zip.write_all(r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>항목</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>달성률</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>증감</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>-10</v></c>
+      <c r="B2"><v>0.75</v></c>
+      <c r="C2"><v>-20</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>20</v></c>
+      <c r="B3"><v>0.25</v></c>
+      <c r="C3"><v>30</v></c>
+    </row>
+  </sheetData>
+  <conditionalFormatting sqref="A2:A3">
+    <cfRule type="colorScale" priority="1">
+      <colorScale>
+        <cfvo type="min"/><cfvo type="num" val="0"/><cfvo type="max"/>
+        <color rgb="FFFCA5A5"/><color rgb="FFFFFFFF"/><color rgb="FF86EFAC"/>
+      </colorScale>
+    </cfRule>
+  </conditionalFormatting>
+  <conditionalFormatting sqref="B2:B3">
+    <cfRule type="dataBar" priority="2">
+      <dataBar>
+        <cfvo type="num" val="0"/><cfvo type="num" val="1"/>
+        <color rgb="FF0F766E"/>
+      </dataBar>
+    </cfRule>
+  </conditionalFormatting>
+  <conditionalFormatting sqref="C2:C3">
+    <cfRule type="iconSet" priority="3">
+      <iconSet iconSet="3Arrows" showValue="1">
+        <cfvo type="percent" val="0"/>
+        <cfvo type="num" val="-15"/>
+        <cfvo type="num" val="15"/>
+      </iconSet>
+    </cfRule>
+  </conditionalFormatting>
+</worksheet>"#.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+
+        let dl = as_tile(book, 0, 0.0, 0.0, 256.0, 256.0, 2.0);
+        assert!(!dl.is_null());
+
+        let cnt = as_drawlist_count(dl) as usize;
+        let cmds = unsafe { std::slice::from_raw_parts(as_drawlist_commands(dl), cnt) };
+
+        // 1. 데이터 막대(AS_CMD_BAR) 명령 생성 확인
+        assert!(cmds.iter().any(|c| c.cmd_type == DrawCmdType::Bar as u8));
+        // 2. 3Arrows 벡터 아이콘(AS_CMD_ICON) 명령 생성 확인 (하락 인덱스 0, 상승 인덱스 2)
+        assert!(cmds.iter().any(|c| c.cmd_type == DrawCmdType::Icon as u8 && c.align_horiz == 0));
+        assert!(cmds.iter().any(|c| c.cmd_type == DrawCmdType::Icon as u8 && c.align_horiz == 2));
+        // 3. 표 머리글 필터 단추 마커(AS_CMD_MARKER, sub_type == 1) 생성 확인
+        assert!(cmds.iter().any(|c| c.cmd_type == DrawCmdType::Marker as u8 && c.sub_type == 1));
+
+        as_drawlist_free(dl);
+        as_close(book);
     }
 }

@@ -253,6 +253,13 @@ final class ArgoSheetTileView: UIView {
                 let r = cgRect(cmd.rect)
                 ctx.setFillColor(cgColor(cmd.color1))
                 if cmd.sub_type == 1 {
+                    // 표·자동 필터 머리글 단추(보기 전용): 옅은 상자 + 아래 화살촉
+                    ctx.setFillColor(CGColor(srgbRed: 0.94, green: 0.95, blue: 0.97, alpha: 0.95))
+                    ctx.fill(r)
+                    ctx.setStrokeColor(CGColor(srgbRed: 0.65, green: 0.68, blue: 0.73, alpha: 1))
+                    ctx.setLineWidth(0.5)
+                    ctx.stroke(r)
+                    ctx.setFillColor(CGColor(srgbRed: 0.25, green: 0.28, blue: 0.32, alpha: 1))
                     ctx.move(to: CGPoint(x: r.minX + r.width * 0.25, y: r.minY + r.height * 0.4))
                     ctx.addLine(to: CGPoint(x: r.maxX - r.width * 0.25, y: r.minY + r.height * 0.4))
                     ctx.addLine(to: CGPoint(x: r.midX, y: r.maxY - r.height * 0.3))
@@ -263,11 +270,90 @@ final class ArgoSheetTileView: UIView {
                 }
                 ctx.closePath()
                 ctx.fillPath()
+            case 6: // 조건부 서식 데이터 막대 (align_vert 1 = 0 기준축, stroke_width = 축의 x)
+                let clip = cgRect(cmd.clip_rect), bar = cgRect(cmd.rect)
+                ctx.saveGState()
+                ctx.clip(to: clip)
+                if bar.width > 0.2, bar.height > 0.2 {
+                    ctx.setFillColor(cgColor(cmd.color1, alpha: 0.85))
+                    ctx.fill(bar)
+                }
+                if cmd.align_vert == 1 {
+                    let ax = CGFloat(cmd.stroke_width)
+                    ctx.setStrokeColor(cgColor(cmd.color2, alpha: 0.85))
+                    ctx.setLineWidth(0.75)
+                    ctx.setLineDash(phase: 0, lengths: [1.5, 1.5])
+                    ctx.move(to: CGPoint(x: ax, y: clip.minY + 1))
+                    ctx.addLine(to: CGPoint(x: ax, y: clip.maxY - 1))
+                    ctx.strokePath()
+                }
+                ctx.restoreGState()
+            case 7: // 조건부 서식 아이콘 (sub_type = 집합, align_horiz = 단계)
+                drawIcon(ctx, cmd)
             default:
                 break
             }
         }
         return ctx.makeImage()
+    }
+
+    /// 아이콘 집합을 도형으로 그린다(그림 파일 없음). 화살표 계열은 단계에 따라 돌린다.
+    /// 집합 번호: 0·1 = 3Arrows(회색), 2 = 신호등, 3 = 3Signs, 7 = 4Arrows, 8 = 5Arrows, 그 밖은 3단계 화살표로.
+    private static func drawIcon(_ ctx: CGContext, _ cmd: ASDrawCmd) {
+        let box = cgRect(cmd.rect)
+        guard box.width > 2, box.height > 2 else { return }
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        ctx.clip(to: cgRect(cmd.clip_rect))
+        ctx.setFillColor(cgColor(cmd.color1))
+        let step = Int(cmd.align_horiz)
+
+        switch cmd.sub_type {
+        case 2:
+            ctx.fillEllipse(in: box.insetBy(dx: 0.8, dy: 0.8))
+            return
+        case 3:
+            if step == 0 {          // 마름모
+                ctx.move(to: CGPoint(x: box.midX, y: box.minY))
+                ctx.addLine(to: CGPoint(x: box.maxX, y: box.midY))
+                ctx.addLine(to: CGPoint(x: box.midX, y: box.maxY))
+                ctx.addLine(to: CGPoint(x: box.minX, y: box.midY))
+            } else if step == 1 {   // 세모
+                ctx.move(to: CGPoint(x: box.midX, y: box.minY + 0.5))
+                ctx.addLine(to: CGPoint(x: box.maxX, y: box.maxY - 0.5))
+                ctx.addLine(to: CGPoint(x: box.minX, y: box.maxY - 0.5))
+            } else {
+                ctx.fillEllipse(in: box.insetBy(dx: 0.8, dy: 0.8))
+                return
+            }
+            ctx.closePath()
+            ctx.fillPath()
+            return
+        default:
+            break
+        }
+
+        // 0° = 위, 90° = 오른쪽, 180° = 아래
+        let angles: [CGFloat]
+        switch cmd.sub_type {
+        case 7: angles = [180, 135, 45, 0]
+        case 8: angles = [180, 135, 90, 45, 0]
+        default: angles = [180, 90, 0]
+        }
+        let deg = angles[min(max(step, 0), angles.count - 1)]
+        let r = min(box.width, box.height) * 0.46
+        ctx.translateBy(x: box.midX, y: box.midY)
+        ctx.rotate(by: deg * .pi / 180)   // y 가 아래로 향한 좌표라 시계 방향으로 돈다
+        let headW = r * 0.92, baseY = -r * 0.10, shaftW = r * 0.42
+        ctx.move(to: CGPoint(x: 0, y: -r))
+        ctx.addLine(to: CGPoint(x: headW, y: baseY))
+        ctx.addLine(to: CGPoint(x: shaftW, y: baseY))
+        ctx.addLine(to: CGPoint(x: shaftW, y: r))
+        ctx.addLine(to: CGPoint(x: -shaftW, y: r))
+        ctx.addLine(to: CGPoint(x: -shaftW, y: baseY))
+        ctx.addLine(to: CGPoint(x: -headW, y: baseY))
+        ctx.closePath()
+        ctx.fillPath()
     }
 
     private static func cgRect(_ r: ASRect) -> CGRect {
