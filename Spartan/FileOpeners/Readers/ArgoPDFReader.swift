@@ -92,17 +92,23 @@ final class ArgoFocusCanvas: UIControl {
     var onSelect: (() -> Void)?
     /// 버튼을 뗐을 때(방향키 길게 누르기 반복을 멈추는 데 쓴다). 없으면 아무것도 안 한다.
     var onRelease: ((UIPress.PressType) -> Void)?
+    /// 키보드 키(UIKey). true 면 select·onPress 보다 먼저 끝낸다. 없으면 전과 같다.
+    var onKey: ((UIKey) -> Bool)?
+    /// 키보드 키를 뗐을 때(키 되풀이를 멈추는 데 쓴다).
+    var onKeyUp: ((UIKey) -> Void)?
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if let onRelease = onRelease {
-            for press in presses { onRelease(press.type) }
+        for press in presses {
+            if let key = press.key { onKeyUp?(key) }
+            onRelease?(press.type)
         }
         super.pressesEnded(presses, with: event)
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if let onRelease = onRelease {
-            for press in presses { onRelease(press.type) }
+        for press in presses {
+            if let key = press.key { onKeyUp?(key) }
+            onRelease?(press.type)
         }
         super.pressesCancelled(presses, with: event)
     }
@@ -118,6 +124,7 @@ final class ArgoFocusCanvas: UIControl {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         for press in presses {
             ArgoDiag.log("canvas", "pressesBegan type=\(press.type.rawValue) focused=\(isFocused)")
+            if let key = press.key, let handled = onKey?(key), handled { return }
             if press.type == .select {
                 onSelect?()
                 return

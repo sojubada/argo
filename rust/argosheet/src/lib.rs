@@ -251,6 +251,8 @@ pub struct Sheet {
     pub cf_blocks: Vec<CfBlock>,
     pub tables: Vec<TableDef>,
     pub raw_drawings: Vec<RawSheetDrawing>,
+    /// 시트 탭 색(`<sheetPr><tabColor>`). 없으면 None.
+    pub tab_color: Option<crate::style::Rgba>,
 }
 
 impl Sheet {
@@ -1001,6 +1003,26 @@ pub extern "C" fn as_sheet_overlay_bytes(
         }
     }));
     res.unwrap_or(ptr::null())
+}
+
+/// 시트 탭 색. ASSheetInfo 레이아웃을 바꾸지 않으려고 따로 둔다. 색이 없으면 false.
+#[no_mangle]
+pub extern "C" fn as_sheet_tab_color(book: *const ASBook, sheet: u32, out: *mut crate::draw::ASColor) -> bool {
+    let res = catch_unwind(AssertUnwindSafe(|| {
+        if book.is_null() || out.is_null() {
+            return false;
+        }
+        let b = unsafe { &*book };
+        let Some(s) = b.wb.sheets.get(sheet as usize) else {
+            return false;
+        };
+        let Some(rgba) = s.tab_color else {
+            return false;
+        };
+        unsafe { *out = rgba.into() };
+        true
+    }));
+    res.unwrap_or(false)
 }
 
 // ============================================================================
@@ -1904,6 +1926,7 @@ mod p5_tests {
             cf_blocks: Vec::new(),
             tables: Vec::new(),
             raw_drawings: Vec::new(),
+            tab_color: None,
         };
 
         let wb = Workbook {
@@ -2072,5 +2095,103 @@ mod p5_tests {
             let _ = zip.finish();
         }
         cur.into_inner()
+    }
+}
+
+#[cfg(test)]
+mod p6_tab_color_tests {
+    use super::*;
+    use crate::draw::ASColor;
+    use crate::style::{apply_color_tint, Rgba};
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    #[test]
+    fn test_as_sheet_tab_color_rgb_theme_tint_none_bounds_and_null() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut zip = ZipWriter::new(tmp.as_file_mut());
+            let opts = SimpleFileOptions::default();
+
+            zip.start_file("_rels/.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>
+</Relationships>"#).unwrap();
+
+            zip.start_file("xl/workbook.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="RGB_Sheet" sheetId="1" r:id="rId1"/>
+    <sheet name="Theme_Sheet" sheetId="2" r:id="rId2"/>
+    <sheet name="NoColor_Sheet" sheetId="3" r:id="rId3"/>
+  </sheets>
+</workbook>"#).unwrap();
+
+            // 시트 0: rgb="FF10B981" 직접 지정
+            zip.start_file("xl/worksheets/sheet1.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr><tabColor rgb="FF10B981"/></sheetPr>
+  <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
+</worksheet>"#).unwrap();
+
+            // 시트 1: theme="4" (accent1 = #4472C4) + tint="0.4"
+            zip.start_file("xl/worksheets/sheet2.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr><tabColor theme="4" tint="0.4"/></sheetPr>
+  <sheetData><row r="1"><c r="A1"><v>2</v></c></row></sheetData>
+</worksheet>"#).unwrap();
+
+            // 시트 2: tabColor 없음
+            zip.start_file("xl/worksheets/sheet3.xml", opts).unwrap();
+            zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1"><v>3</v></c></row></sheetData>
+</worksheet>"#).unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let c_path = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let book = as_open(c_path.as_ptr());
+        assert!(!book.is_null());
+
+        let mut color = ASColor::default();
+
+        // 1. RGB 직접 지정 확인 (#10B981)
+        assert!(as_sheet_tab_color(book, 0, &mut color));
+        assert_eq!((color.r, color.g, color.b, color.a), (0x10, 0xB9, 0x81, 0xFF));
+
+        // 2. theme="4" + tint="0.4" 확인
+        assert!(as_sheet_tab_color(book, 1, &mut color));
+        let expected_tinted = apply_color_tint(Rgba::from_hex("4472C4").unwrap(), 0.4);
+        assert_eq!(
+            (color.r, color.g, color.b),
+            (expected_tinted.r, expected_tinted.g, expected_tinted.b)
+        );
+
+        // 3. 탭 색상 없음 -> false
+        assert!(!as_sheet_tab_color(book, 2, &mut color));
+
+        // 4. 범위 밖 시트 인덱스 -> false
+        assert!(!as_sheet_tab_color(book, 99, &mut color));
+
+        // 5. 널 포인터 방어 -> 패닉 없이 false
+        assert!(!as_sheet_tab_color(ptr::null(), 0, &mut color));
+        assert!(!as_sheet_tab_color(book, 0, ptr::null_mut()));
+
+        as_close(book);
     }
 }

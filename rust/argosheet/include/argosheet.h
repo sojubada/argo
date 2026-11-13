@@ -219,6 +219,8 @@ uint32_t         as_sheet_overlay_count(const ASBook* book, uint32_t sheet);
 bool             as_sheet_overlay_info(const ASBook* book, uint32_t sheet, uint32_t overlay_idx, ASOverlayInfo* out);
 ASDrawList*      as_sheet_overlay_drawlist(const ASBook* book, uint32_t sheet, uint32_t overlay_idx); // as_drawlist_free 로 해제
 const uint8_t*   as_sheet_overlay_bytes(const ASBook* book, uint32_t sheet, uint32_t overlay_idx, uint32_t* out_len); // 책이 살아 있는 동안 유효
+/* 시트 탭 색(<sheetPr><tabColor>). 없으면 false. */
+bool             as_sheet_tab_color(const ASBook* book, uint32_t sheet, ASColor* out);
 
 #ifdef __cplusplus
 }

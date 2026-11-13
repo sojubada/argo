@@ -44,6 +44,7 @@
 		DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */; };
 		A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */; };
 		A0C0FFEE0000000000000C01 /* ArgoSheetViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000C02 /* ArgoSheetViewer.swift */; };
+		A0C0FFEE0000000000000C03 /* ArgoSheetChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000C04 /* ArgoSheetChrome.swift */; };
 		C3A7D19E4B2F4E6A9D8E1F01 /* ArgoPDFNight.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A7D19E4B2F4E6A9D8E1F02 /* ArgoPDFNight.swift */; };
 		D1A90001C0DE4A0099110001 /* ArgoDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A90002C0DE4A0099110002 /* ArgoDiag.swift */; };
 		D1A900F1C0DE4A00991100F1 /* ArgoFontLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A900F2C0DE4A00991100F2 /* ArgoFontLibrary.swift */; };
@@ -179,6 +180,7 @@
 		9CA0F9DD7F774B8AA76E892E /* ArgoClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoClipboard.swift; sourceTree = "<group>"; };
 		7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoPDFReader.swift; sourceTree = "<group>"; };
 		A0C0FFEE0000000000000C02 /* ArgoSheetViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoSheetViewer.swift; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000C04 /* ArgoSheetChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoSheetChrome.swift; sourceTree = "<group>"; };
 		C3A7D19E4B2F4E6A9D8E1F02 /* ArgoPDFNight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoPDFNight.swift; sourceTree = "<group>"; };
 		D1A90002C0DE4A0099110002 /* ArgoDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoDiag.swift; sourceTree = "<group>"; };
 		D1A900F2C0DE4A00991100F2 /* ArgoFontLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgoFontLibrary.swift; sourceTree = "<group>"; };
@@ -383,6 +385,7 @@
 			children = (
 				7289E629B5EA4DA280766C1E /* ArgoPDFReader.swift */,
 				A0C0FFEE0000000000000C02 /* ArgoSheetViewer.swift */,
+				A0C0FFEE0000000000000C04 /* ArgoSheetChrome.swift */,
 				C3A7D19E4B2F4E6A9D8E1F02 /* ArgoPDFNight.swift */,
 				D1A90002C0DE4A0099110002 /* ArgoDiag.swift */,
 				A0EC412E72644794AC5DAE38 /* ArgoTextReader.swift */,
@@ -783,6 +786,7 @@
 				DA18E8ADBBCA418B9F46DA96 /* ArgoClipboard.swift in Sources */,
 				A1F1F25DB5074E8FA713C772 /* ArgoPDFReader.swift in Sources */,
 				A0C0FFEE0000000000000C01 /* ArgoSheetViewer.swift in Sources */,
+				A0C0FFEE0000000000000C03 /* ArgoSheetChrome.swift in Sources */,
 				C3A7D19E4B2F4E6A9D8E1F01 /* ArgoPDFNight.swift in Sources */,
 				D1A90001C0DE4A0099110001 /* ArgoDiag.swift in Sources */,
 				D1A900F1C0DE4A00991100F1 /* ArgoFontLibrary.swift in Sources */,

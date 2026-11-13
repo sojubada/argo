@@ -994,6 +994,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
     let mut default_row_height_pt: f32 = 15.0;
     let mut show_grid_lines = true;
     let mut freeze: Option<FreezePane> = None;
+    let mut tab_color: Option<Rgba> = None;
     let mut auto_filter: Option<CellRange> = None;
     let mut merges: Vec<CellRange> = Vec::new();
     let mut validations: Vec<DataValidationEntry> = Vec::new();
@@ -1060,6 +1061,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
                 match local.as_ref() {
                     b"sheetView" => parse_sheet_view_attrs(&e, &mut show_grid_lines),
                     b"pane" => parse_pane_attrs(&e, &mut freeze),
+                    b"tabColor" => parse_tab_color_element(&e, styles, &mut tab_color),
                     b"sheetFormatPr" => parse_sheet_format_pr(
                         &e,
                         mdw_px,
@@ -1265,6 +1267,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
                 match local.as_ref() {
                     b"sheetView" => parse_sheet_view_attrs(&e, &mut show_grid_lines),
                     b"pane" => parse_pane_attrs(&e, &mut freeze),
+                    b"tabColor" => parse_tab_color_element(&e, styles, &mut tab_color),
                     b"sheetFormatPr" => parse_sheet_format_pr(
                         &e,
                         mdw_px,
@@ -1695,6 +1698,7 @@ fn parse_worksheet_xml<R: Read + Seek>(
         cf_blocks,
         tables,
         raw_drawings,
+        tab_color,
     })
 }
 
@@ -1829,6 +1833,17 @@ fn parse_sheet_view_attrs(e: &quick_xml::events::BytesStart, show_grid_lines: &m
             let v = attr.unescape_value().unwrap_or_default();
             *show_grid_lines = !(v == "0" || v.eq_ignore_ascii_case("false"));
         }
+    }
+}
+
+/// `<sheetPr><tabColor rgb|theme+tint|indexed/>` → 시트 탭 색. 셀 색과 같은 해석(테마·tint·indexed)을 쓴다.
+fn parse_tab_color_element(
+    e: &quick_xml::events::BytesStart,
+    styles: &StyleSheet,
+    out_tab_color: &mut Option<Rgba>,
+) {
+    if let Some(resolved) = parse_color_attrs(e).resolve(&styles.theme_colors, &styles.custom_indexed) {
+        *out_tab_color = Some(resolved);
     }
 }
 

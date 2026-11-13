@@ -5150,6 +5150,7 @@ mod tests {
             cf_blocks: Vec::new(),
             tables: Vec::new(),
             raw_drawings: Vec::new(),
+            tab_color: None,
         };
 
         Workbook {
@@ -5468,6 +5469,7 @@ mod tests {
             cf_blocks: Vec::new(),
             tables: Vec::new(),
             raw_drawings: Vec::new(),
+            tab_color: None,
         };
 
         Workbook {
