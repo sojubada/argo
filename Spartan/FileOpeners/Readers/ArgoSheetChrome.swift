@@ -307,7 +307,7 @@ struct ArgoSheetPalette: Equatable {
 
 private extension CGFloat {
     func clamp(_ lo: CGFloat, _ hi: CGFloat) -> CGFloat {
-        min(max(self, lo), hi)
+        Swift.min(Swift.max(self, lo), hi)
     }
 }
 
