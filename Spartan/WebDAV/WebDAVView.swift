@@ -412,6 +412,11 @@ struct WebDAVBrowserView: View {
             Text("\(server.displayName)   copy to \(destination)")
                 .font(.caption)
                 .foregroundColor(.secondary)
+            // 지금 몇 번째인지 / 전체, 고른 수.
+            Text(positionText)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundColor(.secondary)
 
             HStack {
                 Button(action: { goBack() }) {
@@ -481,6 +486,15 @@ struct WebDAVBrowserView: View {
                 }
             }
         }
+    }
+
+    private var positionText: String {
+        var s = "\(items.count)"
+        if let f = focusedPath, let i = items.firstIndex(where: { $0.path == f }) {
+            s = "\(i + 1) / \(items.count)"
+        }
+        if !picked.isEmpty { s += "   ✓ \(picked.count)" }
+        return s
     }
 
     // MARK: Listing

@@ -180,12 +180,23 @@ struct FilePaneView: View {
                 .lineLimit(1)
                 .truncationMode(.head)
             Spacer()
-            Text("\(model.masterFiles.count)")
+            // 지금 몇 번째인지 / 전체. 포커스가 칸을 떠나 있으면 마지막으로 있던 자리를 보인다.
+            Text(positionText)
                 .font(.caption)
+                .monospacedDigit()
                 .foregroundColor(Theme.textSecondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// "12 / 340". 위치를 모르면(아직 목록에 들어오지 않음) 전체 수만.
+    private var positionText: String {
+        let total = model.masterFiles.count
+        if let row = focusedRow ?? model.lastFocusedIndex, row >= 0, row < total {
+            return "\(row + 1) / \(total)"
+        }
+        return "\(total)"
     }
 
     // MARK: - 목록
