@@ -121,6 +121,10 @@ enum ArgoFontLibrary {
 
     /// 쓸 수 있는 글꼴 얼굴 전부. 사용자 폴더 → 앱에 든 것 → 기기 것 순서다.
     static func allFaces() -> [ArgoFontFace] {
+        // 앱을 켠 채로 글꼴을 넣어도 다음 문서부터 보이게. 폴더(와 바로 아래 폴더)의 수정 시각이
+        // 바뀌었으면 다시 훑는다. 전에는 설정의 '다시 읽기' 를 누르거나 앱을 다시 켜야 했다.
+        let sig = folderSignature()
+        if sig != lastSignature { cached = nil; cachedRoots = nil; lastSignature = folderSignature() }
         if let cached { return cached }
         ensureFolder()
         var faces = indexedUserFaces()
@@ -140,6 +144,28 @@ enum ArgoFontLibrary {
         let ttf = mine.filter { $0.ttf }.count
         ArgoDiag.log("font", "글꼴 얼굴 \(faces.count)개 (사용자 폴더 \(mine.count)개 중 오피스용 TrueType \(ttf)개, 앱·기기 \(faces.count - mine.count)개)")
         return faces
+    }
+
+    private static var lastSignature = ""
+
+    /// 글꼴 폴더들과 그 바로 아래 폴더들의 수정 시각. 파일을 넣거나 빼면 그 폴더 시각이 바뀐다.
+    private static func folderSignature() -> String {
+        let fm = FileManager.default
+        var parts: [String] = []
+        let roots = cachedRoots ?? userRoots()
+        for root in roots {
+            func stamp(_ p: String) {
+                let m = (try? fm.attributesOfItem(atPath: p)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                parts.append("\(p)=\(m)")
+            }
+            stamp(root)
+            for sub in ((try? fm.contentsOfDirectory(atPath: root)) ?? []).prefix(200) {
+                let p = (root as NSString).appendingPathComponent(sub)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue { stamp(p) }
+            }
+        }
+        return parts.joined(separator: "|")
     }
 
     /// 폴더 내용이 바뀌었을 수 있을 때. 다음에 allFaces 를 부르면 다시 훑는다.
@@ -322,9 +348,17 @@ enum ArgoFontLibrary {
             }
             if n > cap { cap = n; continue }
             guard n > 0 else { return [] }
-            return (try? JSONDecoder().decode([String].self, from: Data(buffer[0..<n]))) ?? []
+            let names = (try? JSONDecoder().decode([String].self, from: Data(buffer[0..<n]))) ?? []
+            // 워드 문서의 언어 표시(ko-KR, en-US, x-none)가 글꼴 이름 자리에 섞여 온다. 글꼴이 아니다.
+            return names.filter { !isLanguageTag($0) }
         }
         return []
+    }
+
+    static func isLanguageTag(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        if t.lowercased() == "x-none" { return true }
+        return t.range(of: "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})+$", options: .regularExpression) != nil
     }
 
     struct Pick {
@@ -348,8 +382,18 @@ enum ArgoFontLibrary {
 
         // 2. 닮은 갈래 (명조·고딕·손글씨·고정폭·제목용)
         let want = category(of: [wanted])
-        let userFaces = usable.filter(isUserFace)
-        let pool = userFaces.isEmpty ? usable : userFaces
+        // 2-1. 갈래마다 '무난한 대표 글꼴' 이 있으면 그것. 예전에는 폴더에서 처음 만난 것을 골라
+        //      고딕 문서가 HY목각파임B(장식체)로 그려졌다.
+        for pref in preferred(for: want) {
+            let hit = usable.filter { face in face.names.contains { normalize(stripStyle($0)) == pref || normalize($0) == pref } }
+            if !hit.isEmpty {
+                let regular = bestRegular(hit)
+                return Pick(regular: want == .display ? (bestBold(hit) ?? regular) : regular,
+                            bold: want == .display ? nil : bestBold(hit), exact: false)
+            }
+        }
+        // 2-2. 대표 글꼴이 하나도 없으면 같은 갈래에서. 장식체(목각·엽서·매직 …)는 고르지 않는다.
+        let pool = usable.filter { !isDecorative($0.names) }.isEmpty ? usable : usable.filter { !isDecorative($0.names) }
         var candidates = pool.filter { category(of: $0.names) == want }
         if candidates.isEmpty && want == .display { candidates = pool.filter { category(of: $0.names) == .sans } }
         if candidates.isEmpty && want != .sans { candidates = pool.filter { category(of: $0.names) == .sans } }
@@ -366,6 +410,32 @@ enum ArgoFontLibrary {
         let bold = want == .display ? nil : bestBold(familyOrFirst)
         return Pick(regular: want == .display ? (bestBold(familyOrFirst) ?? regular) : regular,
                     bold: bold, exact: false)
+    }
+
+    /// 갈래별 대표 글꼴(정규화한 이름). 앞에 있을수록 먼저 고른다. 끝의 Pretendard·산돌고딕은 앱·기기에 늘 있다.
+    private static func preferred(for c: Category) -> [String] {
+        switch c {
+        case .serif:
+            return ["함초롬바탕", "hcrbatang", "한컴바탕", "hancombatang", "바탕", "batang", "나눔명조", "nanummyeongjo",
+                    "본명조", "notoserifkr", "sourcehanserifkr", "kopub바탕체", "kopubbatang"]
+        case .sans:
+            return ["맑은고딕", "malgungothic", "함초롬돋움", "hcrdotum", "나눔고딕", "nanumgothic", "한컴돋움", "hancomdotum",
+                    "돋움", "dotum", "굴림", "gulim", "본고딕", "notosanskr", "sourcehansanskr", "pretendard", "applesdgothicneo"]
+        case .display:
+            return ["hy헤드라인m", "hyheadlinem", "hyheadlinemedium", "휴먼둥근헤드라인", "hy견고딕", "hygothicextra", "맑은고딕", "malgungothic", "pretendard"]
+        case .brush:
+            return ["궁서", "gungsuh", "hy궁서b", "hygungsob", "휴먼옛체"]
+        case .mono:
+            return ["d2coding", "굴림체", "gulimche", "돋움체", "dotumche", "consolas", "couriernew", "liberationmono", "sfmono"]
+        }
+    }
+
+    /// 제목·꾸밈용 글꼴. 본문 대신 그리면 문서가 엉뚱해 보인다.
+    private static func isDecorative(_ names: [String]) -> Bool {
+        let all = names.map(normalize).joined(separator: " ")
+        return ["목각", "mokgak", "엽서", "yeopseo", "매직", "magic", "엑스포", "expo", "옛체", "그래픽", "graphic",
+                "샤넬", "소슬", "튼튼", "모음", "wingding", "webding", "symbol", "marlett", "dingbat", "emoji"]
+            .contains { all.contains($0) }
     }
 
     private static func bestRegular(_ faces: [ArgoFontFace]) -> ArgoFontFace {
@@ -426,7 +496,7 @@ enum ArgoFontLibrary {
         if has(["궁서", "gungsuh", "붓", "손글씨", "필기", "흘림", "펜글씨", "brush", "script", "handwriting", "pen", "calligraph", "붓글씨"]) { return .brush }
         if has(["mono", "coding", "courier", "consolas", "d2coding", "고정폭", "바탕체", "굴림체", "돋움체", "batangche", "gulimche", "dotumche", "menlo"]) { return .mono }
         if has(["헤드라인", "headline", "견고딕", "태고딕", "impact", "display", "poster"]) { return .display }
-        if has(["명조", "바탕", "myeongjo", "myungjo", "batang", "serif", "times", "garamond", "georgia", "cambria", "mincho", "song", "신명", "순명", "궁체"]) {
+        if has(["명조", "바탕", "myeongjo", "myungjo", "batang", "serif", "times", "garamond", "georgia", "cambria", "mincho", "song", "신명", "순명", "궁체", "明", "ming", "宋", "serif"]) {
             // "sans serif" 는 고딕이다.
             if all.contains("sans") { return .sans }
             return .serif
