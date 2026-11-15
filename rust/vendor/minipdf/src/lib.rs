@@ -158,6 +158,19 @@ pub fn register_font(name: impl Into<String>, font_data: impl Into<Vec<u8>>) {
     pdf::clear_font_support_cache();
 }
 
+/// 이미 넣은 글꼴(target)을 다른 이름으로도 쓰게 한다. 바이트를 다시 받지 않는다.
+/// target 이 없으면 false.
+pub fn register_font_alias(name: impl Into<String>, target: &str) -> bool {
+    let fonts = REGISTERED_FONTS.get_or_init(|| Mutex::new(Vec::new()));
+    let mut fonts = fonts.lock().expect("font registry lock poisoned");
+    let Some(data) = fonts.iter().find(|f| f.name.eq_ignore_ascii_case(target)).map(|f| f.data.clone()) else {
+        return false;
+    };
+    fonts.push(RegisteredFont { name: name.into(), data });
+    pdf::clear_font_support_cache();
+    true
+}
+
 /// 등록한 글꼴을 모두 비운다. 문서마다 필요한 글꼴만 다시 넣으려고 쓴다 —
 /// 안 비우면 문서를 열 때마다 글꼴 바이트가 쌓인다.
 pub fn clear_fonts() {

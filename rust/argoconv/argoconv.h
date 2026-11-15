@@ -16,6 +16,8 @@
 
 /// 폰트를 등록한다. tvOS 에는 fontconfig 가 없어 직접 먹여야 한다.
 int argoconv_register_font(const char *name, const uint8_t *data, size_t len);
+/* 이미 넣은 글꼴(target)을 다른 이름으로도 쓰게 한다. 바이트를 다시 넘기지 않는다. */
+int argoconv_register_font_alias(const char *name, const char *target);
 
 /// docx · xlsx · pptx -> PDF. 성공하면 out 버퍼를 argoconv_free 로 돌려줄 것.
 int argoconv_to_pdf(const uint8_t *input, size_t len,

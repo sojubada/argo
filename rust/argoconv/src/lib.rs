@@ -167,6 +167,23 @@ pub unsafe extern "C" fn argoconv_register_font(
     ARGOCONV_OK
 }
 
+/// 이미 넣은 글꼴(target)을 다른 이름(name)으로도 쓰게 한다. 글꼴 바이트를 다시
+/// 넘기지 않아도 된다 — 문서가 쓰는 이름 수십 개가 같은 파일로 갈 때 이름마다 10MB 를
+/// 복사하던 것이 문서 열기를 몇 초씩 늦췄다. target 이 없으면 ARGOCONV_BAD_ARGS.
+///
+/// # Safety
+/// 두 인자 모두 NUL 로 끝나는 UTF-8 문자열이어야 한다.
+#[no_mangle]
+pub unsafe extern "C" fn argoconv_register_font_alias(name: *const c_char, target: *const c_char) -> c_int {
+    if name.is_null() || target.is_null() {
+        return ARGOCONV_BAD_ARGS;
+    }
+    let (Ok(name), Ok(target)) = (std::ffi::CStr::from_ptr(name).to_str(), std::ffi::CStr::from_ptr(target).to_str()) else {
+        return ARGOCONV_BAD_ARGS;
+    };
+    if minipdf::register_font_alias(name.to_owned(), target) { ARGOCONV_OK } else { ARGOCONV_BAD_ARGS }
+}
+
 /// docx · xlsx · pptx 를 PDF 로 바꾼다.
 ///
 /// 성공하면 `out` 에 버퍼를, `out_len` 에 길이를 넣는다.

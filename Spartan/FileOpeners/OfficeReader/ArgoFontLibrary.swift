@@ -123,8 +123,9 @@ enum ArgoFontLibrary {
     static func allFaces() -> [ArgoFontFace] {
         // 앱을 켠 채로 글꼴을 넣어도 다음 문서부터 보이게. 폴더(와 바로 아래 폴더)의 수정 시각이
         // 바뀌었으면 다시 훑는다. 전에는 설정의 '다시 읽기' 를 누르거나 앱을 다시 켜야 했다.
-        let sig = folderSignature()
-        if sig != lastSignature { cached = nil; cachedRoots = nil; lastSignature = folderSignature() }
+        // (서명은 다시 훑은 '뒤' 에 잰다. 훑으면서 색인 파일을 쓰면 폴더 시각이 바뀌어,
+        //  앞에서 재면 문서마다 다시 훑었다.)
+        if folderSignature() != lastSignature { cached = nil; cachedRoots = nil; nameIndex = nil }
         if let cached { return cached }
         ensureFolder()
         var faces = indexedUserFaces()
@@ -139,6 +140,7 @@ enum ArgoFontLibrary {
             faces += readFaces(p)
         }
         cached = faces
+        lastSignature = folderSignature()
         let mine = faces.filter(isUserFace)
         // 오피스 문서(워드·엑셀·파워포인트)에는 TrueType 만 심을 수 있다. OTF 는 한글 문서에만 쓴다.
         let ttf = mine.filter { $0.ttf }.count
@@ -307,10 +309,18 @@ enum ArgoFontLibrary {
         var filesIn = Set<String>()
         var bytesIn = 0
         let budget = 160 * 1024 * 1024
+        // 이 글꼴 파일(+ttc 안 번호)을 처음 넣은 이름. 같은 파일을 다른 이름으로 또 쓸 때는
+        // 바이트를 다시 넘기지 않고 그 이름에 별칭만 건다(넘길 때마다 변환기가 통째로 복사했다).
+        var firstAlias: [String: String] = [:]
         func register(_ face: ArgoFontFace, as alias: String) {
             let key = alias.lowercased()
-            guard !registered.contains(key),
-                  let data = try? Data(contentsOf: URL(fileURLWithPath: face.path), options: .alwaysMapped)
+            guard !registered.contains(key) else { return }
+            let fileKey = face.path + "#\(face.index)"
+            if let first = firstAlias[fileKey], argoconv_register_font_alias(alias, first) == 0 {
+                registered.insert(key)
+                return
+            }
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: face.path), options: .alwaysMapped)
             else { return }
             if !filesIn.contains(face.path) {
                 if bytesIn + data.count > budget, !filesIn.isEmpty {
@@ -321,10 +331,11 @@ enum ArgoFontLibrary {
                 bytesIn += data.count
             }
             registered.insert(key)
-            _ = data.withUnsafeBytes { raw -> Int32 in
+            let rc = data.withUnsafeBytes { raw -> Int32 in
                 guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return -1 }
                 return argoconv_register_font(alias, base, data.count)
             }
+            if rc == 0, firstAlias[fileKey] == nil { firstAlias[fileKey] = alias }
         }
         for face in faces where !isUserFace(face) && face.index == 0 {
             register(face, as: ((face.path as NSString).lastPathComponent as NSString).deletingPathExtension.lowercased())
@@ -390,13 +401,41 @@ enum ArgoFontLibrary {
     }
 
     /// 이름으로 찾고, 없으면 닮은 것을 고른다.
+    /// 이름(정규화) → 얼굴 번호, 얼굴마다 갈래·장식체 여부. 얼굴 600개 × 문서 글꼴 수십 개를
+    /// 매번 문자열로 훑던 것을 한 번만 계산한다.
+    private static var nameIndex: [String: [Int]]?
+    private static var indexedCount = -1
+    private static var faceCategory: [Category] = []
+    private static var faceDecorative: [Bool] = []
+
+    private static func ensureIndex(_ faces: [ArgoFontFace]) {
+        if nameIndex != nil, indexedCount == faces.count { return }
+        var idx: [String: [Int]] = [:]
+        for (i, f) in faces.enumerated() {
+            var keys = Set<String>()
+            for n in f.names { keys.insert(normalize(n)); keys.insert(normalize(stripStyle(n))) }
+            for k in keys { idx[k, default: []].append(i) }
+        }
+        nameIndex = idx
+        indexedCount = faces.count
+        faceCategory = faces.map { category(of: $0.names) }
+        faceDecorative = faces.map { isDecorative($0.names) }
+    }
+
     static func resolve(_ wanted: String, in faces: [ArgoFontFace], consumer: Consumer) -> Pick? {
-        let usable = faces.filter { consumer == .hangul || $0.ttf }
-        guard !usable.isEmpty else { return nil }
+        ensureIndex(faces)
+        let ok: (Int) -> Bool = { consumer == .hangul || faces[$0].ttf }
+        guard faces.indices.contains(where: ok) else { return nil }
         let keys = Set([normalize(wanted)] + aliases(of: wanted))
+        func named(_ ks: [String]) -> [ArgoFontFace] {
+            var seen = Set<Int>()
+            var out: [ArgoFontFace] = []
+            for k in ks { for i in nameIndex?[k] ?? [] where ok(i) && seen.insert(i).inserted { out.append(faces[i]) } }
+            return out
+        }
 
         // 1. 같은 이름 (이름표의 어느 말로든)
-        let same = usable.filter { face in face.names.contains { keys.contains(normalize(stripStyle($0))) || keys.contains(normalize($0)) } }
+        let same = named(Array(keys))
         if !same.isEmpty {
             return Pick(regular: bestRegular(same), bold: bestBold(same), exact: true)
         }
@@ -406,7 +445,7 @@ enum ArgoFontLibrary {
         // 2-1. 갈래마다 '무난한 대표 글꼴' 이 있으면 그것. 예전에는 폴더에서 처음 만난 것을 골라
         //      고딕 문서가 HY목각파임B(장식체)로 그려졌다.
         for pref in preferred(for: want) {
-            let hit = usable.filter { face in face.names.contains { normalize(stripStyle($0)) == pref || normalize($0) == pref } }
+            let hit = named([pref])
             if !hit.isEmpty {
                 let regular = bestRegular(hit)
                 return Pick(regular: want == .display ? (bestBold(hit) ?? regular) : regular,
@@ -414,11 +453,14 @@ enum ArgoFontLibrary {
             }
         }
         // 2-2. 대표 글꼴이 하나도 없으면 같은 갈래에서. 장식체(목각·엽서·매직 …)는 고르지 않는다.
-        let pool = usable.filter { !isDecorative($0.names) }.isEmpty ? usable : usable.filter { !isDecorative($0.names) }
-        var candidates = pool.filter { category(of: $0.names) == want }
-        if candidates.isEmpty && want == .display { candidates = pool.filter { category(of: $0.names) == .sans } }
-        if candidates.isEmpty && want != .sans { candidates = pool.filter { category(of: $0.names) == .sans } }
-        if candidates.isEmpty { candidates = pool }
+        let usableIdx = faces.indices.filter(ok)
+        let plain = usableIdx.filter { !faceDecorative[$0] }
+        let poolIdx = plain.isEmpty ? usableIdx : plain
+        func of(_ c: Category) -> [ArgoFontFace] { poolIdx.filter { faceCategory[$0] == c }.map { faces[$0] } }
+        var candidates = of(want)
+        if candidates.isEmpty && want == .display { candidates = of(.sans) }
+        if candidates.isEmpty && want != .sans { candidates = of(.sans) }
+        if candidates.isEmpty { candidates = poolIdx.map { faces[$0] } }
         // 한글을 그릴 수 있는 것을 먼저 둔다. 한글 문서가 대부분이고, 영문 글꼴로
         // 바꾸면 한글 부분이 다른 글꼴로 갈라져 보인다.
         let withHangul = candidates.filter { $0.hangul }
