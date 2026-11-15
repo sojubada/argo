@@ -132,8 +132,12 @@ enum ArgoFontLibrary {
         // ArgoHanja: 한자(4,899자, Noto Sans KR 에서 한자만 추려냄). Pretendard 에 한자가 없어
         // '新'·'社' 가 네모로 나오던 것을 글자 대체로 메운다 — 글꼴 이름으로 고르지는 않는다.
         // LiberationSans: Arial 과 글자 폭·모양이 같은 글꼴(OFL). 'Arial' 을 이것으로 그린다.
+        // 나눔스퀘어_ac·나눔고딕 ExtraBold: 회사 문서(pptx 표지·제목)에서 자주 쓰는데 윈도에 없는
+        // 네이버 글꼴(OFL — 앱에 넣어 재배포 가능, Nanum-LICENSE.txt 동봉).
         for name in ["Pretendard-Regular", "Pretendard-Bold",
-                     "ArgoHanja-Regular", "LiberationSans-Regular", "LiberationSans-Bold"] {
+                     "ArgoHanja-Regular", "LiberationSans-Regular", "LiberationSans-Bold",
+                     "NanumSquare_acL", "NanumSquare_acR", "NanumSquare_acB", "NanumSquare_acEB",
+                     "NanumGothic-ExtraBold"] {
             if let p = Bundle.main.path(forResource: name, ofType: "ttf") { faces += readFaces(p) }
         }
         for p in systemCandidates where FileManager.default.fileExists(atPath: p) {
@@ -338,7 +342,10 @@ enum ArgoFontLibrary {
             if rc == 0, firstAlias[fileKey] == nil { firstAlias[fileKey] = alias }
         }
         for face in faces where !isUserFace(face) && face.index == 0 {
-            register(face, as: ((face.path as NSString).lastPathComponent as NSString).deletingPathExtension.lowercased())
+            let file = ((face.path as NSString).lastPathComponent as NSString).deletingPathExtension.lowercased()
+            // 나눔 글꼴은 문서가 그 이름을 쓸 때만 넣는다(받침 글꼴로는 Pretendard 가 맡는다).
+            if file.hasPrefix("nanum") { continue }
+            register(face, as: file)
         }
 
         var report: [String] = []

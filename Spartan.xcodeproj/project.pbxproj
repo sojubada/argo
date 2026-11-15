@@ -81,6 +81,12 @@
 		A0C0FFEE0000000000000B01 /* ArgoHanja-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000B02 /* ArgoHanja-Regular.ttf */; };
 		A0C0FFEE0000000000000B03 /* LiberationSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000B04 /* LiberationSans-Regular.ttf */; };
 		A0C0FFEE0000000000000B05 /* LiberationSans-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000B06 /* LiberationSans-Bold.ttf */; };
+		A0C0FFEE0000000000000E01 /* NanumSquare_acL.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E02 /* NanumSquare_acL.ttf */; };
+		A0C0FFEE0000000000000E03 /* NanumSquare_acR.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E04 /* NanumSquare_acR.ttf */; };
+		A0C0FFEE0000000000000E05 /* NanumSquare_acB.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E06 /* NanumSquare_acB.ttf */; };
+		A0C0FFEE0000000000000E07 /* NanumSquare_acEB.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E08 /* NanumSquare_acEB.ttf */; };
+		A0C0FFEE0000000000000E09 /* NanumGothic-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E10 /* NanumGothic-ExtraBold.ttf */; };
+		A0C0FFEE0000000000000E11 /* Nanum-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E12 /* Nanum-LICENSE.txt */; };
 		CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */; };
 		1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */; };
 		F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F83F052D2A297CDE00EB0720 /* Sheikah.ttf */; };
@@ -216,6 +222,12 @@
 		A0C0FFEE0000000000000B02 /* ArgoHanja-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/ArgoHanja-Regular.ttf"; sourceTree = "<group>"; };
 		A0C0FFEE0000000000000B04 /* LiberationSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/LiberationSans-Regular.ttf"; sourceTree = "<group>"; };
 		A0C0FFEE0000000000000B06 /* LiberationSans-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/LiberationSans-Bold.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000E02 /* NanumSquare_acL.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/NanumSquare_acL.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000E04 /* NanumSquare_acR.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/NanumSquare_acR.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000E06 /* NanumSquare_acB.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/NanumSquare_acB.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000E08 /* NanumSquare_acEB.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/NanumSquare_acEB.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000E10 /* NanumGothic-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/NanumGothic-ExtraBold.ttf"; sourceTree = "<group>"; };
+		A0C0FFEE0000000000000E12 /* Nanum-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Fonts/Nanum-LICENSE.txt"; sourceTree = "<group>"; };
 		6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-Bold.ttf"; sourceTree = "<group>"; };
 		8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-LICENSE.txt"; sourceTree = "<group>"; };
 		F83F052D2A297CDE00EB0720 /* Sheikah.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Sheikah.ttf; sourceTree = "<group>"; };
@@ -526,6 +538,12 @@
 				A0C0FFEE0000000000000B02 /* ArgoHanja-Regular.ttf */,
 				A0C0FFEE0000000000000B04 /* LiberationSans-Regular.ttf */,
 				A0C0FFEE0000000000000B06 /* LiberationSans-Bold.ttf */,
+				A0C0FFEE0000000000000E02 /* NanumSquare_acL.ttf */,
+				A0C0FFEE0000000000000E04 /* NanumSquare_acR.ttf */,
+				A0C0FFEE0000000000000E06 /* NanumSquare_acB.ttf */,
+				A0C0FFEE0000000000000E08 /* NanumSquare_acEB.ttf */,
+				A0C0FFEE0000000000000E10 /* NanumGothic-ExtraBold.ttf */,
+				A0C0FFEE0000000000000E12 /* Nanum-LICENSE.txt */,
 				6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */,
 				8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */,
 				F83F052D2A297CDE00EB0720 /* Sheikah.ttf */,
@@ -719,6 +737,12 @@
 				A0C0FFEE0000000000000B01 /* ArgoHanja-Regular.ttf in Resources */,
 				A0C0FFEE0000000000000B03 /* LiberationSans-Regular.ttf in Resources */,
 				A0C0FFEE0000000000000B05 /* LiberationSans-Bold.ttf in Resources */,
+				A0C0FFEE0000000000000E01 /* NanumSquare_acL.ttf in Resources */,
+				A0C0FFEE0000000000000E03 /* NanumSquare_acR.ttf in Resources */,
+				A0C0FFEE0000000000000E05 /* NanumSquare_acB.ttf in Resources */,
+				A0C0FFEE0000000000000E07 /* NanumSquare_acEB.ttf in Resources */,
+				A0C0FFEE0000000000000E09 /* NanumGothic-ExtraBold.ttf in Resources */,
+				A0C0FFEE0000000000000E11 /* Nanum-LICENSE.txt in Resources */,
 				CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */,
 				1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */,
 				F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */,

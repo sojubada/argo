@@ -163,12 +163,11 @@ fn document_fonts(bytes: &[u8]) -> Vec<String> {
             if file.read_to_string(&mut xml).is_err() {
                 continue;
             }
-            for key in ["typeface=\"", "w:ascii=\"", "w:eastAsia=\"", "w:hAnsi=\"", "face=\"", "w:name=\""] {
-                // w:name 은 fontTable 에서만 글꼴 이름이다. styles.xml 의
-                // <w:lsdException w:name="heading 1"> 은 스타일 이름이다.
-                if key == "w:name=\"" && !name.contains("fontTable") {
-                    continue;
-                }
+            // w:name(fontTable·스타일 이름)은 보지 않는다. 워드의 fontTable 은 테마가 언급하는
+            // 모든 글자 체계용 예비 글꼴(Angsana New·Nyala·Vrinda … 수십 개)을 늘어놓을 뿐
+            // 문서가 실제로 쓰는 목록이 아니다 — 그것을 다 넣다가 메모리가 넘쳐 앱이 꺼졌다.
+            // 실제로 쓰는 글꼴은 본문·스타일의 w:rFonts 와 테마의 a:latin·a:ea·a:cs 에 있다.
+            for key in ["typeface=\"", "w:ascii=\"", "w:eastAsia=\"", "w:hAnsi=\"", "face=\""] {
                 let mut rest = xml.as_str();
                 while let Some(at) = rest.find(key) {
                     // 테마의 <a:font script="Thai" typeface="Angsana New"/> 는 그 글자 체계를
@@ -176,7 +175,14 @@ fn document_fonts(bytes: &[u8]) -> Vec<String> {
                     // 다 넣으면 메모리가 넘쳐 앱이 꺼졌다. 쓰는 글꼴(a:latin·a:ea·a:cs)만 본다.
                     let before = &rest[..at];
                     let tag_start = before.rfind('<').map(|i| &before[i..]).unwrap_or("");
-                    let skip = key == "typeface=\"" && tag_start.starts_with("<a:font ");
+                    // 접두어가 a: 가 아닌 문서(기본 이름공간·strict)도 있다: <font script=…>.
+                    let is_font_tag = tag_start
+                        .trim_start_matches('<')
+                        .split(|c: char| c.is_whitespace())
+                        .next()
+                        .map(|t| t == "font" || t.ends_with(":font"))
+                        .unwrap_or(false);
+                    let skip = key == "typeface=\"" && is_font_tag && tag_start.contains("script=");
                     rest = &rest[at + key.len()..];
                     if let Some(end) = rest.find('"') {
                         if !skip {
