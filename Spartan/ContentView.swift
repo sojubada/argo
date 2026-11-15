@@ -366,6 +366,8 @@ struct ContentView: View {
                         // 칸이면 그 칸을, 아니면 양쪽 다 새로 읽는다.
                         leftPane.updateFiles()
                         rightPane.updateFiles()
+                        // 바로 재생 주소를 더 쓸 수 없게 지운다.
+                        ArgoRemoteStream.shared.forgetRoutes()
                     }, content: {
                         WebDAVRootView(
                             // 읽을 때는 늘 미디어 폴더 — 받는 곳이 된다.
@@ -375,7 +377,8 @@ struct ContentView: View {
                             directory: Binding(
                                 get: { Self.webdavDefaultTarget },
                                 set: { pane.navigate(to: $0) }),
-                            isPresented: $showWebDAV)
+                            isPresented: $showWebDAV,
+                            openLocal: { openRemoteDownloaded($0) })
                     })
 
                     Button(action: { //trash
@@ -1768,6 +1771,21 @@ struct ContentView: View {
         vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
         vc.onSaved = { refreshBothPanes() }
         presentReader(vc)
+    }
+
+    /// WebDAV·FTP 에서 임시 보관함으로 받은 파일을 로컬 파일과 같은 뷰어로 연다.
+    /// 칸(목록)은 건드리지 않는다 — 임시 폴더로 옮겨 가면 안 된다. 맡지 않는 형식이면 false.
+    func openRemoteDownloaded(_ path: String) -> Bool {
+        newViewFilePath = path
+        newViewFileName = (path as NSString).lastPathComponent
+        switch FileInfo.yandereDevFileType(file: path) {
+        case 4:      presentTextReader()
+        case 15:     presentPDFReader()
+        case 16:     presentOfficeReader()
+        case 3, 12:  presentPhotoAlbum()
+        default:     return false
+        }
+        return true
     }
 
     private func presentPhotoAlbum() {

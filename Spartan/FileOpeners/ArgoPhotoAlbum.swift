@@ -31,6 +31,12 @@ final class ArgoPhotoAlbumController: UIViewController {
     var folder: String = ""
     var startName: String = ""
 
+    /// 원격 폴더를 앨범으로 볼 때: 원격 사진 이름들(폴더 안 목록 대신 쓴다)과,
+    /// 그 이름을 folder 안에 받아 경로를 돌려주는 동기 받기(백그라운드에서 불린다).
+    /// 둘 다 nil 이면 지금까지와 같은 로컬 앨범이다.
+    var remoteNames: [String]?
+    var remoteFetch: ((String) -> String?)?
+
     private var names: [String] = []
     private var index = 0
 
@@ -181,7 +187,7 @@ final class ArgoPhotoAlbumController: UIViewController {
 
     private func loadNames() {
         let fm = FileManager.default
-        let all = (try? fm.contentsOfDirectory(atPath: folder)) ?? []
+        let all = remoteNames ?? ((try? fm.contentsOfDirectory(atPath: folder)) ?? [])
         var list = all.filter { name in
             !name.hasPrefix(".") && ArgoPhotoAlbumController.imageExtensions.contains((name as NSString).pathExtension.lowercased())
         }
@@ -194,6 +200,16 @@ final class ArgoPhotoAlbumController: UIViewController {
 
     private func path(_ i: Int) -> String {
         (folder as NSString).appendingPathComponent(names[i])
+    }
+
+    /// 로더 큐에서 쓸 경로 풀이. 원격 앨범이면 아직 없는 사진을 그때 받는다.
+    /// fetch 가 false 면 받지 않는다(필름 띠 썸네일 — 아홉 장을 다 받느라 지금 사진이 늦어지면 안 된다).
+    private func resolver(fetch: Bool) -> (String) -> String {
+        guard let remote = remoteFetch else { return { $0 } }
+        return { p in
+            if !fetch { return p }
+            return remote((p as NSString).lastPathComponent) ?? p
+        }
     }
 
     // MARK: 입력
@@ -268,8 +284,9 @@ final class ArgoPhotoAlbumController: UIViewController {
             if let t = thumbs.object(forKey: key) { display(t, direction: direction) }
             let p = path(i)
             let maxPx = max(view.bounds.width, view.bounds.height) * 2
+            let resolve = resolver(fetch: true)
             loader.async { [weak self] in
-                let img = ArgoPhotoAlbumController.decode(p, maxPixel: maxPx)
+                let img = ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx)
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     if let img = img { self.big.setObject(img, forKey: key) }
@@ -317,8 +334,9 @@ final class ArgoPhotoAlbumController: UIViewController {
         guard big.object(forKey: key) == nil else { return }
         let p = path(i)
         let maxPx = max(view.bounds.width, view.bounds.height) * 2
+        let resolve = resolver(fetch: true)
         loader.async { [weak self] in
-            guard let img = ArgoPhotoAlbumController.decode(p, maxPixel: maxPx) else { return }
+            guard let img = ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx) else { return }
             DispatchQueue.main.async { self?.big.setObject(img, forKey: key) }
         }
     }

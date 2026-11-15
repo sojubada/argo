@@ -15,6 +15,8 @@ struct WebDAVRootView: View {
 
     @Binding var directory: String
     @Binding var isPresented: Bool
+    /// 받은 문서를 로컬 파일과 같은 뷰어(PDF·오피스·엑셀·글)로 연다. 맡았으면 true.
+    var openLocal: ((String) -> Bool)? = nil
 
     @ObservedObject private var store = WebDAVStore.shared
 
@@ -45,6 +47,7 @@ struct WebDAVRootView: View {
                 WebDAVBrowserView(server: workingServer,
                                   directory: $directory,
                                   isPresented: $isPresented,
+                                  openLocal: openLocal,
                                   onBack: { screen = 0 })
             } else if screen == 1 {
                 WebDAVServerEditView(server: $workingServer,
@@ -276,6 +279,7 @@ struct WebDAVBrowserView: View {
     let server: WebDAVServer
     @Binding var directory: String
     @Binding var isPresented: Bool
+    var openLocal: ((String) -> Bool)?
     var onBack: () -> Void
 
     @State private var client: RemoteFileClient
@@ -309,10 +313,12 @@ struct WebDAVBrowserView: View {
     init(server: WebDAVServer,
          directory: Binding<String>,
          isPresented: Binding<Bool>,
+         openLocal: ((String) -> Bool)? = nil,
          onBack: @escaping () -> Void) {
         self.server = server
         self._directory = directory
         self._isPresented = isPresented
+        self.openLocal = openLocal
         self.onBack = onBack
         let c = RemoteClients.make(server)
         self._client = State(initialValue: c)
@@ -477,6 +483,20 @@ struct WebDAVBrowserView: View {
                     }
                 }
             }
+            // 선택 버튼 = 바로 열기. 복사·설치·정보는 길게 눌러 고른다.
+            .contextMenu {
+                if !item.isDirectory {
+                    Button(action: { openRemote(item) }) {
+                        Label(L("열기"), systemImage: "eye")
+                    }
+                    Button(action: { copyOne(item) }) {
+                        Label(L("미디어 폴더로 복사"), systemImage: "doc.on.doc")
+                    }
+                    Button(action: { detailItem = item }) {
+                        Label(L("정보·설치"), systemImage: "info.circle")
+                    }
+                }
+            }
             }
             if items.count > visibleCount {
                 Text("\(visibleCount) / \(items.count) 항목 — 계속 내리면 더 불러옵니다")
@@ -490,7 +510,13 @@ struct WebDAVBrowserView: View {
     private func icon(for item: WebDAVItem) -> String {
         if item.isDirectory { return "folder" }
         if item.isIPA { return "square.and.arrow.down" }
-        return "doc"
+        switch ArgoRemoteKind.of(item.name) {
+        case .video: return "film"
+        case .audio: return "music.note"
+        case .image: return "photo"
+        case .unsupportedMedia: return "film.fill"
+        case .other: return "doc"
+        }
     }
 
     // MARK: Detail
@@ -514,10 +540,10 @@ struct WebDAVBrowserView: View {
                     .disabled(transferring)
                 }
 
-                Button(action: { downloadThenView(item) }) {
+                Button(action: { openRemote(item) }) {
                     HStack {
                         Image(systemName: "eye")
-                        Text("View")
+                        Text(L("열기"))
                     }
                 }
                 .disabled(transferring)
@@ -565,9 +591,70 @@ struct WebDAVBrowserView: View {
             } else {
                 picked.insert(item.path)
             }
-        } else {
+        } else if item.isIPA {
+            // IPA 는 열 것이 없다 — 설치 화면으로.
             detailItem = item
+        } else {
+            openRemote(item)
         }
+    }
+
+    // MARK: Open like a local file
+
+    /// 로컬 파일을 누를 때와 같은 결과가 나오게 연다.
+    /// 음악·동영상은 받지 않고 바로 재생, 사진은 앨범(넘길 때 그 장만 받음),
+    /// 문서는 임시 보관함에 받아 로컬과 같은 뷰어로.
+    private func openRemote(_ item: WebDAVItem) {
+        guard !transferring else { return }
+        detailItem = nil
+        switch ArgoRemoteKind.of(item.name) {
+        case .unsupportedMedia:
+            message = L("애플TV 재생기가 열 수 없는 형식입니다") + " (." + (item.name as NSString).pathExtension + ")"
+        case .video, .audio:
+            if server.kind == .webdav, let remote = client.directURL(for: item) {
+                message = L("재생 준비 중…")
+                ArgoRemoteStream.shared.streamURL(remote: remote, server: server, name: item.name) { url in
+                    message = ""
+                    guard let url = url else {
+                        message = L("바로 재생을 준비하지 못했습니다. 받아서 엽니다.")
+                        downloadThenView(item)
+                        return
+                    }
+                    ArgoDiag.log("stream", "바로 재생 \(item.name)")
+                    ArgoMediaPresenter.presentVideo(url: url, player: player) {}
+                }
+            } else {
+                // FTP 는 구간 읽기를 중계하지 않는다 — 받아서 연다.
+                downloadThenView(item)
+            }
+        case .image:
+            openRemoteAlbum(item)
+        case .other:
+            downloadThenView(item)
+        }
+    }
+
+    /// 이 원격 폴더의 사진들을 앨범으로. 처음엔 이름만 넘기고, 사진은 보는 장과 이웃 장만 받는다.
+    private func openRemoteAlbum(_ item: WebDAVItem) {
+        let safe: (String) -> String = { $0.replacingOccurrences(of: "/", with: "_") }
+        var byName: [String: WebDAVItem] = [:]
+        for it in items where !it.isDirectory && ArgoRemoteKind.of(it.name) == .image {
+            if byName[safe(it.name)] == nil { byName[safe(it.name)] = it }
+        }
+        if byName[safe(item.name)] == nil { byName[safe(item.name)] = item }
+        let c = client
+        let vc = ArgoPhotoAlbumController()
+        vc.folder = ArgoRemoteCache.folder(server: server, remoteFolder: WebDAVClient.parent(of: item.path))
+        vc.startName = safe(item.name)
+        vc.remoteNames = Array(byName.keys)
+        vc.remoteFetch = { name in
+            guard let it = byName[name] else { return nil }
+            return ArgoRemoteCache.fetchSync(client: c, item: it)
+        }
+        vc.onClose = { [weak vc] in vc?.dismiss(animated: true) }
+        guard let top = AirDropBridge.topViewController() else { return }
+        vc.modalPresentationStyle = .fullScreen
+        top.present(vc, animated: true)
     }
 
     private func reload() {
@@ -646,8 +733,17 @@ struct WebDAVBrowserView: View {
     }
 
     private func downloadThenView(_ item: WebDAVItem) {
-        download(item, to: WebDAVCache.localPath(for: item),
-                 label: "Opening \(item.name)") { local in
+        // 임시 보관함에 받는다. 같은 파일을 이미 받아 두었으면 바로 연다.
+        let target = ArgoRemoteCache.localPath(server: server, item: item)
+        if ArgoRemoteCache.isFresh(target, item: item) {
+            ArgoRemoteCache.touch(target)
+            localPath = target
+            localName = item.name
+            present(target)
+            return
+        }
+        ArgoRemoteCache.prepare(target)
+        download(item, to: target, label: L("여는 중") + " \(item.name)") { local in
             transferring = false
             guard let local = local else { return }
             localPath = local
@@ -657,6 +753,8 @@ struct WebDAVBrowserView: View {
     }
 
     private func present(_ local: String) {
+        // 로컬 파일과 같은 뷰어(PDF·오피스·엑셀·글)가 맡으면 그쪽으로.
+        if let openLocal = openLocal, openLocal(local) { return }
         let type = FileInfo.yandereDevFileType(file: local)
         isSVG = false
         if type == 1 || type == 2 {
