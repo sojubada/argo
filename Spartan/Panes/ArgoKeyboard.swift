@@ -243,6 +243,13 @@ final class ArgoHostingController: UIHostingController<ContentView> {
         return true
     }
 
+    /// WebDAV 탐색 화면이 맨 위인가. 그 위에 다른 창(뷰어·경고창·재생기)이 있으면 아니다.
+    private var isRemoteTop: Bool {
+        guard ArgoRemoteKeys.active, let p = presentedViewController,
+              p.presentedViewController == nil, !ArgoMediaPresenter.isMedia(p) else { return false }
+        return true
+    }
+
     private var allCommands: [ArgoCommand] {
         ArgoCommand.groups.flatMap { $0.1 }
     }
@@ -281,6 +288,18 @@ final class ArgoHostingController: UIHostingController<ContentView> {
             if presses.contains(where: { $0.type == .menu }) {
                 presentedViewController?.dismiss(animated: true)
             }
+            return
+        }
+        // WebDAV 탐색 화면이 맨 위면 그 화면의 단축키로 보낸다(로컬 목록 키는 쓰지 않는다).
+        if isRemoteTop {
+            var hit = false
+            for press in presses {
+                if let key = press.key, let cmd = ArgoRemoteKeys.command(for: key) {
+                    ArgoRemoteKeys.post(cmd)
+                    hit = true
+                }
+            }
+            if !hit { super.pressesBegan(presses, with: event) }
             return
         }
         guard isTopmost else {

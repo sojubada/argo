@@ -368,6 +368,7 @@ struct ContentView: View {
                         rightPane.updateFiles()
                         // 바로 재생 주소를 더 쓸 수 없게 지운다.
                         ArgoRemoteStream.shared.forgetRoutes()
+                        ArgoRemoteKeys.active = false
                     }, content: {
                         WebDAVRootView(
                             // 읽을 때는 늘 미디어 폴더 — 받는 곳이 된다.

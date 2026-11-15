@@ -43,6 +43,10 @@ struct WebDAVRootView: View {
     @ViewBuilder
     private var content: some View {
         Group {
+            // 단축키는 탐색 화면(2)에서만. 연결 목록·설정 화면에서는 로컬처럼 키를 흘려보낸다.
+            Color.clear.frame(width: 0, height: 0)
+                .onAppear { ArgoRemoteKeys.active = (screen == 2) }
+                .onChange(of: screen) { s in ArgoRemoteKeys.active = (s == 2) }
             if screen == 2 {
                 WebDAVBrowserView(server: workingServer,
                                   directory: $directory,
@@ -296,6 +300,11 @@ struct WebDAVBrowserView: View {
     @State private var detailItem: WebDAVItem?
     @State private var multiSelect = false
     @State private var picked: Set<String> = []
+    /// 키보드 고르기(Space)·정보(⌘I)에 쓰는 지금 포커스된 줄.
+    @FocusState private var focusedPath: String?
+    /// ⌘C·⌘X 로 담아 둔 것(서버 안 복사·이동). 폴더를 옮겨 다녀도 남는다.
+    @State private var clip: RemoteClip?
+    @State private var showKeyHelp = false
 
     @State private var transferring = false
     @State private var progress: Double = 0
@@ -354,12 +363,25 @@ struct WebDAVBrowserView: View {
                 listPanel
             }
         }
-        .onAppear { reload() }
+        .onAppear {
+            ArgoRemoteKeys.active = true
+            reload()
+        }
         // The remote's Menu button walks back up the tree, the way it does in
         // the local browser, instead of closing the whole sheet.
         .onExitCommand { goBack() }
+        .onReceive(NotificationCenter.default.publisher(for: ArgoRemoteKeys.notification)) { note in
+            if let raw = note.object as? String, let cmd = ArgoRemoteCommand(rawValue: raw) {
+                handleKey(cmd)
+            }
+        }
         .sheet(isPresented: $showViewer) {
             viewerContent
+        }
+        .alert(isPresented: $showKeyHelp) {
+            Alert(title: Text(L("WebDAV 단축키")),
+                  message: Text(ArgoRemoteKeys.helpText),
+                  dismissButton: .default(Text(L("닫기"))))
         }
     }
 
@@ -417,11 +439,10 @@ struct WebDAVBrowserView: View {
 
                 if multiSelect {
                     Button(action: {
-                        let files = items.filter { !$0.isDirectory }
-                        if picked.count == files.count {
+                        if picked.count == items.count {
                             picked.removeAll()
                         } else {
-                            picked = Set(files.map { $0.path })
+                            picked = Set(items.map { $0.path })
                         }
                     }) {
                         Image(systemName: "square.stack")
@@ -429,7 +450,7 @@ struct WebDAVBrowserView: View {
                     }
                 }
 
-                Button(action: { copyPicked() }) {
+                Button(action: { downloadTargets(keyTargets()) }) {
                     ZStack {
                         Image(systemName: "doc.on.doc")
                             .frame(width: 50, height: 50)
@@ -439,7 +460,7 @@ struct WebDAVBrowserView: View {
                             .offset(x: -4, y: 11.75)
                     }
                 }
-                .disabled(transferring || picked.isEmpty)
+                .disabled(transferring || (picked.isEmpty && focusedPath == nil))
 
                 Button(action: {
                     directory = destination.hasSuffix("/") ? destination : destination + "/"
@@ -469,7 +490,7 @@ struct WebDAVBrowserView: View {
             ForEach(items.prefix(visibleCount)) { item in
             Button(action: { open(item) }) {
                 HStack {
-                    if multiSelect && !item.isDirectory {
+                    if multiSelect {
                         Image(systemName: picked.contains(item.path) ? "checkmark.circle.fill" : "circle")
                     }
                     Image(systemName: icon(for: item))
@@ -483,6 +504,7 @@ struct WebDAVBrowserView: View {
                     }
                 }
             }
+            .focused($focusedPath, equals: item.path)
             // 선택 버튼 = 바로 열기. 복사·설치·정보는 길게 눌러 고른다.
             .contextMenu {
                 if !item.isDirectory {
@@ -574,8 +596,10 @@ struct WebDAVBrowserView: View {
             picked.removeAll()
         } else if !atRoot {
             path = WebDAVClient.parent(of: path)
+            picked.removeAll()
             reload()
         } else {
+            ArgoRemoteKeys.active = false
             onBack()
         }
     }
@@ -597,6 +621,314 @@ struct WebDAVBrowserView: View {
         } else {
             openRemote(item)
         }
+    }
+
+
+    // MARK: Keyboard (RemoteKeys.swift 의 표)
+
+    private func handleKey(_ cmd: ArgoRemoteCommand) {
+        if transferring, cmd != .help {
+            message = L("전송이 끝날 때까지 기다려 주세요.")
+            return
+        }
+        switch cmd {
+        case .goBackOrUp:
+            goBack()
+        case .goRoot:
+            detailItem = nil
+            picked.removeAll()
+            path = client.startPath
+            reload()
+        case .goUp:
+            if !atRoot {
+                detailItem = nil
+                picked.removeAll()
+                path = WebDAVClient.parent(of: path)
+                reload()
+            }
+        case .refresh:
+            reload()
+        case .toggleSelect:
+            guard let f = focusedPath, items.contains(where: { $0.path == f }) else { return }
+            detailItem = nil
+            multiSelect = true
+            if picked.contains(f) { picked.remove(f) } else { picked.insert(f) }
+        case .toggleMultiSelect:
+            if multiSelect {
+                multiSelect = false
+                picked.removeAll()
+            } else {
+                detailItem = nil
+                multiSelect = true
+            }
+        case .selectAll:
+            detailItem = nil
+            multiSelect = true
+            if picked.count == items.count { picked.removeAll() } else { picked = Set(items.map { $0.path }) }
+        case .copy, .cut:
+            let t = keyTargets()
+            guard !t.isEmpty else {
+                message = L("먼저 고르세요 (Space 또는 ⌘A).")
+                return
+            }
+            clip = RemoteClip(items: t, cut: cmd == .cut, serverID: server.id)
+            message = "\(t.count)" + (cmd == .cut ? L("개 잘라냄 — 옮길 폴더에서 ⌘V") : L("개 복사함 — 넣을 폴더에서 ⌘V"))
+        case .paste:
+            paste()
+        case .download:
+            downloadTargets(keyTargets())
+        case .compress:
+            compressTargets(keyTargets())
+        case .info:
+            if let f = focusedPath, let it = items.first(where: { $0.path == f }), !it.isDirectory {
+                detailItem = it
+            }
+        case .help:
+            showKeyHelp = true
+        }
+    }
+
+    /// 고른 것이 있으면 고른 것, 없으면 지금 포커스된 줄.
+    private func keyTargets() -> [WebDAVItem] {
+        if !picked.isEmpty { return items.filter { picked.contains($0.path) } }
+        if let f = focusedPath, let it = items.first(where: { $0.path == f }) { return [it] }
+        return []
+    }
+
+    // MARK: Server-side copy / move (⌘C·⌘X → ⌘V)
+
+    private func paste() {
+        guard let c = clip else {
+            message = L("먼저 ⌘C(복사) 또는 ⌘X(잘라내기)로 담으세요.")
+            return
+        }
+        guard c.serverID == server.id, let dav = client as? WebDAVClient else {
+            message = L("서버 안 복사·이동은 같은 WebDAV 서버 안에서만 됩니다. 애플TV로 받으려면 ⌘D.")
+            return
+        }
+        let here = WebDAVClient.normalize(path)
+        var taken = Set(items.map { $0.name })
+        var jobs: [(WebDAVItem, String)] = []
+        for it in c.items {
+            let src = WebDAVClient.normalize(it.path)
+            if it.isDirectory, here == src || here.hasPrefix(src + "/") {
+                message = L("폴더를 자기 안으로 넣을 수 없습니다") + ": " + it.name
+                return
+            }
+            var name = it.name
+            if WebDAVClient.normalize(WebDAVClient.parent(of: it.path)) == here {
+                if c.cut { continue }                 // 같은 자리로 이동 — 할 일 없음
+                name = copyName(it.name, taken: taken) // 같은 폴더에 복사 — "이름 사본"
+            }
+            taken.insert(name)
+            jobs.append((it, WebDAVClient.child(path, name)))
+        }
+        guard !jobs.isEmpty else { message = L("이미 이 폴더에 있습니다."); return }
+        pasteStep(dav, jobs, 0, cut: c.cut)
+    }
+
+    private func pasteStep(_ dav: WebDAVClient, _ jobs: [(WebDAVItem, String)], _ i: Int, cut: Bool) {
+        if i >= jobs.count {
+            transferring = false
+            if cut { clip = nil }
+            picked.removeAll()
+            multiSelect = false
+            reload()
+            message = "\(jobs.count)" + (cut ? L("개를 옮겼습니다.") : L("개를 복사했습니다."))
+            return
+        }
+        let (it, to) = jobs[i]
+        transferring = true
+        progress = Double(i) / Double(jobs.count)
+        transferLabel = (cut ? L("옮기는 중") : L("복사하는 중")) + " \(it.name) (\(i + 1)/\(jobs.count))"
+        dav.transfer(copy: !cut, from: it.path, to: to) { result in
+            switch result {
+            case .success:
+                pasteStep(dav, jobs, i + 1, cut: cut)
+            case .failure(let e):
+                transferring = false
+                if case .http(412)? = e as? WebDAVError {
+                    message = L("같은 이름이 이미 있어 멈췄습니다") + ": " + it.name
+                } else {
+                    message = e.localizedDescription
+                }
+                reload()
+            }
+        }
+    }
+
+    private func copyName(_ name: String, taken: Set<String>) -> String {
+        let ext = (name as NSString).pathExtension
+        let base = ext.isEmpty ? name : (name as NSString).deletingPathExtension
+        for n in 1..<1000 {
+            let suffix = n == 1 ? " " + L("사본") : " " + L("사본") + " \(n)"
+            let c = ext.isEmpty ? base + suffix : base + suffix + "." + ext
+            if !taken.contains(c) { return c }
+        }
+        return name + " " + UUID().uuidString.prefix(4)
+    }
+
+    // MARK: Download / compress (폴더는 안까지 통째로)
+
+    /// 이름을 로컬 경로 한 칸으로 쓸 수 있게(서버가 준 이름이 '..' 이나 '/' 를 품어도 받는 곳 밖으로 못 나가게).
+    private func safeName(_ n: String) -> String {
+        let s = n.replacingOccurrences(of: "/", with: "_")
+        return (s.isEmpty || s == "." || s == "..") ? "_" : s
+    }
+
+    /// 고른 것을 펼친다: 파일 목록(상대 폴더 포함)과 만들 폴더 목록. 너무 크면 nil.
+    private func collect(_ roots: [WebDAVItem],
+                         done: @escaping (_ files: [(WebDAVItem, String)], _ dirs: [String]) -> Void,
+                         fail: @escaping () -> Void) {
+        var files: [(WebDAVItem, String)] = []
+        var made: [String] = []
+        var queue: [(WebDAVItem, String, Int)] = []
+        for r in roots {
+            if r.isDirectory { queue.append((r, safeName(r.name), 0)) } else { files.append((r, "")) }
+        }
+        func next() {
+            if files.count > 5000 || made.count > 1000 {
+                message = L("너무 많습니다(파일 5,000개·폴더 1,000개까지). 나눠서 받아 주세요.")
+                fail(); return
+            }
+            guard !queue.isEmpty else { done(files, made); return }
+            let (dir, rel, depth) = queue.removeFirst()
+            made.append(rel)
+            transferLabel = L("목록 읽는 중") + " " + rel
+            client.list(path: dir.path) { result in
+                switch result {
+                case .success(let kids):
+                    for k in kids {
+                        let r2 = rel + "/" + safeName(k.name)
+                        if k.isDirectory {
+                            if depth < 30 { queue.append((k, r2, depth + 1)) }
+                        } else {
+                            files.append((k, rel))
+                        }
+                    }
+                    next()
+                case .failure(let e):
+                    message = e.localizedDescription
+                    fail()
+                }
+            }
+        }
+        next()
+    }
+
+    private func fetchAll(_ files: [(WebDAVItem, String)], _ dirs: [String], into base: String,
+                          label: String, done: @escaping (Bool) -> Void) {
+        let fm = FileManager.default
+        for d in dirs {
+            try? fm.createDirectory(atPath: (base as NSString).appendingPathComponent(d),
+                                    withIntermediateDirectories: true)
+        }
+        func step(_ i: Int) {
+            if i >= files.count { done(true); return }
+            let (it, rel) = files[i]
+            let folder = rel.isEmpty ? base : (base as NSString).appendingPathComponent(rel)
+            let target = (folder as NSString).appendingPathComponent(safeName(it.name))
+            transferLabel = "\(label) \(it.name)  (\(i + 1)/\(files.count))"
+            progress = 0
+            client.fetch(item: it, to: target, progress: { progress = $0 }, completion: { result in
+                switch result {
+                case .success:
+                    step(i + 1)
+                case .failure(let e):
+                    message = e.localizedDescription
+                    done(false)
+                }
+            })
+        }
+        step(0)
+    }
+
+    private func downloadTargets(_ t: [WebDAVItem]) {
+        guard !t.isEmpty else {
+            message = L("받을 것을 먼저 고르세요 (Space 또는 ⌘A).")
+            return
+        }
+        transferring = true
+        progress = 0
+        message = ""
+        let base = destination
+        collect(t, done: { files, dirs in
+            fetchAll(files, dirs, into: base, label: L("받는 중")) { ok in
+                transferring = false
+                if ok {
+                    message = "\(files.count)" + L("개를 받았습니다") + " → " + base
+                    picked.removeAll()
+                    multiSelect = false
+                }
+            }
+        }, fail: { transferring = false })
+    }
+
+    private func compressTargets(_ t: [WebDAVItem]) {
+        guard !t.isEmpty else {
+            message = L("압축할 것을 먼저 고르세요 (Space 또는 ⌘A).")
+            return
+        }
+        transferring = true
+        progress = 0
+        message = ""
+        let stage = (ArgoRemoteCache.root as NSString).appendingPathComponent("zip-" + UUID().uuidString)
+        try? FileManager.default.createDirectory(atPath: stage, withIntermediateDirectories: true)
+        // zip 이름: 하나면 그 이름, 여럿이면 지금 폴더 이름.
+        let first = t[0].isDirectory ? t[0].name : (t[0].name as NSString).deletingPathExtension
+        let folderName = (WebDAVClient.normalize(path) as NSString).lastPathComponent
+        var zipBase = safeName(t.count == 1 ? first : (folderName == "/" || folderName.isEmpty ? server.displayName : folderName))
+        if zipBase == "_" { zipBase = "archive" }
+        let dest = freshLocal((destination as NSString).appendingPathComponent(zipBase + ".zip"))
+        collect(t, done: { files, dirs in
+            fetchAll(files, dirs, into: stage, label: L("압축할 것 받는 중")) { ok in
+                guard ok else {
+                    transferring = false
+                    try? FileManager.default.removeItem(atPath: stage)
+                    return
+                }
+                transferLabel = L("압축하는 중") + " " + (dest as NSString).lastPathComponent
+                progress = 1
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: stage)) ?? []
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var failure: Error?
+                    do {
+                        try Compression.compressFiles(listOfFiles: names, directory: stage + "/",
+                                                      destination: dest, compType: .zip)
+                    } catch {
+                        failure = error
+                    }
+                    try? FileManager.default.removeItem(atPath: stage)
+                    DispatchQueue.main.async {
+                        transferring = false
+                        if let failure = failure {
+                            message = L("압축하지 못했습니다") + ": " + failure.localizedDescription
+                        } else {
+                            message = L("압축했습니다") + " → " + dest
+                            picked.removeAll()
+                            multiSelect = false
+                        }
+                    }
+                }
+            }
+        }, fail: {
+            transferring = false
+            try? FileManager.default.removeItem(atPath: stage)
+        })
+    }
+
+    /// 같은 이름이 있으면 "이름 2.zip" 처럼 비켜 쓴다.
+    private func freshLocal(_ p: String) -> String {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: p) else { return p }
+        let ns = p as NSString
+        let ext = ns.pathExtension
+        let base = (ns.lastPathComponent as NSString).deletingPathExtension
+        for n in 2..<1000 {
+            let c = ns.deletingLastPathComponent + "/" + base + " \(n)" + (ext.isEmpty ? "" : "." + ext)
+            if !fm.fileExists(atPath: c) { return c }
+        }
+        return p
     }
 
     // MARK: Open like a local file
@@ -707,31 +1039,6 @@ struct WebDAVBrowserView: View {
         }
     }
 
-    private func copyPicked() {
-        let queue = items.filter { picked.contains($0.path) && !$0.isDirectory }
-        guard !queue.isEmpty else {
-            message = "Select some files first."
-            return
-        }
-        copyStep(queue, 0)
-    }
-
-    private func copyStep(_ queue: [WebDAVItem], _ index: Int) {
-        if index >= queue.count {
-            transferring = false
-            message = "Copied \(queue.count) file(s) to \(destination)"
-            picked.removeAll()
-            multiSelect = false
-            return
-        }
-        let item = queue[index]
-        download(item, to: localTarget(for: item),
-                 label: "Copying \(item.name)  (\(index + 1)/\(queue.count))") { saved in
-            if saved == nil { return }   // download() already reported the failure
-            copyStep(queue, index + 1)
-        }
-    }
-
     private func downloadThenView(_ item: WebDAVItem) {
         // 임시 보관함에 받는다. 같은 파일을 이미 받아 두었으면 바로 연다.
         let target = ArgoRemoteCache.localPath(server: server, item: item)
@@ -805,4 +1112,11 @@ struct WebDAVBrowserView: View {
             }
         }
     }
+}
+
+/// ⌘C·⌘X 로 담아 둔 원격 항목.
+struct RemoteClip {
+    let items: [WebDAVItem]
+    let cut: Bool
+    let serverID: UUID
 }

@@ -200,6 +200,18 @@ final class WebDAVClient: NSObject {
         run(req, acceptable: [201, 204], completion: completion)
     }
 
+    /// 서버 안 복사·이동(COPY/MOVE). 같은 이름이 있으면 덮어쓰지 않는다(Overwrite: F → 412).
+    /// 폴더는 통째로(Depth: infinity).
+    func transfer(copy: Bool, from: String, to: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard var req = request(copy ? "COPY" : "MOVE", path: from), let destination = url(forPath: to) else {
+            finish(completion, .failure(WebDAVError.badURL)); return
+        }
+        req.setValue(destination.absoluteString, forHTTPHeaderField: "Destination")
+        req.setValue("F", forHTTPHeaderField: "Overwrite")
+        req.setValue("infinity", forHTTPHeaderField: "Depth")
+        run(req, acceptable: [201, 204], completion: completion)
+    }
+
     private func simple(_ method: String, path: String, acceptable: Set<Int>,
                         completion: @escaping (Result<Void, Error>) -> Void) {
         guard let req = request(method, path: path) else {
