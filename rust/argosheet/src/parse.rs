@@ -1636,11 +1636,24 @@ fn parse_worksheet_xml<R: Read + Seek>(
                 max_row_1based = max_row_1based.max(r);
                 max_col_1based = max_col_1based.max(c);
             }
-            crate::drawing::CellAnchorSpec::OneCell { from, .. } => {
-                max_row_1based = max_row_1based.max(from.row_0based.saturating_add(10).min(1_048_576));
-                max_col_1based = max_col_1based.max(from.col_0based.saturating_add(6).min(16_384));
+            // 한 칸 앵커·절대 위치는 크기(ext)만 있다. 행 높이·열 너비를 따라 걸어가 끝 칸을 구한다.
+            // 예전엔 "+10행·+6열" 로 어림해서, 행 높이가 작으면 차트 아래쪽이 시트 끝에서 잘렸다.
+            crate::drawing::CellAnchorSpec::OneCell { from, ext_cx_emu, ext_cy_emu } => {
+                let need_y = from.row_off_emu.max(0) as f64 / 12700.0 + ext_cy_emu.max(0) as f64 / 12700.0;
+                let need_x = from.col_off_emu.max(0) as f64 / 12700.0 + ext_cx_emu.max(0) as f64 / 12700.0;
+                let r = walk_extent(from.row_0based, need_y, &custom_row_heights_pt, default_row_height_pt, 1_048_576);
+                let c = walk_extent(from.col_0based, need_x, &custom_col_widths_pt, default_col_width_pt, 16_384);
+                max_row_1based = max_row_1based.max(r.saturating_add(1).min(1_048_576));
+                max_col_1based = max_col_1based.max(c.saturating_add(1).min(16_384));
             }
-            _ => {}
+            crate::drawing::CellAnchorSpec::Absolute { x_emu, y_emu, ext_cx_emu, ext_cy_emu } => {
+                let need_y = (y_emu.max(0) as f64 + ext_cy_emu.max(0) as f64) / 12700.0;
+                let need_x = (x_emu.max(0) as f64 + ext_cx_emu.max(0) as f64) / 12700.0;
+                let r = walk_extent(0, need_y, &custom_row_heights_pt, default_row_height_pt, 1_048_576);
+                let c = walk_extent(0, need_x, &custom_col_widths_pt, default_col_width_pt, 16_384);
+                max_row_1based = max_row_1based.max(r.saturating_add(1).min(1_048_576));
+                max_col_1based = max_col_1based.max(c.saturating_add(1).min(16_384));
+            }
         }
     }
 
@@ -1847,6 +1860,26 @@ fn parse_tab_color_element(
     }
 }
 
+/// 0부터 센 시작 칸(start0)에서 need_pt 만큼 가면 몇 번째 칸(1부터)에서 끝나는지.
+/// 칸 크기는 custom 이 있으면 그것, 없으면 기본값. limit 까지만 걷는다(악성 크기·숨은 칸 대비).
+fn walk_extent(start0: u32, need_pt: f64, custom: &HashMap<u32, f32>, default_pt: f32, limit: u32) -> u32 {
+    let mut idx = start0.saturating_add(1).min(limit); // 1부터 센 시작 칸
+    if !need_pt.is_finite() || need_pt <= 0.0 {
+        return idx;
+    }
+    let mut acc = 0.0f64;
+    let mut steps = 0u32;
+    while idx < limit && steps < 200_000 {
+        acc += custom.get(&idx).copied().unwrap_or(default_pt).max(0.0) as f64;
+        if acc >= need_pt {
+            break;
+        }
+        idx += 1;
+        steps += 1;
+    }
+    idx
+}
+
 fn parse_pane_attrs(e: &quick_xml::events::BytesStart, freeze: &mut Option<FreezePane>) {
     let mut x_split = 0u32;
     let mut y_split = 0u32;
@@ -2017,4 +2050,26 @@ fn extract_dv_attrs(e: &quick_xml::events::BytesStart) -> DataValidationEntry {
         }
     }
     dv
+}
+#[cfg(test)]
+mod walk_extent_tests {
+    use super::walk_extent;
+    use std::collections::HashMap;
+
+    #[test]
+    fn one_cell_anchor_extent_follows_row_heights() {
+        // 샘플 00 시트: 18행(0부터 17)에서 시작, 높이 297.6pt, 행 높이 20pt → 32행까지.
+        let mut h = HashMap::new();
+        for r in 1..=40u32 {
+            h.insert(r, 20.0f32);
+        }
+        assert_eq!(walk_extent(17, 297.6, &h, 15.0, 1_048_576), 32);
+        // 크기 0 이면 시작 칸
+        assert_eq!(walk_extent(17, 0.0, &h, 15.0, 1_048_576), 18);
+        // 행이 모두 숨김(0pt)이어도 상한에서 멈춘다
+        assert_eq!(walk_extent(0, 1e12, &HashMap::new(), 0.0, 1_048_576), 200_001);
+        // 시트 끝을 넘지 않는다
+        assert_eq!(walk_extent(1_048_570, 1e9, &HashMap::new(), 15.0, 1_048_576), 1_048_576);
+        assert_eq!(walk_extent(5, f64::NAN, &HashMap::new(), 15.0, 1_048_576), 6);
+    }
 }

@@ -171,10 +171,21 @@ struct ArgoSheetPalette: Equatable {
             return CGColor(srgbRed: 0x1C / 255.0, green: 0x1E / 255.0, blue: 0x22 / 255.0, alpha: a)
         }
 
-        let newL = 0.10 + 0.30 * l
-        let newS = s * 0.85
-        let (nr, ng, nb) = Self.hslToRgb(h, newS, newL)
+        _ = (h, s)
+        // 밝은 채우기는 어둡게 뒤집고(흰색에 가까울수록 바탕색에 가깝게), 이미 어두운 채우기(머리글 줄 등)는
+        // 밝기를 그대로 둔다. 색 기운은 RGB 차이를 줄여서 남긴다.
+        // HSL 채도를 쓰지 않는 까닭: 흰색에 가까운 연한 파랑(239,246,255)은 HSL 채도가 100% 로 나와
+        // 진한 파랑이 되어 버렸다(기기에서 줄무늬 행이 형광 파랑으로 보인 원인).
+        let newL: CGFloat = l >= 0.5 ? min(0.40, 0.115 + (1.0 - l) * 0.8) : max(l, 0.14)
+        let (nr, ng, nb) = Self.shift(r, g, b, from: l, to: newL, keep: l >= 0.5 ? 0.55 : 0.8)
         return CGColor(srgbRed: nr, green: ng, blue: nb, alpha: a)
+    }
+
+    /// 밝기만 from → to 로 옮기고 색 차이(r-L, g-L, b-L)는 keep 배로 남긴다.
+    static func shift(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat,
+                      from l: CGFloat, to newL: CGFloat, keep: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
+        func f(_ c: CGFloat) -> CGFloat { (newL + (c - l) * keep).clamp(0.0, 1.0) }
+        return (f(r), f(g), f(b))
     }
 
     /// 글자(Text) 색 변환.
@@ -198,21 +209,15 @@ struct ArgoSheetPalette: Equatable {
             return CGColor(srgbRed: r, green: g, blue: b, alpha: a)
         }
 
-        // 무채색 어두운 글자(검정 등)는 #E6E8EB 로 즉시 매핑
-        if s < 0.08 && l < 0.20 {
-            return CGColor(srgbRed: 0xE6 / 255.0, green: 0xE8 / 255.0, blue: 0xEB / 255.0, alpha: a)
+        _ = (h, s)
+        // 채우기는 위에서 모두 어둡게(L ≤ 0.37) 바뀌므로 글자는 모두 밝게 둔다.
+        // 어두운 글자(검정·짙은 색)는 밝게 뒤집고, 이미 밝은 글자(진한 머리글 위 흰 글자)는 그대로.
+        // 예전에는 바탕(#1C1E22)만 보고 대비를 맞춰서, 색 칸 위 글자가 흐려졌다.
+        if l >= 0.6 {
+            return CGColor(srgbRed: r, green: g, blue: b, alpha: a)
         }
-
-        // 배경(#1C1E22, 상대 휘도 약 0.0116) 대비 4.5:1 이상이 되도록 밝기(L)만 단계적으로 끌어올린다.
-        let bgLum: CGFloat = 0.0116
-        var curL = l
-        var (nr, ng, nb) = (r, g, b)
-        var guardStep = 0
-        while Self.contrastRatio(Self.relativeLuminance(nr, ng, nb), bgLum) < 4.5 && curL < 0.94 && guardStep < 24 {
-            curL = min(0.94, curL + 0.05)
-            (nr, ng, nb) = Self.hslToRgb(h, s, curL)
-            guardStep += 1
-        }
+        let newL: CGFloat = 0.90 - l * 0.25
+        let (nr, ng, nb) = Self.shift(r, g, b, from: l, to: newL, keep: 0.75)
         return CGColor(srgbRed: nr, green: ng, blue: nb, alpha: a)
     }
 
@@ -245,8 +250,10 @@ struct ArgoSheetPalette: Equatable {
             return CGColor(srgbRed: r, green: g, blue: b, alpha: a)
         }
 
-        let newL = (1.0 - 0.7 * l).clamp(0.0, 1.0)
-        let (nr, ng, nb) = Self.hslToRgb(h, s, newL)
+        _ = (h, s)
+        // 테두리: 검정 → 밝은 회색, 흰 테두리 → 어두운 회색(바탕과 구분만 되게).
+        let newL = (0.80 - 0.55 * l).clamp(0.25, 0.85)
+        let (nr, ng, nb) = Self.shift(r, g, b, from: l, to: newL, keep: 0.6)
         return CGColor(srgbRed: nr, green: ng, blue: nb, alpha: a)
     }
 

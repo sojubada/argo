@@ -1372,14 +1372,6 @@ pub fn render_chart_to_drawlist(
 
     let has_secondary = resolved_series.iter().any(|s| s.use_secondary_axis);
     let legend_h = if resolved_series.len() > 1 { 20.0 } else { 4.0 };
-    let pad_left = 44.0f32;
-    let pad_right = if has_secondary { 44.0f32 } else { 14.0f32 };
-    let pad_bottom = 24.0f32 + legend_h;
-
-    let plot_x = pad_left;
-    let plot_y = title_h;
-    let plot_w = (w - pad_left - pad_right).max(40.0);
-    let plot_h = (h - title_h - pad_bottom).max(30.0);
 
     // 4. 주축(Primary) 및 보조축(Secondary) 최솟값/최댓값 및 눈금 간격(Nice Step) 산출
     let (p_min_raw, p_max_raw) = compute_axis_min_max(&resolved_series, false);
@@ -1391,6 +1383,29 @@ pub fn render_chart_to_drawlist(
     } else {
         (0.0, 10.0, 2.0)
     };
+
+    // 축 글자 폭에 맞춰 왼쪽·오른쪽 여백을 정한다. 고정 44pt 였을 때 "20,000,000" 같은
+    // 긴 눈금 글자의 앞이 잘렸다(애플TV 에서는 글자를 더 굵게 그려 더 많이 잘렸다).
+    let label_pad = |lo: f64, hi: f64, step: f64| -> f32 {
+        let mut chars = 1usize;
+        let mut v = lo;
+        let mut g = 0;
+        while v <= hi + step * 0.01 && g < 20 {
+            chars = chars.max(format_axis_number(v, step).chars().count());
+            v += step;
+            g += 1;
+        }
+        // 8pt 숫자 한 자 ≈ 5.2pt(굵게 그려도 남게) + 좌우 여유
+        (chars as f32 * 5.6 + 12.0).clamp(30.0, (w * 0.3).max(30.0))
+    };
+    let pad_left = label_pad(p_min, p_max, p_step);
+    let pad_right = if has_secondary { label_pad(s_min, s_max, s_step) } else { 14.0f32 };
+    let pad_bottom = 24.0f32 + legend_h;
+
+    let plot_x = pad_left;
+    let plot_y = title_h;
+    let plot_w = (w - pad_left - pad_right).max(40.0);
+    let plot_h = (h - title_h - pad_bottom).max(30.0);
 
     // 5. 수평 눈금선 및 좌/우 Y축 레이블 출력
     let grid_col = ASColor {
