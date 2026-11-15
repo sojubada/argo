@@ -76,7 +76,8 @@ pub struct ConversionOptions {
 #[derive(Debug, Clone)]
 pub struct RegisteredFont {
     pub name: String,
-    pub data: Vec<u8>,
+    /// 같은 글꼴 파일을 여러 이름(별칭·굵게)으로 넣어도 바이트는 하나만 둔다.
+    pub data: std::sync::Arc<[u8]>,
 }
 
 static REGISTERED_FONTS: OnceLock<Mutex<Vec<RegisteredFont>>> = OnceLock::new();
@@ -141,9 +142,18 @@ fn clear_notices() {
 pub fn register_font(name: impl Into<String>, font_data: impl Into<Vec<u8>>) {
     let fonts = REGISTERED_FONTS.get_or_init(|| Mutex::new(Vec::new()));
     let mut fonts = fonts.lock().expect("font registry lock poisoned");
+    let bytes: Vec<u8> = font_data.into();
+    // 같은 파일이 이미 있으면 그 바이트를 함께 쓴다. 문서 하나가 글꼴 이름을 수십 개 쓰고
+    // 그 대부분이 '맑은 고딕' 으로 바뀌면, 같은 10MB 를 이름마다 따로 들고 있다가 메모리가
+    // 넘쳐 앱이 꺼졌다(NDA docx, 이름 56개).
+    let shared = fonts
+        .iter()
+        .find(|f| f.data.len() == bytes.len() && f.data[..] == bytes[..])
+        .map(|f| f.data.clone());
+    let data = shared.unwrap_or_else(|| std::sync::Arc::from(bytes.into_boxed_slice()));
     fonts.push(RegisteredFont {
         name: name.into(),
-        data: font_data.into(),
+        data,
     });
     pdf::clear_font_support_cache();
 }

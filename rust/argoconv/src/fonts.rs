@@ -164,11 +164,24 @@ fn document_fonts(bytes: &[u8]) -> Vec<String> {
                 continue;
             }
             for key in ["typeface=\"", "w:ascii=\"", "w:eastAsia=\"", "w:hAnsi=\"", "face=\"", "w:name=\""] {
+                // w:name 은 fontTable 에서만 글꼴 이름이다. styles.xml 의
+                // <w:lsdException w:name="heading 1"> 은 스타일 이름이다.
+                if key == "w:name=\"" && !name.contains("fontTable") {
+                    continue;
+                }
                 let mut rest = xml.as_str();
                 while let Some(at) = rest.find(key) {
+                    // 테마의 <a:font script="Thai" typeface="Angsana New"/> 는 그 글자 체계를
+                    // 쓸 때만 쓰는 예비 글꼴이다. 문서 하나에 수십 개가 들어 있어(Nyala·Vrinda …)
+                    // 다 넣으면 메모리가 넘쳐 앱이 꺼졌다. 쓰는 글꼴(a:latin·a:ea·a:cs)만 본다.
+                    let before = &rest[..at];
+                    let tag_start = before.rfind('<').map(|i| &before[i..]).unwrap_or("");
+                    let skip = key == "typeface=\"" && tag_start.starts_with("<a:font ");
                     rest = &rest[at + key.len()..];
                     if let Some(end) = rest.find('"') {
-                        push(&xml_unescape(&rest[..end]));
+                        if !skip {
+                            push(&xml_unescape(&rest[..end]));
+                        }
                         rest = &rest[end..];
                     } else {
                         break;
@@ -310,6 +323,11 @@ mod tests {
             w.write_all(r#"<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="맑은 고딕"/></w:rPr></w:r><a:latin typeface="+mn-lt"/>"#.as_bytes()).unwrap();
             w.start_file("xl/styles.xml", opt).unwrap();
             w.write_all(r#"<font><name val="함초롬바탕"/></font>"#.as_bytes()).unwrap();
+            // 테마의 글자 체계별 예비 글꼴과 스타일 이름은 글꼴로 세지 않는다.
+            w.start_file("word/theme/theme1.xml", opt).unwrap();
+            w.write_all(r#"<a:font script="Thai" typeface="Angsana New"/><a:font script="Hans" typeface="等线"/>"#.as_bytes()).unwrap();
+            w.start_file("word/styles.xml", opt).unwrap();
+            w.write_all(r#"<w:lsdException w:name="heading 1" w:uiPriority="9"/>"#.as_bytes()).unwrap();
             w.finish().unwrap();
         }
         let names = document_fonts(&zipped);

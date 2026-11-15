@@ -301,11 +301,25 @@ enum ArgoFontLibrary {
 
         // 기본: 모든 글자를 그릴 수 있게 받쳐 주는 글꼴. 이름은 예전과 같다.
         var registered = Set<String>()
+        // 서로 다른 글꼴 파일을 합쳐 이만큼까지만 넣는다. 같은 파일을 여러 이름으로 넣는 것은
+        // 변환기가 바이트를 함께 쓰므로 세지 않는다. 넘으면 그 이름은 받쳐 주는 글꼴로 그린다.
+        // (문서 하나가 글꼴 이름 56개를 써서 수백 MB 를 올리다 앱이 꺼진 일이 있다.)
+        var filesIn = Set<String>()
+        var bytesIn = 0
+        let budget = 160 * 1024 * 1024
         func register(_ face: ArgoFontFace, as alias: String) {
             let key = alias.lowercased()
             guard !registered.contains(key),
                   let data = try? Data(contentsOf: URL(fileURLWithPath: face.path), options: .alwaysMapped)
             else { return }
+            if !filesIn.contains(face.path) {
+                if bytesIn + data.count > budget, !filesIn.isEmpty {
+                    ArgoDiag.log("font", "글꼴 메모리 한도로 넣지 않음: \(alias) (\((face.path as NSString).lastPathComponent), \(data.count / 1_048_576)MB)")
+                    return
+                }
+                filesIn.insert(face.path)
+                bytesIn += data.count
+            }
             registered.insert(key)
             _ = data.withUnsafeBytes { raw -> Int32 in
                 guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return -1 }
@@ -350,9 +364,16 @@ enum ArgoFontLibrary {
             guard n > 0 else { return [] }
             let names = (try? JSONDecoder().decode([String].self, from: Data(buffer[0..<n]))) ?? []
             // 워드 문서의 언어 표시(ko-KR, en-US, x-none)가 글꼴 이름 자리에 섞여 온다. 글꼴이 아니다.
-            return names.filter { !isLanguageTag($0) }
+            return names.filter { !isLanguageTag($0) && !isStyleName($0) }
         }
         return []
+    }
+
+    /// 워드 스타일 이름(Normal, heading 1 …)이 글꼴 자리에 섞여 오는 것.
+    static func isStyleName(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces).lowercased()
+        if ["normal", "title", "subtitle", "default paragraph font", "table normal", "no list"].contains(t) { return true }
+        return t.range(of: "^(heading|toc|index) [0-9]$", options: .regularExpression) != nil
     }
 
     static func isLanguageTag(_ s: String) -> Bool {

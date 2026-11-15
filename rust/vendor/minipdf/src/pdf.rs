@@ -1457,7 +1457,7 @@ mod tests {
         let fonts = (0..300)
             .map(|index| RegisteredFont {
                 name: format!("font-{index}"),
-                data: Vec::new(),
+                data: Vec::<u8>::new().into(),
             })
             .collect::<Vec<_>>();
 
