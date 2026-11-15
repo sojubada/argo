@@ -183,6 +183,11 @@ fn document_fonts(bytes: &[u8]) -> Vec<String> {
                         .map(|t| t == "font" || t.ends_with(":font"))
                         .unwrap_or(false);
                     let skip = key == "typeface=\"" && is_font_tag && tag_start.contains("script=");
+                    // face=" 는 typeface=" 의 꼬리에도 걸린다 — 그 경우는 typeface 키가 맡는다.
+                    // (이것 때문에 위 건너뛰기가 소용없이 예비 글꼴이 그대로 들어왔다.)
+                    let tail_of_word = key == "face=\""
+                        && before.chars().last().map_or(false, |c| c.is_alphanumeric() || c == ':');
+                    let skip = skip || tail_of_word;
                     rest = &rest[at + key.len()..];
                     if let Some(end) = rest.find('"') {
                         if !skip {
