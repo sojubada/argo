@@ -25,6 +25,8 @@ svg2pdf = "0.13"
 pdf-writer = "0.12"
 # 글꼴 파일의 이름표를 읽는다 (폰트 폴더 색인).
 ttf-parser = "0.25"
+# 옛 한글 글꼴(한컴·HY)의 한국어 이름표는 완성형(EUC-KR)으로 적혀 있다. hwpers 와 같은 판.
+encoding_rs = "0.8"
 # 문서 안 XML 에서 글꼴 이름을 훑는다. minipdf 와 같은 판을 쓴다.
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 # 발표 문서를 SVG 로 그리는 데 쓴다 (usvg 와 같은 판).

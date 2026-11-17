@@ -83,7 +83,7 @@ pub unsafe extern "C" fn argoconv_font_faces(
             ) {
                 continue;
             }
-            if let Some(text) = name.to_string() {
+            if let Some(text) = name.to_string().or_else(|| korean_legacy_name(&name)) {
                 let text = text.trim().to_owned();
                 if !text.is_empty() && text.len() < 120 {
                     names.insert(text);
@@ -105,6 +105,35 @@ pub unsafe extern "C" fn argoconv_font_faces(
         ));
     }
     write_out(&format!("[{}]", faces.join(",")), out, cap)
+}
+
+/// 유니코드가 아닌 한국어 이름표를 읽는다. 한컴·한양(HY) 옛 글꼴은 '한컴바탕'·'HY신명조' 같은
+/// 한국어 이름을 윈도 완성형(플랫폼 3, 인코딩 5)이나 맥 한국어(플랫폼 1, 인코딩 3)로만 적어 둔다.
+/// ttf-parser 는 이것을 못 읽어, 폴더에 글꼴이 있어도 한국어 이름으로 찾지 못했다.
+fn korean_legacy_name(name: &ttf_parser::name::Name) -> Option<String> {
+    use ttf_parser::PlatformId;
+    let raw = name.name;
+    let bytes: Vec<u8> = match (name.platform_id, name.encoding_id) {
+        // 윈도 완성형: 16비트 단위마다 한 글자. 윗바이트가 0 이면 한 바이트 글자다.
+        (PlatformId::Windows, 5) => {
+            let mut v = Vec::with_capacity(raw.len());
+            for c in raw.chunks_exact(2) {
+                if c[0] != 0 {
+                    v.push(c[0]);
+                }
+                v.push(c[1]);
+            }
+            v
+        }
+        (PlatformId::Macintosh, 3) => raw.to_vec(),
+        _ => return None,
+    };
+    let (text, _, bad) = encoding_rs::EUC_KR.decode(&bytes);
+    if bad {
+        return None;
+    }
+    let text = text.trim_matches(char::from(0)).to_owned();
+    (!text.is_empty()).then_some(text)
 }
 
 /// 문서가 쓰는 글꼴 이름들. JSON 문자열 배열로 돌려준다.
@@ -321,6 +350,16 @@ mod tests {
         assert!(json.contains("Pretendard"), "{json}");
         assert!(json.contains("\"weight\":700"), "{json}");
         assert!(json.contains("\"hangul\":true"), "{json}");
+    }
+
+    #[test]
+    fn reads_wansung_korean_names() {
+        // 리버레이션 산스에 완성형(3,5) 한국어 이름 '한컴바탕' 을 덧붙인 시험 글꼴.
+        let data = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/wansung-name.ttf")).unwrap();
+        let mut buf = vec![0u8; 65536];
+        let n = unsafe { argoconv_font_faces(data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) };
+        let json = String::from_utf8(buf[..n].to_vec()).unwrap();
+        assert!(json.contains("한컴바탕"), "{json}");
     }
 
     #[test]

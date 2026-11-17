@@ -53,7 +53,28 @@ final class ArgoPhotoAlbumController: UIViewController {
 
     private let big = NSCache<NSString, UIImage>()
     private let thumbs = NSCache<NSString, UIImage>()
-    private let loader = DispatchQueue(label: "argo.photo.loader", qos: .userInitiated)
+    /// 모든 앨범이 함께 쓰는 한 줄 큐. 앨범마다 큐를 두면 닫았다 다시 연 앨범의 일이 겹쳐
+    /// 큰 사진 여러 장을 한꺼번에 풀다가 메모리가 넘친다.
+    private static let sharedLoader = DispatchQueue(label: "argo.photo.loader", qos: .userInitiated)
+    private var loader: DispatchQueue { ArgoPhotoAlbumController.sharedLoader }
+    /// 지금 보는 장(로더 큐에서도 읽는다). 빠르게 넘기면 쌓인 일 중 이미 지나간 장은 건너뛴다 —
+    /// 원격 앨범에서 수백 장을 줄줄이 받고 풀다가 앱이 꺼졌다(build 347, 사진 4477장 폴더).
+    private let wantLock = NSLock()
+    private var wantedIndex = 0
+    private var closed = false
+
+    private func setWanted(_ i: Int) {
+        wantLock.lock(); wantedIndex = i; wantLock.unlock()
+    }
+
+    /// i 번째 사진이 아직 필요한가(지금 장에서 radius 장 안, 앨범이 열려 있음).
+    private func stillWanted(_ i: Int, radius: Int, count n: Int) -> Bool {
+        wantLock.lock(); defer { wantLock.unlock() }
+        if closed || n == 0 { return false }
+        var d = abs(i - wantedIndex) % n
+        d = Swift.min(d, n - d)
+        return d <= radius
+    }
 
     private var overlayVisible = true
     private var hideWork: DispatchWorkItem?
@@ -185,6 +206,17 @@ final class ArgoPhotoAlbumController: UIViewController {
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // 닫힌 앨범의 남은 받기·풀기는 모두 건너뛴다.
+        wantLock.lock(); closed = true; wantLock.unlock()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        wantLock.lock(); closed = false; wantLock.unlock()
+    }
+
     private func loadNames() {
         let fm = FileManager.default
         let all = remoteNames ?? ((try? fm.contentsOfDirectory(atPath: folder)) ?? [])
@@ -276,6 +308,7 @@ final class ArgoPhotoAlbumController: UIViewController {
         updateLabels()
         updateStrip()
         if slideshow == nil { setOverlay(true, autoHide: true) }
+        setWanted(i)
         let key = names[i] as NSString
         if let img = big.object(forKey: key) {
             display(img, direction: direction)
@@ -285,7 +318,9 @@ final class ArgoPhotoAlbumController: UIViewController {
             let p = path(i)
             let maxPx = max(view.bounds.width, view.bounds.height) * 2
             let resolve = resolver(fetch: true)
+            let n = names.count
             loader.async { [weak self] in
+                guard let me = self, me.stillWanted(i, radius: 0, count: n) else { return }
                 let img = ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx)
                 DispatchQueue.main.async {
                     guard let self = self else { return }
@@ -335,7 +370,9 @@ final class ArgoPhotoAlbumController: UIViewController {
         let p = path(i)
         let maxPx = max(view.bounds.width, view.bounds.height) * 2
         let resolve = resolver(fetch: true)
+        let n = names.count
         loader.async { [weak self] in
+            guard let me = self, me.stillWanted(i, radius: 1, count: n) else { return }
             guard let img = ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx) else { return }
             DispatchQueue.main.async { self?.big.setObject(img, forKey: key) }
         }
@@ -385,7 +422,9 @@ final class ArgoPhotoAlbumController: UIViewController {
             }
             iv.image = nil
             let p = path(raw)
+            let n = names.count, radius = stripRadius
             loader.async { [weak self] in
+                guard let me = self, me.stillWanted(raw, radius: radius, count: n) else { return }
                 guard let t = ArgoPhotoAlbumController.decode(p, maxPixel: 300) else { return }
                 DispatchQueue.main.async {
                     guard let self = self else { return }

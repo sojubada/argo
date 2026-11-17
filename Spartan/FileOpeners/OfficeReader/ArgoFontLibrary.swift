@@ -85,7 +85,9 @@ enum ArgoFontLibrary {
     // MARK: 색인
 
     private struct IndexFile: Codable {
-        var version = 1
+        /// 이름표 읽는 법이 바뀌면 올린다(2: 완성형 한국어 이름). 판이 다르면 색인을 버리고 다시 읽는다.
+        static let current = 2
+        var version = IndexFile.current
         var files: [String: Entry] = [:]
         struct Entry: Codable {
             var size: Int64
@@ -192,7 +194,8 @@ enum ArgoFontLibrary {
         let fm = FileManager.default
         let indexPath = (userDir as NSString).appendingPathComponent(indexName)
         var index = (try? Data(contentsOf: URL(fileURLWithPath: indexPath)))
-            .flatMap { try? JSONDecoder().decode(IndexFile.self, from: $0) } ?? IndexFile()
+            .flatMap { try? JSONDecoder().decode(IndexFile.self, from: $0) }
+            .flatMap { $0.version == IndexFile.current ? $0 : nil } ?? IndexFile()
         var seen = Set<String>()
         var changed = false
         var out: [ArgoFontFace] = []
@@ -487,7 +490,8 @@ enum ArgoFontLibrary {
         switch c {
         case .serif:
             return ["함초롬바탕", "hcrbatang", "한컴바탕", "hancombatang", "바탕", "batang", "나눔명조", "nanummyeongjo",
-                    "본명조", "notoserifkr", "sourcehanserifkr", "kopub바탕체", "kopubbatang"]
+                    "본명조", "notoserifkr", "sourcehanserifkr", "kopub바탕체", "kopubbatang",
+                    "hy신명조", "hysinmyeongjomedium"]
         case .sans:
             return ["맑은고딕", "malgungothic", "함초롬돋움", "hcrdotum", "나눔고딕", "nanumgothic", "한컴돋움", "hancomdotum",
                     "돋움", "dotum", "굴림", "gulim", "본고딕", "notosanskr", "sourcehansanskr", "pretendard", "applesdgothicneo"]
@@ -549,7 +553,15 @@ enum ArgoFontLibrary {
         ["본명조", "sourcehanserifkr", "notoserifkr", "notoserifcjkkr"],
         ["애플산돌고딕네오", "applesdgothicneo"],
         // Arial·Helvetica 계열은 글자 폭이 같은 Liberation Sans 로 그린다(앱에 들어 있다).
-        ["arial", "liberationsans", "helvetica", "arialmt"], ["한컴바탕", "hancombatang"], ["한컴돋움", "hancomdotum"],
+        ["arial", "liberationsans", "helvetica", "arialmt"], ["한컴바탕", "hancombatang", "haansoftbatang", "hanbatang"],
+        ["한컴돋움", "hancomdotum", "haansoftdotum", "handotum"], ["한컴고딕", "hancomgothic"],
+        // 한글 문서의 '한양○○' 은 윈도에 깔리는 'HY○○' 과 같은 글꼴이다(한양정보통신).
+        ["한양신명조", "hy신명조", "hysinmyeongjo", "hysinmyeongjomedium"],
+        ["한양중고딕", "hy중고딕", "hygothic", "hygothicmedium"],
+        ["한양견고딕", "hy견고딕", "hygothicextra"], ["한양견명조", "hy견명조", "hymyeongjoextra"],
+        ["한양헤드라인", "hy헤드라인m", "hyheadlinem", "hyheadlinemedium"],
+        ["한양궁서", "hy궁서b", "hygungsob", "hygungso", "hygungsobold"],
+        ["한양그래픽", "hy그래픽", "hygraphic", "hygraphicmedium"],
     ]
 
     private static func aliases(of name: String) -> [String] {
