@@ -283,6 +283,11 @@ final class ArgoTextReaderController: UIViewController {
     private func scrollBy(_ delta: CGFloat) {
         let maxY = max(0, textView.contentSize.height - textView.bounds.height)
         var y = textView.contentOffset.y + delta
+        // 이미 끝이면 바운스로 알린다.
+        if (delta < 0 && textView.contentOffset.y <= 1) || (delta > 0 && textView.contentOffset.y >= maxY - 1) {
+            textView.argoBounce(dx: 0, dy: delta < 0 ? 1 : -1)
+            return
+        }
         y = min(max(0, y), maxY)
         textView.setContentOffset(CGPoint(x: 0, y: y), animated: true)
         updateStatus()

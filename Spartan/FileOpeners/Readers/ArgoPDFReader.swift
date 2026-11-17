@@ -84,6 +84,25 @@ enum PDFFitMode: Int, CaseIterable {
 /// "선택 버튼을 누르면 흰 화면이 없어진다"의 정체다.
 ///
 /// 평범한 UIView 는 포커스를 받아도 아무것도 그리지 않는다. 그래서 이쪽이다.
+extension UIView {
+    /// 더 갈 곳이 없을 때(첫·마지막 쪽, 엑셀 마지막 칸) 살짝 밀렸다 돌아와 끝임을 알린다.
+    /// dx·dy 는 내용이 밀리는 방향(-1·0·1). 프레임은 건드리지 않아 배치와 다투지 않는다.
+    func argoBounce(dx: CGFloat, dy: CGFloat, distance: CGFloat = 40) {
+        guard layer.animation(forKey: "argoBounce") == nil else { return }
+        let a = CAKeyframeAnimation(keyPath: "transform.translation")
+        a.values = [CGSize.zero,
+                    CGSize(width: dx * distance, height: dy * distance),
+                    CGSize(width: -dx * distance * 0.2, height: -dy * distance * 0.2),
+                    CGSize.zero].map { NSValue(cgSize: $0) }
+        a.keyTimes = [0, 0.35, 0.75, 1]
+        a.timingFunctions = [CAMediaTimingFunction(name: .easeOut),
+                             CAMediaTimingFunction(name: .easeInEaseOut),
+                             CAMediaTimingFunction(name: .easeOut)]
+        a.duration = 0.38
+        layer.add(a, forKey: "argoBounce")
+    }
+}
+
 @available(tvOS 13.0, *)
 final class ArgoFocusCanvas: UIControl {
     /// 방향키·재생 등. true 를 돌려주면 그 입력은 여기서 끝난다.
@@ -161,6 +180,10 @@ final class ArgoPDFReaderController: UIViewController {
 
     /// 가로 맞춤에서 쪽이 화면보다 길 때의 세로 위치 (0 = 맨 위).
     private var scrollOffset: CGFloat = 0
+    /// 터치면으로 끌 때 쪽 끝을 넘어 당긴 양(고무줄). 놓으면 0 으로 돌아온다.
+    private var overscroll: CGFloat = 0
+    private var panStartOffset: CGFloat = 0
+    private var panning = false
     private var renderedPageHeight: CGFloat = 0
 
     private let scrollHost = UIScrollView()
@@ -246,6 +269,11 @@ final class ArgoPDFReaderController: UIViewController {
         let menu = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
         menu.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
         view.addGestureRecognizer(menu)
+
+        // 리모컨 터치면을 쓸어 쪽 안을 부드럽게 스크롤한다. 끝을 넘겨 당기면 다음·앞 쪽.
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        view.addGestureRecognizer(pan)
 
         ArgoDiag.begin("PDF 뷰어: \((documentPath as NSString).lastPathComponent)")
         ArgoDiag.log("load", "bounds=\(view.bounds) safeArea=\(view.safeAreaInsets)")
@@ -617,10 +645,12 @@ final class ArgoPDFReaderController: UIViewController {
 
         // 쪽이 화면보다 짧으면 가운데로. 두 쪽 펼침면은 32:9 라 16:9 화면에서
         // 위아래가 남을 수밖에 없는데, 위에 붙여 두면 아래만 텅 비어 보인다.
-        let y = h < available.height ? (available.height - h) / 2 : -scrollOffset
+        let y = (h < available.height ? (available.height - h) / 2 : -scrollOffset) + overscroll
         pageImage.frame = CGRect(x: (available.width - w) / 2,
                                  y: y,
                                  width: w, height: h)
+        // 끄는 동안은 한 장면마다 불려 로그가 넘친다.
+        if panning { return }
         ArgoDiag.log("layoutPage", "available=\(available) image=\(pageImage.image?.size ?? .zero) "
                                  + "renderedH=\(renderedPageHeight) offset=\(scrollOffset) "
                                  + "frame=\(pageImage.frame)")
@@ -638,17 +668,17 @@ final class ArgoPDFReaderController: UIViewController {
         // 아무 일도 일어나지 않는다.
         switch type {
         case .leftArrow:
-            goToPage(previousViewStart())
+            goToPageOrBounce(previousViewStart(), dx: 1, dy: 0)
             return true
         case .rightArrow:
-            goToPage(nextViewStart())
+            goToPageOrBounce(nextViewStart(), dx: -1, dy: 0)
             return true
         case .upArrow:
             // 쪽이 길면 쪽 안에서 올라가고, 맨 위면 앞 쪽으로 넘어간다.
             if canScrollWithinPage && scrollOffset > 0 {
                 scrollBy(-view.bounds.height * 0.85)
             } else {
-                goToPage(previousViewStart(), landAtBottom: true)
+                goToPageOrBounce(previousViewStart(), dx: 0, dy: 1, landAtBottom: true)
             }
             return true
         case .downArrow:
@@ -656,7 +686,7 @@ final class ArgoPDFReaderController: UIViewController {
             if canScrollWithinPage && scrollOffset < maxOffset - 1 {
                 scrollBy(view.bounds.height * 0.85)
             } else {
-                goToPage(nextViewStart())
+                goToPageOrBounce(nextViewStart(), dx: 0, dy: -1)
             }
             return true
         case .playPause:
@@ -669,8 +699,75 @@ final class ArgoPDFReaderController: UIViewController {
 
     private func scrollBy(_ delta: CGFloat) {
         scrollOffset += delta
-        layoutPage()
+        // 한 번에 뛰지 않고 미끄러지듯 — 어디서 어디로 갔는지 눈으로 따라가게.
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.layoutPage()
+        }
         updateStatus()
+    }
+
+    /// 갈 쪽이 없으면(첫 쪽에서 앞, 마지막 쪽에서 뒤) 바운스로 끝을 알린다.
+    private func goToPageOrBounce(_ page: Int, dx: CGFloat, dy: CGFloat, landAtBottom: Bool = false) {
+        if page < 1 || page > pageCount {
+            pageImage.argoBounce(dx: dx, dy: dy)
+            return
+        }
+        goToPage(page, landAtBottom: landAtBottom)
+    }
+
+    /// 터치면 끌기: 쪽 안 스크롤 + 끝에서는 고무줄처럼 당겨지고, 충분히 당기고 놓으면 다음·앞 쪽.
+    @objc private func panned(_ g: UIPanGestureRecognizer) {
+        // 도구 모음을 고르는 중이면 포커스 이동에 맡긴다.
+        guard canvas.isFocused, pageCount > 0 else { return }
+        let t = g.translation(in: view)
+        let maxOffset = canScrollWithinPage ? max(0, renderedPageHeight - view.bounds.height) : 0
+        switch g.state {
+        case .began:
+            panning = true
+            panStartOffset = scrollOffset
+            overscroll = 0
+        case .changed:
+            // 터치면은 작아서 손가락 움직임을 키운다.
+            let raw = panStartOffset - t.y * 2
+            if raw < 0 {
+                scrollOffset = 0
+                overscroll = -raw / 3
+            } else if raw > maxOffset {
+                scrollOffset = maxOffset
+                overscroll = -(raw - maxOffset) / 3
+            } else {
+                scrollOffset = raw
+                overscroll = 0
+            }
+            layoutPage()
+        case .ended, .cancelled, .failed:
+            panning = false
+            let pull = overscroll
+            overscroll = 0
+            let threshold = view.bounds.height * 0.12
+            // 옆으로 크게 쓸면 쪽 넘김.
+            if g.state == .ended, abs(t.x) > view.bounds.width * 0.25, abs(t.x) > abs(t.y) * 1.5 {
+                layoutPage()
+                goToPageOrBounce(t.x < 0 ? nextViewStart() : previousViewStart(), dx: t.x < 0 ? -1 : 1, dy: 0)
+                return
+            }
+            if g.state == .ended, pull < -threshold {
+                if nextViewStart() <= pageCount { layoutPage(); goToPage(nextViewStart()); return }
+            } else if g.state == .ended, pull > threshold {
+                if previousViewStart() >= 1 { layoutPage(); goToPage(previousViewStart(), landAtBottom: true); return }
+            }
+            // 놓을 때의 빠르기만큼 조금 더 미끄러진다.
+            if g.state == .ended, pull == 0, maxOffset > 0 {
+                let v = g.velocity(in: view).y
+                scrollOffset = min(max(0, scrollOffset - v * 0.25), maxOffset)
+            }
+            UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                self.layoutPage()
+            }
+            updateStatus()
+        default:
+            break
+        }
     }
 
     private func goToPage(_ page: Int, landAtBottom: Bool = false) {

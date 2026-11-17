@@ -1672,9 +1672,22 @@ final class ArgoSheetViewerController: UIViewController {
             if n < 1 || n > colCount { break }
             c = n; guardN += 1
         }
+        // 마지막 칸(또는 첫 칸)에서 더 가려 하면 제자리 — 바운스로 끝을 알리고 되풀이를 멈춘다.
+        if (dr != 0 || dc != 0), r == cursorRow, c == cursorCol, cursorInfo.map({ ci in
+            (dr > 0 ? Int(ci.merge_end_row) >= rowCount : dr < 0 ? Int(ci.merge_start_row) <= 1 : true)
+                && (dc > 0 ? Int(ci.merge_end_col) >= colCount : dc < 0 ? Int(ci.merge_start_col) <= 1 : true)
+        }) ?? true {
+            bounceAtEdge(dr, dc)
+            return
+        }
         cursorRow = r
         cursorCol = c
         syncCursor(ensureVisible: true)
+    }
+
+    private func bounceAtEdge(_ dr: Int, _ dc: Int) {
+        stopRepeat()
+        grid.argoBounce(dx: dc > 0 ? -1 : (dc < 0 ? 1 : 0), dy: dr > 0 ? -1 : (dr < 0 ? 1 : 0), distance: 30)
     }
 
     /// P6: 엑셀 Ctrl+화살표 규칙(빈 칸 / 찬 칸 경계까지 이동).
@@ -1698,7 +1711,7 @@ final class ArgoSheetViewerController: UIViewController {
 
         let nr = r + dr
         let nc = c + dc
-        if nr < 1 || nr > maxR || nc < 1 || nc > maxC { return }
+        if nr < 1 || nr > maxR || nc < 1 || nc > maxC { bounceAtEdge(dr, dc); return }
 
         let curFilled = isFilled(cursorRow, cursorCol)
         let nextFilled = isFilled(nr, nc)
@@ -1735,6 +1748,11 @@ final class ArgoSheetViewerController: UIViewController {
     /// P6: 한 화면 위·아래·왼쪽·오른쪽 이동
     private func moveCursorByPage(dRowPages: Int, dColPages: Int) {
         guard rowCount > 0, colCount > 0 else { return }
+        if (dRowPages > 0 && cursorRow >= rowCount) || (dRowPages < 0 && cursorRow <= 1)
+            || (dColPages > 0 && cursorCol >= colCount) || (dColPages < 0 && cursorCol <= 1) {
+            bounceAtEdge(dRowPages, dColPages)
+            return
+        }
         if dRowPages != 0 {
             let pagePt = max(60, bodyHost.bounds.height / max(zoom, 0.25))
             let curY = rowOffsets[min(cursorRow - 1, rowOffsets.count - 1)]
