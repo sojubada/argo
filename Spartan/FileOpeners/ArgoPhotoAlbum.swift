@@ -332,10 +332,11 @@ final class ArgoPhotoAlbumController: UIViewController {
             let n = names.count
             loader.async { [weak self] in
                 guard let me = self, me.stillWanted(i, radius: 0, count: n) else { return }
-                let img = ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx)
+                // 미리 풀기가 먼저 끝났으면 그것을 쓴다(같은 장을 두 번 풀던 것). 큐가 한 줄이라 그 결과가 이미 캐시에 있다.
+                let img = me.big.object(forKey: key) ?? ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx)
+                if let img = img { me.big.setObject(img, forKey: key) }
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if let img = img { self.big.setObject(img, forKey: key) }
                     guard self.index == i else { return }
                     if let img = img {
                         if self.thumbs.object(forKey: key) != nil { self.current.image = img }
@@ -384,8 +385,9 @@ final class ArgoPhotoAlbumController: UIViewController {
         let n = names.count
         loader.async { [weak self] in
             guard let me = self, me.stillWanted(i, radius: 1, count: n) else { return }
+            if me.big.object(forKey: key) != nil { return }
             guard let img = ArgoPhotoAlbumController.decode(resolve(p), maxPixel: maxPx) else { return }
-            DispatchQueue.main.async { self?.big.setObject(img, forKey: key) }
+            me.big.setObject(img, forKey: key)
         }
     }
 

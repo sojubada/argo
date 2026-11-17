@@ -587,7 +587,7 @@ enum ArgoFontLibrary {
     /// 한국어 이름과 영어 이름이 다른 글꼴. 이름표에 둘 다 있는 경우가 많지만,
     /// 한쪽만 적어 둔 파일도 있어 짝을 알아 둔다.
     private static let pairs: [[String]] = [
-        ["맑은고딕", "malgungothic"], ["바탕", "batang"], ["바탕체", "batangche"],
+        ["맑은고딕", "malgungothic", "malgungothicregular"], ["바탕", "batang"], ["바탕체", "batangche"],
         ["굴림", "gulim"], ["굴림체", "gulimche"], ["돋움", "dotum"], ["돋움체", "dotumche"],
         ["궁서", "gungsuh"], ["궁서체", "gungsuhche"], ["새굴림", "newgulim"],
         ["함초롬바탕", "hcrbatang"], ["함초롬돋움", "hcrdotum"],
