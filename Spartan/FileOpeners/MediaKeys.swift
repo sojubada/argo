@@ -128,6 +128,10 @@ final class ArgoAVPlayerController: AVPlayerViewController {
         // Menu 로 닫혔을 때도 멈추고, 부른 쪽 상태를 되돌린다.
         if isBeingDismissed || presentingViewController == nil {
             player?.pause()
+            // 닫은 영상을 플레이어에 그대로 두면 받아 둔 버퍼가 메모리에 남는다. 그 상태로 큰 사진을
+            // 보다 앱이 꺼진 적이 있다(영상 → 사진 앨범 순서로 본 두 번 모두).
+            player?.replaceCurrentItem(with: nil)
+            ArgoDiag.log("mem", "영상 닫음 · \(ArgoDiag.memoryText())")
             onClose?()
             onClose = nil
         }

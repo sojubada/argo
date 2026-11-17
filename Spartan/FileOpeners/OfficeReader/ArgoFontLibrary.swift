@@ -210,12 +210,19 @@ enum ArgoFontLibrary {
                 files += 1
                 let name = (rel as NSString).lastPathComponent
                 // 맥에서 복사하면 생기는 짝 파일(._이름.ttf)은 글꼴이 아니다.
-                if name.hasPrefix("._") { continue }
+                if name.hasPrefix("._") { ArgoDiag.log("fontfile", "짝 파일(무시): \(rel)"); continue }
                 let ext = (rel as NSString).pathExtension.lowercased()
-                guard ["ttf", "otf", "ttc", "otc"].contains(ext) else { continue }
+                guard ["ttf", "otf", "ttc", "otc"].contains(ext) else {
+                    ArgoDiag.log("fontfile", "글꼴 아님: \(rel)")
+                    continue
+                }
                 fonts += 1
                 let path = (root as NSString).appendingPathComponent(rel)
-                guard let attrs = try? fm.attributesOfItem(atPath: path) else { failed += 1; continue }
+                guard let attrs = try? fm.attributesOfItem(atPath: path) else {
+                    failed += 1
+                    ArgoDiag.log("fontfile", "속성 못 읽음: \(rel)")
+                    continue
+                }
                 let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
                 let mod = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
                 seen.insert(path)
@@ -223,10 +230,12 @@ enum ArgoFontLibrary {
                     out += e.faces
                     faceCount += e.faces.count
                     if e.faces.isEmpty { failed += 1 }
+                    logFontFile(rel, size: size, faces: e.faces)
                     continue
                 }
                 let faces = readFaces(path)
                 if faces.isEmpty { failed += 1 }
+                logFontFile(rel, size: size, faces: faces)
                 index.files[path] = .init(size: size, modified: mod, faces: faces)
                 changed = true
                 out += faces
@@ -249,6 +258,20 @@ enum ArgoFontLibrary {
             try? data.write(to: URL(fileURLWithPath: indexPath), options: .atomic)
         }
         return out
+    }
+
+    /// 글꼴 파일 하나의 이름표를 전부 로그에 남긴다(파일명 ↔ 글꼴 이름 연결을 눈으로 확인하려는 것).
+    /// 이름표의 모든 말(영문·한글·EUC-KR 옛 이름 포함)을 / 로 이어 적는다.
+    private static func logFontFile(_ rel: String, size: Int64, faces: [ArgoFontFace]) {
+        let kb = size / 1024
+        if faces.isEmpty {
+            ArgoDiag.log("fontfile", "읽기 실패: \(rel) (\(kb)KB) — 이름표를 못 읽음")
+            return
+        }
+        for f in faces {
+            let n = f.names.joined(separator: " / ")
+            ArgoDiag.log("fontfile", "\(rel) (\(kb)KB) #\(f.index) → \(n) | w\(f.weight)\(f.italic ? " 기울임" : "")\(f.mono ? " 고정폭" : "")\(f.hangul ? " 한글" : "")\(f.ttf ? "" : " OTF")")
+        }
     }
 
     /// 사용자 글꼴이 하나도 없을 때, Media 아래 두 단계까지만 훑어 글꼴 파일이 어디 있는지 찾아본다.
@@ -424,6 +447,11 @@ enum ArgoFontLibrary {
         for (i, f) in faces.enumerated() {
             var keys = Set<String>()
             for n in f.names { keys.insert(normalize(n)); keys.insert(normalize(stripStyle(n))) }
+            // 파일명 줄기(HANBatang.ttf → hanbatang)로도 찾게 한다. 이름표에는 함초롬바탕 이라 적혀 있어도
+            // 문서는 파일 이름이나 옛 이름으로 부르는 일이 있다. 연결표에 있는 것만 더한다.
+            let stem = normalize(((f.path as NSString).lastPathComponent as NSString).deletingPathExtension)
+            keys.insert(stem)
+            for extra in fileStemNames[stem] ?? [] { keys.insert(normalize(extra)) }
             for k in keys { idx[k, default: []].append(i) }
         }
         nameIndex = idx
@@ -431,6 +459,21 @@ enum ArgoFontLibrary {
         faceCategory = faces.map { category(of: $0.names) }
         faceDecorative = faces.map { isDecorative($0.names) }
     }
+
+    /// 파일명 줄기(정규화) → 그 파일이 가리키는 글꼴 이름들.
+    /// 근거: 윈도·한컴 배포 파일명 관례(웹 확인). HANBatang/HANDotum 은 '한컴바탕' 이 아니라
+    /// 함초롬바탕·함초롬돋움(HCR Batang/Dotum)이고, H2GTRE 는 HY견고딕이다.
+    /// 확실한 것만 둔다 — 모르는 파일명은 이름표(위 names)만 믿는다.
+    private static let fileStemNames: [String: [String]] = [
+        "hanbatang": ["함초롬바탕", "HCR Batang"],
+        "hanbatangb": ["함초롬바탕", "HCR Batang"],
+        "handotum": ["함초롬돋움", "HCR Dotum"],
+        "handotumb": ["함초롬돋움", "HCR Dotum"],
+        "h2gtre": ["HY견고딕", "HYGothic-Extra"],
+        "h2hdrm": ["HY헤드라인M", "HYHeadLine-Medium"],
+        "malgun": ["맑은 고딕", "Malgun Gothic"],
+        "malgunbd": ["맑은 고딕", "Malgun Gothic"],
+    ]
 
     static func resolve(_ wanted: String, in faces: [ArgoFontFace], consumer: Consumer) -> Pick? {
         ensureIndex(faces)

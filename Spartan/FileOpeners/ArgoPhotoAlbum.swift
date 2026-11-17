@@ -87,7 +87,7 @@ final class ArgoPhotoAlbumController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        big.countLimit = 4
+        big.countLimit = 3
         thumbs.countLimit = 120
 
         for iv in [current, incoming] {
@@ -210,6 +210,17 @@ final class ArgoPhotoAlbumController: UIViewController {
         super.viewDidDisappear(animated)
         // 닫힌 앨범의 남은 받기·풀기는 모두 건너뛴다.
         wantLock.lock(); closed = true; wantLock.unlock()
+        big.removeAllObjects()
+        thumbs.removeAllObjects()
+        ArgoDiag.log("photo", "앨범 닫음 · \(ArgoDiag.memoryText())")
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        // 시스템이 메모리 부족을 알리면 지금 장 말고는 모두 비운다.
+        ArgoDiag.logNow("photo", "메모리 경고! 캐시 비움 · \(ArgoDiag.memoryText())")
+        big.removeAllObjects()
+        thumbs.removeAllObjects()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -465,6 +476,20 @@ final class ArgoPhotoAlbumController: UIViewController {
         let url = URL(fileURLWithPath: path) as CFURL
         guard let src = CGImageSourceCreateWithURL(url, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
+        }
+        // 큰 사진만 풀기 전·후를 남긴다(썸네일 300px 은 너무 잦아 제외). 앱이 꺼지면 '풀기 전' 줄이 마지막이다.
+        let big = maxPixel > 400
+        var t0 = Date()
+        if big {
+            let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+            let w = (props?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+            let h = (props?[kCGImagePropertyPixelHeight] as? Int) ?? 0
+            let size = ((try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber)?.int64Value ?? 0
+            ArgoDiag.logNow("photo", "풀기 전 \((path as NSString).lastPathComponent) \(w)x\(h) \(size / 1024)KB → 최대 \(Int(maxPixel))px · \(ArgoDiag.memoryText())")
+            t0 = Date()
+        }
+        defer {
+            if big { ArgoDiag.log("photo", "풀기 끝 \(Int(Date().timeIntervalSince(t0) * 1000))ms · \(ArgoDiag.memoryText())") }
         }
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

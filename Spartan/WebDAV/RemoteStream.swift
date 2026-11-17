@@ -75,6 +75,17 @@ final class ArgoRemoteStream: NSObject {
         queue.async { self.routes.removeAll() }
     }
 
+    /// 진행 중인 중계를 모두 끊는다. 사진 앨범을 열 때 부른다 — 영상 받기가 뒤에서 계속 돌며
+    /// 메모리·네트워크를 잡고 있지 않게 한다. 열린 연결은 재생기가 다시 요청하면 새로 만든다.
+    func cancelAll() {
+        queue.async {
+            let n = self.relays.count
+            for (_, r) in self.relays { r.task?.cancel(); r.conn.cancel() }
+            self.relays.removeAll()
+            if n > 0 { ArgoDiag.log("stream", "중계 \(n)개 끊음") }
+        }
+    }
+
     static func mimeType(forName name: String) -> String? {
         switch (name as NSString).pathExtension.lowercased() {
         case "mp4":          return "video/mp4"

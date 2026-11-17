@@ -12,6 +12,7 @@
 //
 
 import UIKit
+import os
 
 @available(tvOS 13.0, *)
 enum ArgoDiag {
@@ -61,7 +62,7 @@ enum ArgoDiag {
         write("""
 
         ========================================
-        Argo \(ver) build \(build)
+        Argo \(ver) build \(build)  \(memoryText()) · 기기 메모리 \(ProcessInfo.processInfo.physicalMemory / 1_048_576)MB
         \(what)  \(Date())
         screen bounds=\(s.bounds.size) native=\(s.nativeBounds.size) \
         scale=\(s.scale) nativeScale=\(s.nativeScale)
@@ -72,6 +73,39 @@ enum ArgoDiag {
     static func log(_ tag: String, _ message: @autoclosure () -> String) {
         guard isEnabled else { return }
         write("\(stamp.string(from: Date()))  [\(tag)] \(message())")
+    }
+
+    /// 지금 앱이 쓰는 메모리(MB)와, 시스템이 앱을 끄기 전까지 남은 여유(MB).
+    /// 사진·영상을 오래 보다 앱이 아무 기록 없이 꺼지는 것(메모리 부족)을 로그로 잡기 위한 것이다.
+    static func memoryText() -> String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        let used = kr == KERN_SUCCESS ? Int(info.phys_footprint / 1_048_576) : -1
+        let free = Int(os_proc_available_memory() / 1_048_576)
+        return "메모리 \(used)MB 사용 · 꺼지기까지 \(free)MB 남음"
+    }
+
+    /// 쓰는 즉시 디스크에 적고 돌아온다. 앱이 바로 꺼질 수 있는 자리(큰 사진을 풀기 직전)의 기록용.
+    /// 보통 log 는 뒤에서 적어, 꺼지는 순간 마지막 몇 줄이 사라질 수 있다.
+    static func logNow(_ tag: String, _ message: @autoclosure () -> String) {
+        guard isEnabled else { return }
+        let line = "\(stamp.string(from: Date()))  [\(tag)] \(message())\n"
+        queue.sync {
+            guard let data = line.data(using: .utf8) else { return }
+            if let h = FileHandle(forWritingAtPath: logPath) {
+                h.seekToEndOfFile()
+                h.write(data)
+                h.synchronizeFile()
+                h.closeFile()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: logPath))
+            }
+        }
     }
 
     /// 기록을 비웁니다. 한 번 재현에 한 파일이어야 읽을 수 있습니다.

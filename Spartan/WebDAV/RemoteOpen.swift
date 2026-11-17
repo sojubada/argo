@@ -100,6 +100,8 @@ enum ArgoRemoteCache {
         let path = localPath(server: client.server, item: item)
         if isFresh(path, item: item) { touch(path); return path }
         prepare(path)
+        let t0 = Date()
+        ArgoDiag.log("fetch", "받기 시작 \(item.name) \(item.size / 1024)KB")
         let done = DispatchSemaphore(value: 0)
         var saved: String?
         DispatchQueue.main.async {
@@ -108,7 +110,11 @@ enum ArgoRemoteCache {
                 done.signal()
             })
         }
-        if done.wait(timeout: .now() + timeout) == .timedOut { return nil }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            ArgoDiag.log("fetch", "받기 시간 초과 \(item.name)")
+            return nil
+        }
+        ArgoDiag.log("fetch", "받기 끝 \(item.name) \(Int(Date().timeIntervalSince(t0) * 1000))ms \(saved == nil ? "실패" : "성공")")
         return saved
     }
 

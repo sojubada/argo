@@ -989,6 +989,8 @@ struct WebDAVBrowserView: View {
         }
         if byName[safe(item.name)] == nil { byName[safe(item.name)] = item }
         let c = client
+        ArgoRemoteStream.shared.cancelAll()
+        ArgoDiag.log("photo", "앨범 열기 \(byName.count)장 · \(ArgoDiag.memoryText())")
         let vc = ArgoPhotoAlbumController()
         vc.folder = ArgoRemoteCache.folder(server: server, remoteFolder: WebDAVClient.parent(of: item.path))
         vc.startName = safe(item.name)
