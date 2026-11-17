@@ -78,6 +78,9 @@ final class WebDAVClient: NSObject {
         }
         req.setValue("1", forHTTPHeaderField: "Depth")
         req.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        // 파일이 수만 개인 폴더는 서버가 목록을 다 만들 때까지 첫 바이트가 안 온다. 기본 30초면 시간 초과로 실패한다.
+        req.timeoutInterval = 300
+        let started = Date()
         let body = """
         <?xml version="1.0" encoding="utf-8"?>
         <D:propfind xmlns:D="DAV:">
@@ -100,10 +103,12 @@ final class WebDAVClient: NSObject {
             guard let data = data, !data.isEmpty else {
                 self.finish(completion, .failure(WebDAVError.emptyResponse)); return
             }
+            let gotAt = Date()
             let parser = WebDAVPropfindParser()
             guard let entries = parser.parse(data) else {
                 self.finish(completion, .failure(WebDAVError.parseFailure)); return
             }
+            let parsedAt = Date()
 
             let requested = WebDAVClient.normalize(path)
             var items: [WebDAVItem] = []
@@ -119,6 +124,8 @@ final class WebDAVClient: NSObject {
                 if l.0.isDirectory != r.0.isDirectory { return l.0.isDirectory }
                 return l.1 < r.1
             }.map { $0.0 }
+            let ms: (Date, Date) -> Int = { Int($1.timeIntervalSince($0) * 1000) }
+            ArgoDiag.log("webdav", "목록 \(items.count)개 · 응답 \(data.count / 1024)KB · 받기 \(ms(started, gotAt))ms · 해석 \(ms(gotAt, parsedAt))ms · 정렬 \(ms(parsedAt, Date()))ms · \(ArgoDiag.memoryText())")
             self.finish(completion, .success(items))
         }
         task.resume()

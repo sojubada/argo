@@ -307,6 +307,9 @@ struct WebDAVBrowserView: View {
     /// 처음 한 번만 목록을 읽는다. 사진·영상 화면을 닫고 돌아올 때마다 onAppear 가 다시 불려
     /// 폴더를 통째로 다시 읽고, 그 바람에 커서가 첫 파일로 갔다.
     @State private var didInitialLoad = false
+    /// 목록 읽기 번호. 폴더를 빠르게 옮기거나 새로고침을 겹쳐 눌렀을 때, 늦게 온 옛 폴더 결과가
+    /// 지금 폴더 목록을 덮어쓰지 않게 한다(큰 폴더는 응답이 수 초 늦다).
+    @State private var reloadToken = 0
     /// ⌘C·⌘X 로 담아 둔 것(서버 안 복사·이동). 폴더를 옮겨 다녀도 남는다.
     @State private var clip: RemoteClip?
     @State private var showKeyHelp = false
@@ -1022,17 +1025,25 @@ struct WebDAVBrowserView: View {
     private func reload() {
         loading = true
         message = ""
+        reloadToken += 1
+        let token = reloadToken
         client.list(path: path) { result in
+            guard token == reloadToken else { return }   // 더 새 읽기가 있다 — 이 결과는 버린다
             loading = false
             switch result {
             case .success(let listed):
                 visibleCount = 150
                 items = listed
                 if listed.isEmpty { message = "This folder is empty." }
+                else if listed.count > 1000 { message = "항목 \(listed.count)개 — 나눠서 보여 줍니다" }
                 // 목록을 다시 읽어도(새로고침·폴더 이동 후 돌아옴) 마지막에 연 줄로 커서를 되돌린다.
                 if let f = lastFocus, let idx = listed.firstIndex(where: { $0.path == f }) {
-                    visibleCount = max(visibleCount, idx + 30)   // 아래쪽 줄이면 그 줄까지 그려 둔다
-                    DispatchQueue.main.async { focusedPath = f }
+                    // 아래쪽 줄이면 그 줄까지 그려 둔다. 다만 수만 줄을 한꺼번에 그리면 멈추거나 꺼지므로
+                    // 2000줄 안쪽일 때만(그보다 멀면 처음 줄에 둔다).
+                    if idx + 30 <= 2000 {
+                        visibleCount = max(visibleCount, idx + 30)
+                        DispatchQueue.main.async { focusedPath = f }
+                    }
                 }
             case .failure(let error):
                 items = []
