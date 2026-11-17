@@ -302,6 +302,11 @@ struct WebDAVBrowserView: View {
     @State private var picked: Set<String> = []
     /// 키보드 고르기(Space)·정보(⌘I)에 쓰는 지금 포커스된 줄.
     @FocusState private var focusedPath: String?
+    /// 마지막으로 연 줄(사진·영상·폴더). 닫고 돌아오거나 목록을 다시 읽어도 커서를 여기로 돌려 놓는다.
+    @State private var lastFocus: String?
+    /// 처음 한 번만 목록을 읽는다. 사진·영상 화면을 닫고 돌아올 때마다 onAppear 가 다시 불려
+    /// 폴더를 통째로 다시 읽고, 그 바람에 커서가 첫 파일로 갔다.
+    @State private var didInitialLoad = false
     /// ⌘C·⌘X 로 담아 둔 것(서버 안 복사·이동). 폴더를 옮겨 다녀도 남는다.
     @State private var clip: RemoteClip?
     @State private var showKeyHelp = false
@@ -365,7 +370,13 @@ struct WebDAVBrowserView: View {
         }
         .onAppear {
             ArgoRemoteKeys.active = true
-            reload()
+            if !didInitialLoad {
+                didInitialLoad = true
+                reload()
+            } else if let f = lastFocus, items.contains(where: { $0.path == f }) {
+                // 돌아왔을 뿐이다 — 다시 읽지 않고 커서만 제자리로.
+                DispatchQueue.main.async { focusedPath = f }
+            }
         }
         // The remote's Menu button walks back up the tree, the way it does in
         // the local browser, instead of closing the whole sheet.
@@ -609,6 +620,7 @@ struct WebDAVBrowserView: View {
             multiSelect = false
             picked.removeAll()
         } else if !atRoot {
+            lastFocus = path   // 위로 가면 방금 나온 폴더에 커서
             path = WebDAVClient.parent(of: path)
             picked.removeAll()
             reload()
@@ -619,6 +631,7 @@ struct WebDAVBrowserView: View {
     }
 
     private func open(_ item: WebDAVItem) {
+        lastFocus = item.path
         if item.isDirectory {
             path = item.path
             picked.removeAll()
@@ -951,6 +964,7 @@ struct WebDAVBrowserView: View {
     /// 음악·동영상은 받지 않고 바로 재생, 사진은 앨범(넘길 때 그 장만 받음),
     /// 문서는 임시 보관함에 받아 로컬과 같은 뷰어로.
     private func openRemote(_ item: WebDAVItem) {
+        lastFocus = item.path
         guard !transferring else { return }
         detailItem = nil
         switch ArgoRemoteKind.of(item.name) {
@@ -1015,6 +1029,11 @@ struct WebDAVBrowserView: View {
                 visibleCount = 150
                 items = listed
                 if listed.isEmpty { message = "This folder is empty." }
+                // 목록을 다시 읽어도(새로고침·폴더 이동 후 돌아옴) 마지막에 연 줄로 커서를 되돌린다.
+                if let f = lastFocus, let idx = listed.firstIndex(where: { $0.path == f }) {
+                    visibleCount = max(visibleCount, idx + 30)   // 아래쪽 줄이면 그 줄까지 그려 둔다
+                    DispatchQueue.main.async { focusedPath = f }
+                }
             case .failure(let error):
                 items = []
                 message = error.localizedDescription
