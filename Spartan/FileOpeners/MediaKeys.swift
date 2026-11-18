@@ -120,8 +120,83 @@ struct MediaKeyHost<Content: View>: UIViewControllerRepresentable {
 
 /// 애플TV 기본 재생 화면. 리모컨(재생·멈춤, 훑기, ±10초, 정보 패널)은 기본 그대로
 /// 쓰고, 키보드 단축키만 더한다.
+/// 같은 폴더의 영상들을 이어서 보기 위한 목록. 열 때 부른 쪽이 만들어 넘긴다.
+struct ArgoVideoPlaylist {
+    var count: Int
+    var index: Int
+    /// i 번째 영상의 파일 이름(정보 패널 제목·로그용)
+    var name: (Int) -> String
+    /// i 번째 영상의 재생 주소를 만들어 돌려준다(원격은 중계 주소를 새로 만들므로 비동기, 메인에서 호출됨).
+    var url: (Int, @escaping (URL?) -> Void) -> Void
+}
+
 final class ArgoAVPlayerController: AVPlayerViewController {
     var onClose: (() -> Void)?
+    var playlist: ArgoVideoPlaylist?
+    private var endObserver: NSObjectProtocol?
+    private var switching = false
+
+    /// 목록이 있으면: 영상이 끝나면 다음 파일을 이어 틀고, 재생 막대 메뉴에 이전·다음 항목을 둔다.
+    func startPlaylist() {
+        guard playlist != nil else { return }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
+                guard let self = self, let item = note.object as? AVPlayerItem,
+                      item === self.player?.currentItem else { return }
+                self.advance(1, auto: true)
+            }
+        refreshMenu()
+    }
+
+    private func stopPlaylist() {
+        if let o = endObserver { NotificationCenter.default.removeObserver(o) }
+        endObserver = nil
+    }
+
+    private func refreshMenu() {
+        guard #available(tvOS 15.0, *), let pl = playlist else { return }
+        var actions: [UIMenuElement] = []
+        if pl.index + 1 < pl.count {
+            actions.append(UIAction(title: "다음 파일 (\(pl.index + 2)/\(pl.count))",
+                                    image: UIImage(systemName: "forward.end")) { [weak self] _ in
+                self?.advance(1, auto: false)
+            })
+        }
+        if pl.index > 0 {
+            actions.append(UIAction(title: "이전 파일 (\(pl.index)/\(pl.count))",
+                                    image: UIImage(systemName: "backward.end")) { [weak self] _ in
+                self?.advance(-1, auto: false)
+            })
+        }
+        transportBarCustomMenuItems = actions
+    }
+
+    /// 목록의 다음(+1)·이전(-1) 영상으로. 끝(마지막 영상이 끝남)이면 그대로 둔다.
+    func advance(_ delta: Int, auto: Bool) {
+        guard var pl = playlist, !switching else { return }
+        let next = pl.index + delta
+        guard next >= 0, next < pl.count else {
+            if auto { ArgoDiag.log("video", "목록 끝 — 이어 틀 파일 없음") }
+            return
+        }
+        switching = true
+        ArgoDiag.log("video", "\(auto ? "이어 재생" : "수동 이동") \(pl.index + 1) → \(next + 1)/\(pl.count) \(pl.name(next)) · \(ArgoDiag.memoryText())")
+        pl.url(next) { [weak self] url in
+            guard let self = self else { return }
+            self.switching = false
+            guard let url = url, let player = self.player else {
+                ArgoDiag.log("video", "다음 영상 주소를 못 만듦 \(pl.name(next))")
+                return
+            }
+            // 앞 영상 항목을 비운 뒤 새로 건다(버퍼를 먼저 놓아야 메모리가 안 겹친다).
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            player.replaceCurrentItem(with: ArgoMediaPresenter.makeItem(url: url, title: pl.name(next)))
+            self.playlist?.index = next
+            self.refreshMenu()
+            player.play()
+        }
+    }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -131,6 +206,7 @@ final class ArgoAVPlayerController: AVPlayerViewController {
             // 닫은 영상을 플레이어에 그대로 두면 받아 둔 버퍼가 메모리에 남는다. 그 상태로 큰 사진을
             // 보다 앱이 꺼진 적이 있다(영상 → 사진 앨범 순서로 본 두 번 모두).
             player?.replaceCurrentItem(with: nil)
+            stopPlaylist()
             ArgoDiag.log("mem", "영상 닫음 · \(ArgoDiag.memoryText())")
             onClose?()
             onClose = nil
@@ -168,6 +244,10 @@ final class ArgoAVPlayerController: AVPlayerViewController {
             return { [weak self] in self?.seek(10) }
         case .keyboardEscape:
             return { [weak self] in self?.player?.pause(); self?.dismiss(animated: true) }
+        case .keyboardN:
+            return { [weak self] in self?.advance(1, auto: false) }
+        case .keyboardP:
+            return { [weak self] in self?.advance(-1, auto: false) }
         default:
             return nil
         }
@@ -291,18 +371,25 @@ enum ArgoMediaPresenter {
         return vc
     }
 
-    static func presentVideo(url: URL, player: AVPlayer, onClose: @escaping () -> Void) {
+    /// 영상 항목 하나. 정보 패널에 보일 제목은 태그가 없으면 파일 이름.
+    static func makeItem(url: URL, title name: String? = nil) -> AVPlayerItem {
+        let item = AVPlayerItem(url: url)
+        let title = AVMutableMetadataItem()
+        title.identifier = .commonIdentifierTitle
+        title.value = ((name ?? url.lastPathComponent) as NSString).deletingPathExtension as NSString
+        title.extendedLanguageTag = "und"
+        item.externalMetadata = [title]
+        return item
+    }
+
+    static func presentVideo(url: URL, player: AVPlayer, playlist: ArgoVideoPlaylist? = nil,
+                             onClose: @escaping () -> Void) {
         if let c = current, c.presentingViewController != nil { return }
         guard let host = top() else { onClose(); return }
         let vc = ArgoAVPlayerController()
-        let item = AVPlayerItem(url: url)
-        // 정보 패널에 보일 제목 (태그가 없으면 파일 이름)
-        let title = AVMutableMetadataItem()
-        title.identifier = .commonIdentifierTitle
-        title.value = (url.lastPathComponent as NSString).deletingPathExtension as NSString
-        title.extendedLanguageTag = "und"
-        item.externalMetadata = [title]
-        player.replaceCurrentItem(with: item)
+        player.replaceCurrentItem(with: makeItem(url: url, title: playlist.map { $0.name($0.index) }))
+        vc.playlist = playlist
+        vc.startPlaylist()
         vc.player = player
         vc.onClose = { current = nil; onClose() }
         vc.modalPresentationStyle = .fullScreen

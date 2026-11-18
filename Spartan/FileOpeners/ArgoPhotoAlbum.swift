@@ -22,7 +22,7 @@ import ImageIO
 import SVGWrapper
 
 @available(tvOS 13.0, *)
-final class ArgoPhotoAlbumController: UIViewController {
+final class ArgoPhotoAlbumController: UIViewController, UIGestureRecognizerDelegate {
 
     static let imageExtensions: Set<String> = [
         "jpg", "jpeg", "png", "heic", "heif", "gif", "bmp", "tif", "tiff", "webp", "svg", "ico"
@@ -81,6 +81,143 @@ final class ArgoPhotoAlbumController: UIViewController {
     private var slideshow: Timer?
     private var animating = false
     private var showInfo = false
+
+    // MARK: 확대·이동·회전
+    //
+    // 리모컨: 가운데 버튼 = 한 단계 확대(최대 뒤엔 원래 크기로) · 재생/멈춤 = 한 단계 축소(확대 중일 때) ·
+    // 확대 중 방향 = 그 방향으로 이동(터치면 끌기도 됨) · Menu = 원래 크기로(원래 크기면 닫기) ·
+    // 위 = 정보 줄 켜기/끄기 · 아래 = 띠 숨기기/보이기.
+    // 키보드: + 확대 · − 축소 · 0 원래 크기 · R 오른쪽으로 90° 돌리기 · I 정보.
+    private let zoomSteps: [CGFloat] = [1, 1.5, 2, 3, 4]
+    private var zoomIdx = 0
+    private var quarterTurns = 0
+    private var panX: CGFloat = 0
+    private var panY: CGFloat = 0
+    private var panStart = CGPoint.zero
+    private var zoomHidOverlay = false
+    private let hintLabel = UILabel()
+    private var hintWork: DispatchWorkItem?
+
+    private var isZoomed: Bool { zoomIdx > 0 }
+    private var isAdjusted: Bool { zoomIdx > 0 || quarterTurns != 0 }
+
+    private func hint(_ text: String) {
+        hintLabel.text = "  \(text)  "
+        hintLabel.sizeToFit()
+        hintLabel.center = CGPoint(x: view.bounds.midX, y: view.bounds.height - 60)
+        hintLabel.alpha = 1
+        hintWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in UIView.animate(withDuration: 0.3) { self?.hintLabel.alpha = 0 } }
+        hintWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2, execute: w)
+    }
+
+    /// 사진이 한 변이 닿게 들어간 상태(맞춤)의 배율. 돌렸을 때는 가로세로를 바꿔 계산한다.
+    private func fitScale(_ img: UIImage, rotated: Bool) -> CGFloat {
+        let r = photoRect
+        let iw = Swift.max(1, rotated ? img.size.height : img.size.width)
+        let ih = Swift.max(1, rotated ? img.size.width : img.size.height)
+        return Swift.min(r.width / iw, r.height / ih)
+    }
+
+    private func clampPan() {
+        guard let img = current.image else { panX = 0; panY = 0; return }
+        let odd = quarterTurns % 2 == 1
+        let f = fitScale(img, rotated: odd)
+        let dw = (odd ? img.size.height : img.size.width) * f * zoomSteps[zoomIdx]
+        let dh = (odd ? img.size.width : img.size.height) * f * zoomSteps[zoomIdx]
+        let r = photoRect
+        let mx = Swift.max(0, (dw - r.width) / 2), my = Swift.max(0, (dh - r.height) / 2)
+        panX = Swift.min(mx, Swift.max(-mx, panX))
+        panY = Swift.min(my, Swift.max(-my, panY))
+    }
+
+    /// 확대·돌림 중에는 frame 을 바로 쓰면 값이 어긋난다 — bounds·center 로 자리를 잡는다.
+    private func placeCurrent() {
+        let r = photoRect
+        current.bounds = CGRect(origin: .zero, size: r.size)
+        current.center = CGPoint(x: r.midX, y: r.midY)
+    }
+
+    private func applyTransform(animated: Bool) {
+        guard let img = current.image else { current.transform = .identity; return }
+        clampPan()
+        let odd = quarterTurns % 2 == 1
+        // 돌린 사진을 맞춤으로 보이게 하는 추가 배율(뷰는 안 돌린 사진 기준으로 맞춰져 있다)
+        let rel = odd ? fitScale(img, rotated: true) / fitScale(img, rotated: false) : 1
+        let s = zoomSteps[zoomIdx] * rel
+        let t = CGAffineTransform(translationX: panX, y: panY)
+            .scaledBy(x: s, y: s)
+            .rotated(by: CGFloat(quarterTurns) * .pi / 2)
+        if animated {
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) { self.current.transform = t }
+        } else {
+            current.transform = t
+        }
+    }
+
+    private func setZoom(_ idx: Int) {
+        let n = Swift.max(0, Swift.min(zoomSteps.count - 1, idx))
+        let was = zoomIdx
+        zoomIdx = n
+        if n == 0 { panX = 0; panY = 0 }
+        if was == 0 && n > 0, overlayVisible {
+            zoomHidOverlay = true
+            setOverlay(false, autoHide: false)   // 확대하면 아래 띠를 치워 화면을 모두 쓴다
+        } else if n == 0, zoomHidOverlay {
+            zoomHidOverlay = false
+            setOverlay(true, autoHide: true)
+        }
+        applyTransform(animated: true)
+        hint(n == 0 ? "원래 크기" : "확대 \(zoomSteps[n] == zoomSteps[n].rounded() ? String(Int(zoomSteps[n])) : String(format: "%.1f", zoomSteps[n]))배 — 방향키로 이동 · ▶︎ 축소 · Menu 원래대로")
+    }
+
+    private func zoomIn(wrap: Bool) {
+        if zoomIdx >= zoomSteps.count - 1 { if wrap { setZoom(0) } } else { setZoom(zoomIdx + 1) }
+    }
+
+    private func rotate() {
+        quarterTurns = (quarterTurns + 1) % 4
+        panX = 0; panY = 0
+        applyTransform(animated: true)
+        hint("돌림 \(quarterTurns * 90)°")
+    }
+
+    /// 확대·돌림을 없앤다. 사진을 넘기기 전·Menu 로 되돌릴 때 부른다.
+    private func resetView(animated: Bool) {
+        let had = isAdjusted
+        zoomIdx = 0; quarterTurns = 0; panX = 0; panY = 0
+        if zoomHidOverlay { zoomHidOverlay = false; setOverlay(true, autoHide: true) }
+        if had { applyTransform(animated: animated) } else { current.transform = .identity }
+    }
+
+    private func panBy(dx: CGFloat, dy: CGFloat) {
+        panX += dx; panY += dy
+        applyTransform(animated: true)
+    }
+
+    /// 리모컨 터치면을 쓸어 확대된 사진을 끈다(확대 중에만).
+    @objc private func panned(_ g: UIPanGestureRecognizer) {
+        guard isZoomed else { return }
+        switch g.state {
+        case .began:
+            panStart = CGPoint(x: panX, y: panY)
+        case .changed:
+            let t = g.translation(in: view)
+            // 터치면은 작아서 손가락 움직임을 키운다. 사진은 손가락 반대 방향으로 따라온다.
+            panX = panStart.x + t.x * 2.5
+            panY = panStart.y + t.y * 2.5
+            applyTransform(animated: false)
+        default:
+            break
+        }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer is UIPanGestureRecognizer { return isZoomed }
+        if gestureRecognizer is UISwipeGestureRecognizer { return !isZoomed }
+        return true
+    }
 
     // MARK: 시작
 
@@ -142,13 +279,28 @@ final class ArgoPhotoAlbumController: UIViewController {
         canvas.frame = view.bounds
         canvas.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         canvas.onPress = { [weak self] type in self?.handlePress(type) ?? false }
-        canvas.onSelect = { [weak self] in self?.toggleInfo() }
+        canvas.onSelect = { [weak self] in self?.zoomIn(wrap: true) }
+        canvas.onKey = { [weak self] key in self?.handleKey(key) ?? false }
         view.addSubview(canvas)
+
+        hintLabel.textColor = .white
+        hintLabel.font = .systemFont(ofSize: 26, weight: .medium)
+        hintLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        hintLabel.layer.cornerRadius = 14
+        hintLabel.clipsToBounds = true
+        hintLabel.alpha = 0
+        view.addSubview(hintLabel)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        pan.delegate = self
+        canvas.addGestureRecognizer(pan)
 
         // 리모컨 터치면 쓸어넘기기
         for dir in [UISwipeGestureRecognizer.Direction.left, .right] {
             let g = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
             g.direction = dir
+            g.delegate = self
             canvas.addGestureRecognizer(g)
         }
 
@@ -164,6 +316,7 @@ final class ArgoPhotoAlbumController: UIViewController {
     var onClose: (() -> Void)?
 
     @objc private func closeNow() {
+        if isAdjusted { resetView(animated: true); hint("원래 크기"); return }
         if let onClose = onClose { onClose() } else { dismiss(animated: true) }
     }
 
@@ -184,9 +337,7 @@ final class ArgoPhotoAlbumController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if !animating {
-            current.frame = photoRect
-        }
+        if !animating { placeCurrent() }
         let w = view.bounds.width, h = view.bounds.height
         topBar.frame = CGRect(x: 60, y: 40, width: w - 120, height: showInfo ? 150 : 70)
         titleLabel.frame = CGRect(x: 24, y: 14, width: topBar.bounds.width - 48, height: 40)
@@ -259,21 +410,53 @@ final class ArgoPhotoAlbumController: UIViewController {
 
     private func handlePress(_ type: UIPress.PressType) -> Bool {
         switch type {
-        case .leftArrow:
-            step(-1, user: true); return true
-        case .rightArrow:
-            step(1, user: true); return true
-        case .upArrow, .downArrow:
-            setOverlay(type == .upArrow ? true : !overlayVisible, autoHide: false)
+        case .leftArrow, .rightArrow, .upArrow, .downArrow:
+            if isZoomed {
+                // 확대 중: 방향키는 사진 이동(한 번에 화면의 1/4). 가장자리에선 더 안 간다.
+                let b = view.bounds
+                let dx: CGFloat = type == .leftArrow ? b.width / 4 : (type == .rightArrow ? -b.width / 4 : 0)
+                let dy: CGFloat = type == .upArrow ? b.height / 4 : (type == .downArrow ? -b.height / 4 : 0)
+                panBy(dx: dx, dy: dy)
+                return true
+            }
+            if type == .leftArrow { step(-1, user: true) }
+            else if type == .rightArrow { step(1, user: true) }
+            else if type == .upArrow {
+                // 띠가 안 보이면 먼저 보이고, 이미 보이면 정보 줄을 켜고 끈다.
+                if overlayVisible { toggleInfo() } else { setOverlay(true, autoHide: false) }
+            } else {
+                setOverlay(!overlayVisible, autoHide: false)
+            }
             return true
         case .playPause:
-            toggleSlideshow(); return true
+            if isZoomed { setZoom(zoomIdx - 1) } else { toggleSlideshow() }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleKey(_ key: UIKey) -> Bool {
+        let mods = key.modifierFlags.intersection([.command, .alternate, .control])
+        guard mods.isEmpty else { return false }
+        switch key.keyCode {
+        case .keyboardEqualSign, .keypadPlus:
+            zoomIn(wrap: false); return true
+        case .keyboardHyphen, .keypadHyphen:
+            setZoom(zoomIdx - 1); return true
+        case .keyboard0, .keypad0:
+            resetView(animated: true); hint("원래 크기"); return true
+        case .keyboardR:
+            rotate(); return true
+        case .keyboardI:
+            toggleInfo(); return true
         default:
             return false
         }
     }
 
     @objc private func swiped(_ g: UISwipeGestureRecognizer) {
+        guard !isZoomed else { return }
         step(g.direction == .left ? 1 : -1, user: true)
     }
 
@@ -316,6 +499,7 @@ final class ArgoPhotoAlbumController: UIViewController {
 
     private func show(index i: Int, direction: Int) {
         guard names.indices.contains(i) else { return }
+        resetView(animated: false)
         updateLabels()
         updateStrip()
         if slideshow == nil { setOverlay(true, autoHide: true) }
@@ -339,7 +523,7 @@ final class ArgoPhotoAlbumController: UIViewController {
                     guard let self = self else { return }
                     guard self.index == i else { return }
                     if let img = img {
-                        if self.thumbs.object(forKey: key) != nil { self.current.image = img }
+                        if self.thumbs.object(forKey: key) != nil { self.current.image = img; self.applyTransform(animated: false) }
                         else { self.display(img, direction: direction) }
                     } else {
                         self.current.image = nil
@@ -455,7 +639,7 @@ final class ArgoPhotoAlbumController: UIViewController {
         UIView.animate(withDuration: 0.25) {
             self.topBar.alpha = on ? 1 : 0
             self.stripBack.alpha = on ? 1 : 0
-            if !self.animating { self.current.frame = self.photoRect }
+            if !self.animating { self.placeCurrent() }
         }
         if on && autoHide && !showInfo {
             // 자동으로 숨길 때는 위 글자줄만 — 아래 띠까지 숨기면 사진 크기가 3초마다 바뀌어 눈에 거슬린다.

@@ -984,7 +984,8 @@ struct WebDAVBrowserView: View {
                         return
                     }
                     ArgoDiag.log("stream", "바로 재생 \(item.name)")
-                    ArgoMediaPresenter.presentVideo(url: url, player: player) {}
+                    ArgoMediaPresenter.presentVideo(url: url, player: player,
+                                                    playlist: videoPlaylist(startingAt: item)) {}
                 }
             } else {
                 // FTP 는 구간 읽기를 중계하지 않는다 — 받아서 연다.
@@ -995,6 +996,25 @@ struct WebDAVBrowserView: View {
         case .other:
             downloadThenView(item)
         }
+    }
+
+    /// 같은 폴더의 같은 종류(영상끼리·음악끼리) 파일을 목록 순서대로 이어 재생하기 위한 목록.
+    private func videoPlaylist(startingAt item: WebDAVItem) -> ArgoVideoPlaylist? {
+        let kind = ArgoRemoteKind.of(item.name)
+        let list = items.filter { !$0.isDirectory && ArgoRemoteKind.of($0.name) == kind }
+        guard list.count > 1, let start = list.firstIndex(where: { $0.path == item.path }) else { return nil }
+        let c = client
+        let srv = server
+        return ArgoVideoPlaylist(
+            count: list.count, index: start,
+            name: { list[$0].name },
+            url: { i, done in
+                let it = list[i]
+                guard let remote = c.directURL(for: it) else { done(nil); return }
+                // 앞 영상의 중계가 뒤에서 계속 받지 않게 끊고 새로 연다.
+                ArgoRemoteStream.shared.cancelAll()
+                ArgoRemoteStream.shared.streamURL(remote: remote, server: srv, name: it.name, completion: done)
+            })
     }
 
     /// 이 원격 폴더의 사진들을 앨범으로. 처음엔 이름만 넘기고, 사진은 보는 장과 이웃 장만 받는다.

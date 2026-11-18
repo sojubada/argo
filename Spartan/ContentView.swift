@@ -1967,7 +1967,20 @@ struct ContentView: View {
     /// 동영상: 애플TV 기본 재생 화면을 화면 가득 띄운다. 닫히면 멈춘다.
     func openVideoPlayer() {
         let path = newViewFileName.isEmpty ? newViewFilePath : (newViewFilePath as NSString).appendingPathComponent(newViewFileName)
-        ArgoMediaPresenter.presentVideo(url: URL(fileURLWithPath: path), player: globalAVPlayer) {
+        // 같은 폴더의 영상들을 이름 순으로 이어 재생한다.
+        let dir = (path as NSString).deletingLastPathComponent
+        let me = (path as NSString).lastPathComponent
+        let siblings = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+            .filter { !$0.hasPrefix(".") && ArgoRemoteKind.of($0) == .video }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        var playlist: ArgoVideoPlaylist?
+        if siblings.count > 1, let start = siblings.firstIndex(of: me) {
+            playlist = ArgoVideoPlaylist(
+                count: siblings.count, index: start,
+                name: { siblings[$0] },
+                url: { i, done in done(URL(fileURLWithPath: (dir as NSString).appendingPathComponent(siblings[i]))) })
+        }
+        ArgoMediaPresenter.presentVideo(url: URL(fileURLWithPath: path), player: globalAVPlayer, playlist: playlist) {
             showSubView[11] = false
         }
     }
