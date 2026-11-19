@@ -19,6 +19,11 @@ Built on [Spartan](https://github.com/WhitetailAni/Spartan), with the goal of a 
 Documents are converted by a Rust engine inside the app (`rust/argoconv`): it renders each page to SVG, bundles the pages into a PDF, and draws that PDF with CoreGraphics.
 This approach is needed because tvOS has no PDFKit, WebKit or QuickLook.
 
+## Credits
+
+Created by Rob ([sojubada](https://github.com/sojubada)), developed together with Claude (Anthropic) as an AI pair-programmer.
+Built on Spartan by WhitetailAni; Spartan's own contributors are listed in the app (Settings → Credits).
+
 ## Install
 
 1. Download an IPA from [Releases](../../releases) (unsigned).
@@ -42,7 +47,12 @@ Builds run on GitHub Actions (macOS 15, Xcode 16). Changes and how to revert the
 | [Indosaram/hwpers](https://github.com/Indosaram/hwpers) | Fallback Hangul engine | MIT / Apache-2.0 |
 | [mini-software/MiniPdf](https://github.com/mini-software/MiniPdf) | Word/Excel → PDF | Apache-2.0 |
 | [resvg family](https://github.com/linebender/resvg) (usvg, svg2pdf, pdf-writer, ttf-parser, rustybuzz) | SVG, PDF and font handling | MIT / Apache-2.0 |
+| [encoding_rs](https://github.com/hsivonen/encoding_rs) | Reading legacy Korean (EUC-KR) font names | MIT / Apache-2.0 |
 | ECMA-376 presetShapeDefinitions | PowerPoint shape definitions | ECMA standard |
+| [Nanum fonts](https://hangeul.naver.com/font) (NAVER) | Bundled fonts (NanumSquare, NanumGothic ExtraBold) | SIL OFL 1.1 |
+| [Pretendard](https://github.com/orioncactus/pretendard) | Bundled font | SIL OFL 1.1 |
+| [Liberation Sans](https://github.com/liberationfonts/liberation-fonts) | Arial substitute font | SIL OFL 1.1 |
+| SF Mono (Apple) | Monospaced font in hex and text views | Apple |
 | [iTunes Search API](https://performance-partners.apple.com/search-api), [LRCLIB](https://lrclib.net) | Album art and lyrics lookup (can be turned off) | Each service's terms |
 
 The PowerPoint renderer (`rust/argoconv/src/slides`) and the tvOS screens were written from scratch in this repository.

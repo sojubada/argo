@@ -42,6 +42,8 @@ struct SpartanApp: App {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // 화면 언어를 가장 먼저 정한다. 처음 켜면 영어다.
         ArgoLocale.install()
+        // 시이카 글꼴 옵션은 없앴다(원작 게임 글꼴). 예전에 켜 둔 값이 남아 있으면 끈다.
+        UserDefaults.settings.set(false, forKey: "sheikahFontApply")
 
         
         if UserDefaults.settings.string(forKey: "tvapothecary") == nil {

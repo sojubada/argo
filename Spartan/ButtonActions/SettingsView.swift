@@ -8,17 +8,13 @@
 import SwiftUI
 
 struct SettingsView: View {
-    // showView 배열 크기 5 -> 6 -> 7 -> 8 확장 (media 폴더 탐침 추가)
     @State private var showView: [Bool] = [Bool](repeating: false, count: 8)
-    @State private var probeRunning = false
-    @State private var probeStatus = ""
     @State private var fontStatus = ""
     @State private var fontScanning = false
     @State private var descriptiveTitlesPre = UserDefaults.settings.bool(forKey: "descriptiveTitles")
     @State private var descriptiveTimestampsPre = UserDefaults.settings.bool(forKey: "verboseTimestamps")
     @State private var autoCompletePre = UserDefaults.settings.bool(forKey: "autoComplete")
     @State private var logWindowFontSizePre = UserDefaults.settings.integer(forKey: "logWindowFontSize")
-    @State private var sheikahFontApplyPre = UserDefaults.settings.bool(forKey: "sheikahFontApply")
     @State private var dateFormatPre: String = UserDefaults.settings.string(forKey: "dateFormat") ?? ""
     
     // 안전모드 설정
@@ -39,9 +35,6 @@ struct SettingsView: View {
     var body: some View {
 		ScrollView {
 			Text(NSLocalizedString("SETTINGS", comment: "But choose carefully because you'll stay in the job you pick for the rest of your life."))
-				.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-					view.scaledFont(name: "BotW Sheikah Regular", size: 60)
-				}
 				.font(.system(size: 60))
                 .sheet(isPresented: $showView[0], content: {
                     CreditsView()
@@ -173,9 +166,6 @@ struct SettingsView: View {
 			}
 			.padding(5)
 			Text(NSLocalizedString("SETTINGS_LOGFONTSIZE", comment: "The same job the rest of your life?"))
-				.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-					view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-				}
 				.font(.system(size: 25))
 				
 			Text(" ")
@@ -183,8 +173,6 @@ struct SettingsView: View {
 			descriptiveThings
 			Text(" ")
 			autoCompleteFileExtensions
-			Text(" ")
-			sheikahFont
 			Text(" ")
             
             // 안전 모드 스위치. 안전판에서는 끌 수 없다.
@@ -210,9 +198,6 @@ struct SettingsView: View {
                     Image(systemName: safeModeEnabledPre ? "checkmark.shield.fill" : "shield.slash")
                         .foregroundColor(safeModeEnabledPre ? .green : .red)
                     Text(L("안전 모드 (시스템 쓰기 차단)"))
-                        .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                            view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                        }
                 }
             }
             .alert(isPresented: $showSafeModeWarning) {
@@ -255,139 +240,20 @@ struct SettingsView: View {
 			Text(" ")
 				.font(.system(size: 15))
 			Text(NSLocalizedString("SETTINGS_DATEFORMATDESC1", comment: "Halls Of Science 4"))
-				.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-					view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-				}
 				.font(.system(size: 25))
 			Text(NSLocalizedString("SETTINGS_DATEFORMATDESC2", comment: "Halls Of Science... 5?"))
-				.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-					view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-				}
 				.font(.system(size: 25))
 			Text(" ")
             
-            /*Button(action: {
-                cacheFolder("/")
-            }) {
-                Text(localizedString: "SETTINGS_CACHEALL")
-            }
-            Text(NSLocalizedString("SETTINGS_CACHEALLDESC", comment: "Halls Of Science... 5?"))
-                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                    view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-                }
-                .font(.system(size: 25))
-            Text(" ")*/
-			
 			Button(action: {
 				showView[2] = true
 			}) {
 				HStack {
 					Image(systemName: "paintpalette")
 					Text(L("테마 · 아이콘"))
-					.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-						view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-					}
 				}
 			}
 			
-			/*Button(action: {
-				showView[1] = true
-			}) {
-				Text(LocalizedString("SETTINGS_WEBSERVERSTART"))
-			}*/
-			
-			Button(action: { //WebKit probe
-				showView[3] = true
-			}) {
-				HStack {
-					Image(systemName: "stethoscope")
-						.frame(width: 50, height: 50)
-					Text(L("Lab ① WebKit 탐침 — 확인 완료"))
-						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-						}
-				}
-			}
-			.fullScreenCover(isPresented: $showView[3]) {
-				WebKitProbeView(isPresented: $showView[3])
-					.edgesIgnoringSafeArea(.all)
-			}
-
-			Button(action: { //document render probe
-				showView[4] = true
-			}) {
-				HStack {
-					Image(systemName: "doc.viewfinder")
-						.frame(width: 50, height: 50)
-					Text(L("Lab ② 문서 렌더링 탐침 — 확인 완료"))
-						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-						}
-				}
-			}
-			.fullScreenCover(isPresented: $showView[4]) {
-				WebDocProbeView(isPresented: $showView[4])
-					.edgesIgnoringSafeArea(.all)
-			}
-
-			Button(action: { //print pipeline probe
-				showView[6] = true
-			}) {
-				HStack {
-					Image(systemName: "printer")
-						.frame(width: 50, height: 50)
-					Text(L("Lab ③ 인쇄 파이프라인 탐침"))
-						.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-							view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-						}
-				}
-			}
-			.fullScreenCover(isPresented: $showView[6]) {
-				PrintProbeView(isPresented: $showView[6])
-					.edgesIgnoringSafeArea(.all)
-			}
-
-			// Lab ④ — media 폴더 원본 vs PC PDF 비교 탐침
-			//
-			// 결과를 버튼 아래에 그대로 띄웁니다. 로그를 꺼내 봐야만 알 수
-			// 있으면, 받아 본 로그가 묵은 사본인지 탐침이 안 돈 것인지
-			// 구별하느라 한참을 돌게 됩니다.
-			Button(action: {
-				guard !probeRunning else { return }
-				probeRunning = true
-				probeStatus  = L("실행 중…")
-				Task {
-					let summary = await MediaFolderProbe.run()
-					await MainActor.run {
-						probeRunning = false
-						probeStatus  = summary
-					}
-				}
-			}) {
-				HStack(alignment: .top) {
-					if probeRunning {
-						ProgressView()
-							.frame(width: 50, height: 50)
-					} else {
-						Image(systemName: "arrow.triangle.2.circlepath.doc.on.clipboard")
-							.frame(width: 50, height: 50)
-					}
-					VStack(alignment: .leading, spacing: 8) {
-						Text(L("Lab ④ media 폴더 PDF 비교 탐침 ← 지금 이것"))
-							.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-								view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-							}
-						if !probeStatus.isEmpty {
-							Text(probeStatus)
-								.font(.system(size: 22))
-								.foregroundColor(.secondary)
-								.multilineTextAlignment(.leading)
-								.fixedSize(horizontal: false, vertical: true)
-						}
-					}
-				}
-			}
-
 			Button(action: { //info
 				showView[0] = true
 			}) {
@@ -397,24 +263,15 @@ struct SettingsView: View {
 					Text(NSLocalizedString("CREDITS", comment: """
 					"What's the difference?"
 					"""))
-					.if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-						view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-					}
 				}
 			}
 			
 			Text(" ")
 				.font(.system(size: 25))
-			Text("Spartan v\((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "Don't edit") (\((Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "Info.plists"))")
+			Text("Argo v\((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "") (build \((Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""))")
                 .foregroundColor(.secondary)
-                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-					view.scaledFont(name: "BotW Sheikah Regular", size: 20)
-				}
 				.font(.footnote)
         }
-		.sheet(isPresented: $showView[1], content: {
-			WebServerView()
-		})
 		.sheet(isPresented: $showView[2], content: {
 			IconView()
 		})
@@ -428,15 +285,9 @@ struct SettingsView: View {
             UserDefaults.settings.synchronize()
         }) {
             Text(NSLocalizedString("SETTINGS_TITLES", comment: "The same job the rest of your life?"))
-                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                }
             Image(systemName: descriptiveTitlesPre ? "checkmark.square" : "square")
         }
         Text(NSLocalizedString("SETTINGS_TITLES_DESC", comment: "I didn't know that."))
-            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-            }
             .font(.system(size: 25))
 		
 		Text(" ")
@@ -446,15 +297,9 @@ struct SettingsView: View {
             UserDefaults.settings.synchronize()
         }) {
             Text(NSLocalizedString("SETTINGS_TIMESTAMPS", comment: "What's the difference?"))
-                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                }
             Image(systemName: descriptiveTimestampsPre ? "checkmark.square" : "square")
         }
         Text(NSLocalizedString("SETTINGS_TIMESTAMPS_DESC", comment: "You'll be happy to know that bees, as a species"))
-            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-            }
             .font(.system(size: 25))
     }
     
@@ -466,9 +311,6 @@ struct SettingsView: View {
             UserDefaults.settings.synchronize()
         }) {
             Text(NSLocalizedString("SETTINGS_AUTOCOMPLETE", comment: "haven't had one day off in 27 million years."))
-                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                }
             Image(systemName: autoCompletePre ? "checkmark.square" : "square")
         }
         Text("""
@@ -476,35 +318,9 @@ struct SettingsView: View {
         \(NSLocalizedString("SETTINGS_AUTOCOMPLETE_DESC_2", comment: "We'll sure try."))
         """)
             .multilineTextAlignment(.center)
-            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-            }
             .font(.system(size: 25))
         Text(NSLocalizedString("SETTINGS_AUTOCOMPLETE_WARNING", comment: "Wow! That blew my mind!"))
-            .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                view.scaledFont(name: "BotW Sheikah Regular", size: 25)
-            }
             .font(.system(size: 25))
-    }
-    
-    @ViewBuilder
-    var sheikahFont: some View {
-        Button(action: {
-            sheikahFontApplyPre.toggle()
-            UserDefaults.settings.set(sheikahFontApplyPre, forKey: "sheikahFontApply")
-            UserDefaults.settings.synchronize()
-            if(sheikahFontApplyPre) {
-                buttonWidth *= 1.5
-            } else {
-                buttonWidth /= 1.5
-            }
-        }) {
-            Text(NSLocalizedString("SETTINGS_SHEIKAH", comment: "YOU LOST IT WHEN YOU TRIED TO SEE TOO FAR"))
-                .if(UserDefaults.settings.bool(forKey: "sheikahFontApply")) { view in
-                    view.scaledFont(name: "BotW Sheikah Regular", size: 40)
-                }
-            Image(systemName: sheikahFontApplyPre ? "checkmark.square" : "square")
-        }
     }
 }
 

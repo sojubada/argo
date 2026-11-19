@@ -89,7 +89,6 @@
 		A0C0FFEE0000000000000E11 /* Nanum-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A0C0FFEE0000000000000E12 /* Nanum-LICENSE.txt */; };
 		CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */; };
 		1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */; };
-		F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F83F052D2A297CDE00EB0720 /* Sheikah.ttf */; };
 		F83F47D22A43782E00A4C47F /* CommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83F47D12A43782E00A4C47F /* CommandRunner.swift */; };
 		F845C82829F4D77C0025AC0A /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F845C82A29F4D77C0025AC0A /* Localizable.strings */; };
 		F845C82F29F6247A0025AC0A /* EThree.swift in Sources */ = {isa = PBXBuildFile; fileRef = F845C82E29F6247A0025AC0A /* EThree.swift */; };
@@ -230,7 +229,6 @@
 		A0C0FFEE0000000000000E12 /* Nanum-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Fonts/Nanum-LICENSE.txt"; sourceTree = "<group>"; };
 		6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-Bold.ttf"; sourceTree = "<group>"; };
 		8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fonts/Pretendard-LICENSE.txt"; sourceTree = "<group>"; };
-		F83F052D2A297CDE00EB0720 /* Sheikah.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Sheikah.ttf; sourceTree = "<group>"; };
 		F83F47D12A43782E00A4C47F /* CommandRunner.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandRunner.swift; sourceTree = "<group>"; };
 		F84430612A43EF290042BAB5 /* Pogo-BridgingHeader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Pogo-BridgingHeader.h"; sourceTree = "<group>"; };
 		F845C82929F4D77C0025AC0A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -546,7 +544,6 @@
 				A0C0FFEE0000000000000E12 /* Nanum-LICENSE.txt */,
 				6361000FDF0D41078EE4164F /* Pretendard-Bold.ttf */,
 				8C4141BF060E47C9A0A31033 /* Pretendard-LICENSE.txt */,
-				F83F052D2A297CDE00EB0720 /* Sheikah.ttf */,
 				F88CC49E2A44ADEB001FACFC /* SF Mono.otf */,
 			);
 			path = Spartan;
@@ -745,7 +742,6 @@
 				A0C0FFEE0000000000000E11 /* Nanum-LICENSE.txt in Resources */,
 				CDC7045C76A24B4ABA133D38 /* Pretendard-Bold.ttf in Resources */,
 				1B97D3C6EE364D81B6017BC9 /* Pretendard-LICENSE.txt in Resources */,
-				F83F052E2A297E2000EB0720 /* Sheikah.ttf in Resources */,
 				F845C82829F4D77C0025AC0A /* Localizable.strings in Resources */,
 				F853AB3329DBCB1E006EA2D5 /* Assets.xcassets in Resources */,
 				788067B142BB476A813CCC47 /* webdoc in Resources */,
@@ -1082,7 +1078,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				OTHER_SWIFT_FLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.sojubada.argo;
 				PRODUCT_NAME = Argo;
@@ -1141,7 +1137,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				OTHER_SWIFT_FLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.sojubada.argo;
 				PRODUCT_NAME = Argo;
@@ -1180,7 +1176,7 @@
 				INFOPLIST_FILE = "$(SRCROOT)/RootHelper/Info.plist";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACH_O_TYPE = mh_execute;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				OTHER_LDFLAGS = (
 					"-ObjC",
 					"-largoconv",
@@ -1216,7 +1212,7 @@
 				INFOPLIST_FILE = "$(SRCROOT)/RootHelper/Info.plist";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACH_O_TYPE = mh_execute;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				OTHER_LDFLAGS = (
 					"-ObjC",
 					"-largoconv",

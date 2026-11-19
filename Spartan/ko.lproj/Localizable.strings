@@ -140,7 +140,6 @@
 "SETTINGS_AUTOCOMPLETE_DESC_2" = "폴더를 옮길 때 '/', 압축 파일에 '.zip' 같은 것입니다.";
 "SETTINGS_AUTOCOMPLETE_WARNING" = "주의: 끄면 경로를 **정확히** 쳐야 합니다!";
 "SETTINGS_LOGFONTSIZE" = "패키지 설치나 실행 파일을 돌릴 때 나오는 기록 창의 글자 크기입니다.";
-"SETTINGS_SHEIKAH" = "시이카 글꼴 쓰기";
 "SETTINGS_DATEFORMAT" = "날짜 형식";
 "SETTINGS_DATEFORMATDESC1" = "날짜를 보여 줄 때 쓰는 DateFormatter 형식입니다.";
 "SETTINGS_DATEFORMATDESC2" = "형식은 https://www.advancedswift.com/date-formatter-cheatsheet-formulas-swift/ 를 보십시오.";

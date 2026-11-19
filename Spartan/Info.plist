@@ -40,7 +40,6 @@
 	</dict>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Sheikah.ttf</string>
 		<string>SF Mono.otf</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
